@@ -4,9 +4,9 @@ package main
 import (
 	"net/http"
 
-	"github.com/nimbus-framework/nimbus"
-	"github.com/nimbus-framework/nimbus/context"
-	"github.com/nimbus-framework/nimbus/middleware"
+	"github.com/CodeSyncr/nimbus"
+	"github.com/CodeSyncr/nimbus/context"
+	"github.com/CodeSyncr/nimbus/middleware"
 )
 
 func main() {

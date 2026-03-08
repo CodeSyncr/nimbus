@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 
-	"github.com/nimbus-framework/nimbus/router"
+	"github.com/CodeSyncr/nimbus/router"
 )
 
 // TestClient performs HTTP requests against the router (plan: HTTP test client, test helpers).

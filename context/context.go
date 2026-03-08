@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/nimbus-framework/nimbus/view"
+	"github.com/CodeSyncr/nimbus/view"
 )
 
 // Context wraps http.Request and ResponseWriter with AdonisJS-style helpers.

@@ -4,6 +4,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"text/template"
@@ -26,7 +27,7 @@ var newCmd = &cobra.Command{
 
 var serveCmd = &cobra.Command{
 	Use:   "serve",
-	Short: "Run the application (use from project root)",
+	Short: "Run the application (AdonisJS ace serve style; run from app root)",
 	RunE:  runServe,
 }
 
@@ -118,9 +119,9 @@ func runNew(cmd *cobra.Command, args []string) error {
 
 go 1.21
 
-require github.com/nimbus-framework/nimbus v0.0.0
+require github.com/CodeSyncr/nimbus v0.0.0
 
-replace github.com/nimbus-framework/nimbus => ../
+replace github.com/CodeSyncr/nimbus => ../
 `
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(mod), 0644); err != nil {
 		return err
@@ -142,10 +143,10 @@ const mainTmpl = `package main
 import (
 	"net/http"
 
-	"github.com/nimbus-framework/nimbus"
-	"github.com/nimbus-framework/nimbus/context"
-	"github.com/nimbus-framework/nimbus/database"
-	"github.com/nimbus-framework/nimbus/middleware"
+	"github.com/CodeSyncr/nimbus"
+	"github.com/CodeSyncr/nimbus/context"
+	"github.com/CodeSyncr/nimbus/database"
+	"github.com/CodeSyncr/nimbus/middleware"
 )
 
 func main() {
@@ -188,9 +189,36 @@ const configApp = `package config
 `
 
 func runServe(cmd *cobra.Command, args []string) error {
-	fmt.Println("Run your app with: go run main.go")
-	fmt.Println("Hot reload: go install github.com/air-verse/air@latest && air")
-	return nil
+	dir, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	if !isNimbusApp(dir) {
+		fmt.Println("Not a Nimbus app. Run 'nimbus serve' from your app root (where go.mod and main.go are).")
+		fmt.Println("Create an app with: nimbus new myapp")
+		return nil
+	}
+	fmt.Println("Starting Nimbus app...")
+	c := exec.Command("go", "run", ".")
+	c.Dir = dir
+	c.Stdin = os.Stdin
+	c.Stdout = os.Stdout
+	c.Stderr = os.Stderr
+	return c.Run()
+}
+
+// isNimbusApp reports whether dir contains a Nimbus app (go.mod requires nimbus + main.go).
+func isNimbusApp(dir string) bool {
+	modPath := filepath.Join(dir, "go.mod")
+	mainPath := filepath.Join(dir, "main.go")
+	mod, err := os.ReadFile(modPath)
+	if err != nil {
+		return false
+	}
+	if _, err := os.Stat(mainPath); err != nil {
+		return false
+	}
+	return strings.Contains(string(mod), "CodeSyncr/nimbus") || strings.Contains(string(mod), "nimbus-framework/nimbus")
 }
 
 func runMakeModel(cmd *cobra.Command, args []string) error {
@@ -209,7 +237,7 @@ func runMakeModel(cmd *cobra.Command, args []string) error {
 
 const modelTmpl = `package models
 
-import "github.com/nimbus-framework/nimbus/database"
+import "github.com/CodeSyncr/nimbus/database"
 
 // %s embeds the base model (ID, timestamps).
 type %s struct {
@@ -270,7 +298,7 @@ const controllerTmpl = `package controllers
 import (
 	"net/http"
 
-	"github.com/nimbus-framework/nimbus/context"
+	"github.com/CodeSyncr/nimbus/context"
 )
 
 // %s controller.
@@ -305,8 +333,8 @@ func runMakeMiddleware(cmd *cobra.Command, args []string) error {
 const middlewareTmpl = `package middleware
 
 import (
-	"github.com/nimbus-framework/nimbus/context"
-	"github.com/nimbus-framework/nimbus/router"
+	"github.com/CodeSyncr/nimbus/context"
+	"github.com/CodeSyncr/nimbus/router"
 )
 
 // %s returns a middleware that runs before the handler.

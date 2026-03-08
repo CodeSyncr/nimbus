@@ -1,4 +1,4 @@
-module github.com/nimbus-framework/nimbus
+module github.com/CodeSyncr/nimbus
 
 go 1.21
 

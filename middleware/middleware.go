@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	reqctx "github.com/nimbus-framework/nimbus/context"
-	"github.com/nimbus-framework/nimbus/router"
+	reqctx "github.com/CodeSyncr/nimbus/context"
+	"github.com/CodeSyncr/nimbus/router"
 )
 
 // Logger logs each request (AdonisJS middleware style).

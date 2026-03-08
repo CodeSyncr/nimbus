@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"regexp"
 
-	"github.com/nimbus-framework/nimbus/context"
+	"github.com/CodeSyncr/nimbus/context"
 )
 
 // HandlerFunc is the handler signature (AdonisJS controller action style).

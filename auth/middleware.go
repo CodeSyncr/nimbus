@@ -3,8 +3,8 @@ package auth
 import (
 	"net/http"
 
-	"github.com/nimbus-framework/nimbus/context"
-	"github.com/nimbus-framework/nimbus/router"
+	"github.com/CodeSyncr/nimbus/context"
+	"github.com/CodeSyncr/nimbus/router"
 )
 
 // RequireAuth returns middleware that loads the user from the guard and sets it on the request context.

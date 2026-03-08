@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/nimbus-framework/nimbus/config"
-	"github.com/nimbus-framework/nimbus/container"
-	"github.com/nimbus-framework/nimbus/router"
+	"github.com/CodeSyncr/nimbus/config"
+	"github.com/CodeSyncr/nimbus/container"
+	"github.com/CodeSyncr/nimbus/router"
 )
 
 // Provider is the service provider interface (AdonisJS/Laravel style).
