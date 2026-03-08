@@ -50,6 +50,8 @@ export PATH="$HOME/go/bin:$PATH"
 
 Then run `nimbus serve` from your app directory. If you get "command not found", either add the export above and restart the terminal, or run the app with `go run main.go` instead.
 
+**Hot reload:** `nimbus serve` runs [air](https://github.com/air-verse/air) via `go run`, so you don’t install anything extra. The first run may download air once; after that, edits to `.go` and `.nimbus` files restart the app automatically. No need to add air to your app’s `go.mod` or run `go mod tidy` for it.
+
 ### Create a new app
 
 ```bash

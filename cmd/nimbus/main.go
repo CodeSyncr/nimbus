@@ -133,6 +133,8 @@ replace github.com/CodeSyncr/nimbus => ../
 	_ = os.WriteFile(filepath.Join(dir, "start", "routes.go"), []byte(routesStub), 0644)
 	_ = os.WriteFile(filepath.Join(dir, ".env.example"), []byte(envExample), 0644)
 	_ = os.WriteFile(filepath.Join(dir, "config", "app.go"), []byte(configApp), 0644)
+	_ = os.WriteFile(filepath.Join(dir, ".air.toml"), []byte(airConfigTmpl), 0644)
+	_ = os.WriteFile(filepath.Join(dir, ".gitignore"), []byte(".env\n*.sqlite\ntmp/\n"), 0644)
 	fmt.Printf("Created Nimbus app %q in ./%s\n", name, dir)
 	fmt.Println("Next: cd " + dir + " && go mod tidy && go run main.go")
 	return nil
@@ -188,6 +190,23 @@ const configApp = `package config
 // App-specific config can live here; base config is in nimbus/config.
 `
 
+const airConfigTmpl = `# Nimbus hot reload (air)
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  cmd = "go build -o ./tmp/main ."
+  bin = "./tmp/main"
+  delay = 1000
+  exclude_dir = ["tmp", "vendor"]
+  exclude_regex = ["_test.go"]
+  include_ext = ["go", "nimbus"]
+  send_interrupt = true
+
+[log]
+  time = false
+`
+
 func runServe(cmd *cobra.Command, args []string) error {
 	dir, err := os.Getwd()
 	if err != nil {
@@ -198,13 +217,40 @@ func runServe(cmd *cobra.Command, args []string) error {
 		fmt.Println("Create an app with: nimbus new myapp")
 		return nil
 	}
-	fmt.Println("Starting Nimbus app...")
-	c := exec.Command("go", "run", ".")
+	// Hot reload: run air via go run (no separate install; go fetches it when needed)
+	ensureAirConfig(dir)
+	fmt.Println("Starting Nimbus app (hot reload)...")
+	c := exec.Command("go", "run", "github.com/air-verse/air@v1.52.3")
 	c.Dir = dir
 	c.Stdin = os.Stdin
 	c.Stdout = os.Stdout
 	c.Stderr = os.Stderr
 	return c.Run()
+}
+
+// ensureAirConfig writes a default .air.toml if missing (watches .go and .nimbus).
+func ensureAirConfig(dir string) {
+	path := filepath.Join(dir, ".air.toml")
+	if _, err := os.Stat(path); err == nil {
+		return
+	}
+	const config = `# Nimbus hot reload (air)
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  cmd = "go build -o ./tmp/main ."
+  bin = "./tmp/main"
+  delay = 1000
+  exclude_dir = ["tmp", "vendor"]
+  exclude_regex = ["_test.go"]
+  include_ext = ["go", "nimbus"]
+  send_interrupt = true
+
+[log]
+  time = false
+`
+	_ = os.WriteFile(path, []byte(config), 0644)
 }
 
 // isNimbusApp reports whether dir contains a Nimbus app (go.mod requires nimbus + main.go).
