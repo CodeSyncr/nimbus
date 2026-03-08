@@ -2,7 +2,9 @@
 package main
 
 import (
+	"embed"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,6 +14,9 @@ import (
 
 	"github.com/spf13/cobra"
 )
+
+//go:embed templates/views/*.nimbus
+var viewTemplates embed.FS
 
 var rootCmd = &cobra.Command{
 	Use:   "nimbus",
@@ -119,7 +124,10 @@ func runNew(cmd *cobra.Command, args []string) error {
 
 go 1.21
 
-require github.com/CodeSyncr/nimbus v0.0.0
+require (
+	github.com/CodeSyncr/nimbus v0.1.1
+	github.com/air-verse/air v1.52.3
+)
 
 replace github.com/CodeSyncr/nimbus => ../
 `
@@ -135,8 +143,13 @@ replace github.com/CodeSyncr/nimbus => ../
 	_ = os.WriteFile(filepath.Join(dir, "config", "app.go"), []byte(configApp), 0644)
 	_ = os.WriteFile(filepath.Join(dir, ".air.toml"), []byte(airConfigTmpl), 0644)
 	_ = os.WriteFile(filepath.Join(dir, ".gitignore"), []byte(".env\n*.sqlite\ntmp/\n"), 0644)
+	// Copy view templates from embedded FS (edit cmd/nimbus/templates/views/*.nimbus to customize)
+	if err := copyViewTemplates(dir); err != nil {
+		return err
+	}
 	fmt.Printf("Created Nimbus app %q in ./%s\n", name, dir)
-	fmt.Println("Next: cd " + dir + " && go mod tidy && go run main.go")
+	fmt.Println("Next: cd " + dir + " && go mod tidy && nimbus serve")
+	fmt.Println("      (go mod tidy fetches air for hot reload; nimbus serve starts the app with live reload)")
 	return nil
 }
 
@@ -164,7 +177,11 @@ func main() {
 }
 
 func homeHandler(c *context.Context) error {
-	return c.JSON(http.StatusOK, map[string]string{"message": "Welcome to Nimbus"})
+	return c.View("home", map[string]any{
+		"title":    "Welcome",
+		"appName":  "Nimbus",
+		"tagline":  "AdonisJS-style framework for Go",
+	})
 }
 
 func healthHandler(c *context.Context) error {
@@ -190,9 +207,30 @@ const configApp = `package config
 // App-specific config can live here; base config is in nimbus/config.
 `
 
+// copyViewTemplates copies embedded templates/views/*.nimbus into the app's views/ folder.
+func copyViewTemplates(appDir string) error {
+	viewsDir := filepath.Join(appDir, "views")
+	if err := os.MkdirAll(viewsDir, 0755); err != nil {
+		return err
+	}
+	return fs.WalkDir(viewTemplates, "templates/views", func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		body, err := fs.ReadFile(viewTemplates, path)
+		if err != nil {
+			return err
+		}
+		name := filepath.Base(path)
+		dest := filepath.Join(viewsDir, name)
+		return os.WriteFile(dest, body, 0644)
+	})
+}
+
 const airConfigTmpl = `# Nimbus hot reload (air)
 root = "."
 tmp_dir = "tmp"
+silent = true
 
 [build]
   cmd = "go build -o ./tmp/main ."
@@ -217,7 +255,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		fmt.Println("Create an app with: nimbus new myapp")
 		return nil
 	}
-	// Hot reload: run air via go run (no separate install; go fetches it when needed)
+	// Hot reload: run air (use app's version from go.mod after go mod tidy, else fetch v1.52.3)
 	ensureAirConfig(dir)
 	fmt.Println("Starting Nimbus app (hot reload)...")
 	c := exec.Command("go", "run", "github.com/air-verse/air@v1.52.3")
@@ -225,7 +263,10 @@ func runServe(cmd *cobra.Command, args []string) error {
 	c.Stdin = os.Stdin
 	c.Stdout = os.Stdout
 	c.Stderr = os.Stderr
-	return c.Run()
+	if err := c.Run(); err != nil {
+		return err
+	}
+	return nil
 }
 
 // ensureAirConfig writes a default .air.toml if missing (watches .go and .nimbus).
@@ -237,6 +278,7 @@ func ensureAirConfig(dir string) {
 	const config = `# Nimbus hot reload (air)
 root = "."
 tmp_dir = "tmp"
+silent = true
 
 [build]
   cmd = "go build -o ./tmp/main ."

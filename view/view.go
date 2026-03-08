@@ -87,14 +87,17 @@ func (e *Engine) parse(name string) (*template.Template, error) {
 
 func parseLayoutLine(s string) string {
 	s = strings.TrimSpace(s)
-	if !strings.HasPrefix(s, "@layout(") {
+	prefix := "@layout("
+	if !strings.HasPrefix(s, prefix) {
 		return ""
 	}
-	end := strings.Index(s, ")")
+	start := len(prefix) // first char inside the parens
+	end := strings.Index(s[start:], ")")
 	if end == -1 {
 		return ""
 	}
-	return strings.Trim(strings.TrimSpace(s[7:end]), "'\"")
+	inner := strings.TrimSpace(s[start : start+end])
+	return strings.Trim(inner, "'\"")
 }
 
 func stripLayoutLine(s string) string {
@@ -106,7 +109,18 @@ func stripLayoutLine(s string) string {
 }
 
 // convertNimbusToGo turns @if/@each/{{ }} into Go template syntax.
+// Content inside <code>...</code> and <pre>...</pre> is left unchanged (for docs/literal syntax).
 func (e *Engine) convertNimbusToGo(s string) string {
+	// Protect code/pre blocks from conversion (so docs can show literal {{ }} and @if etc.)
+	var blocks []string
+	placeholder := " __NIMBUS_RAW_%d__ "
+	// (?s) = dot matches newline; non-greedy match
+	codeRe := regexp.MustCompile(`(?s)<(code|pre)[^>]*>.*?</\1>`)
+	s = codeRe.ReplaceAllStringFunc(s, func(m string) string {
+		blocks = append(blocks, m)
+		return fmt.Sprintf(placeholder, len(blocks)-1)
+	})
+
 	// {{ variable }} -> {{ .variable }} (preserve lone . for range context)
 	s = regexp.MustCompile(`\{\{\s*([a-zA-Z_][a-zA-Z0-9_.]*)\s*\}\}`).ReplaceAllStringFunc(s, func(m string) string {
 		sub := regexp.MustCompile(`\{\{\s*([a-zA-Z_][a-zA-Z0-9_.]*)\s*\}\}`).FindStringSubmatch(m)
@@ -125,6 +139,11 @@ func (e *Engine) convertNimbusToGo(s string) string {
 	s = regexp.MustCompile(`@each\s*\((.*?)\)`).ReplaceAllString(s, "{{ range .$1 }}")
 	// @endeach -> {{ end }}
 	s = strings.ReplaceAll(s, "@endeach", "{{ end }}")
+
+	// Restore protected code/pre blocks
+	for i, block := range blocks {
+		s = strings.Replace(s, fmt.Sprintf(placeholder, i), block, 1)
+	}
 	return s
 }
 

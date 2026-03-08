@@ -1,0 +1,25 @@
+@layout('layout')
+<main class="min-h-[85vh] flex flex-col items-center justify-center px-4">
+  <div class="max-w-2xl mx-auto text-center">
+    <div class="inline-flex items-center gap-2 rounded-full bg-amber-500/10 text-amber-400 px-4 py-1.5 text-sm font-medium mb-8 ring-1 ring-amber-500/20">
+      <span class="relative flex h-2 w-2">
+        <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+        <span class="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+      </span>
+      Ready to build
+    </div>
+    <h1 class="text-5xl sm:text-6xl font-bold tracking-tight text-white mb-4">
+      Welcome to <span class="text-transparent bg-clip-text bg-gradient-to-r from-amber-400 to-orange-500">{{ .appName }}</span>
+    </h1>
+    <p class="text-xl text-slate-400 mb-10">{{ .tagline }}</p>
+    <div class="flex flex-wrap gap-4 justify-center">
+      <a href="https://github.com/CodeSyncr/nimbus" target="_blank" rel="noopener" class="inline-flex items-center gap-2 rounded-lg bg-amber-500 px-5 py-2.5 text-sm font-semibold text-slate-950 shadow-lg shadow-amber-500/25 hover:bg-amber-400 transition focus:outline-none focus:ring-2 focus:ring-amber-400 focus:ring-offset-2 focus:ring-offset-slate-950">
+        GitHub
+      </a>
+      <a href="/health" class="inline-flex items-center gap-2 rounded-lg border border-slate-600 bg-slate-800/50 px-5 py-2.5 text-sm font-medium text-slate-200 hover:bg-slate-700/50 hover:border-slate-500 transition">
+        Health check
+      </a>
+    </div>
+    <p class="mt-12 text-slate-500 text-sm">Edit <code class="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300">views/home.nimbus</code> and save — hot reload will refresh the page.</p>
+  </div>
+</main>

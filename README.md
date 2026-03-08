@@ -42,13 +42,13 @@ cd /path/to/nimbus
 go install ./cmd/nimbus
 ```
 
-Ensure `$HOME/go/bin` is in your PATH (add to `~/.zshrc` if needed):
+**If you get `zsh: command not found: nimbus`**, add Go’s bin directory to your PATH. For zsh, run once:
 
 ```bash
-export PATH="$HOME/go/bin:$PATH"
+echo 'export PATH="$HOME/go/bin:$PATH"' >> ~/.zshrc && source ~/.zshrc
 ```
 
-Then run `nimbus serve` from your app directory. If you get "command not found", either add the export above and restart the terminal, or run the app with `go run main.go` instead.
+Then run `nimbus` again. You can also run your app without the CLI: `go run main.go` (no hot reload) or `go run github.com/air-verse/air@v1.52.3` (hot reload).
 
 **Hot reload:** `nimbus serve` runs [air](https://github.com/air-verse/air) via `go run`, so you don’t install anything extra. The first run may download air once; after that, edits to `.go` and `.nimbus` files restart the app automatically. No need to add air to your app’s `go.mod` or run `go mod tidy` for it.
 
