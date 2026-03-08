@@ -69,6 +69,14 @@ replace github.com/CodeSyncr/nimbus => ../nimbus
 
 So the path after `=>` is the directory that contains the nimbus `go.mod`.
 
+**If you see** `missing go.sum entry for module providing package ... (imported by github.com/CodeSyncr/nimbus/...)`: your app’s `go.sum` is missing transitive dependencies from the local nimbus module. From your **app** directory run:
+
+```bash
+go mod tidy
+```
+
+Then run `nimbus serve` again.
+
 ### Use the framework in your own app
 
 ```go
@@ -140,6 +148,39 @@ func createUser(c *context.Context) error {
 	// ...
 }
 ```
+
+### Views (.nimbus, Edge-style)
+
+Put templates in a `views/` folder with the **`.nimbus`** extension. Use `c.View("name", data)` to render (like Edge in AdonisJS).
+
+**Syntax:**
+
+| Nimbus | Description |
+|--------|-------------|
+| `{{ variable }}` | Output (becomes `{{ .variable }}`) |
+| `@if(condition)` … `@else` … `@endif` | Conditionals |
+| `@each(list)` … `@endeach` | Loop (range) |
+| `@layout('layout')` | Wrap this view with `views/layout.nimbus`; layout uses `{{ .embed }}` or `{{ .content }}` for the slot |
+
+**Example:** `views/home.nimbus`
+
+```
+@layout('layout')
+<h2>Hello, {{ name }}!</h2>
+@if(.items)
+  @each(items)
+  <li>{{ . }}</li>
+  @endeach
+@endif
+```
+
+**In your handler:**
+
+```go
+return c.View("home", map[string]any{"name": "Guest", "title": "Home", "items": []string{"A", "B"}})
+```
+
+Views are loaded from the `views/` directory by default. Change with `view.SetRoot("custom/views")` in `main.go`.
 
 ## Commands
 
