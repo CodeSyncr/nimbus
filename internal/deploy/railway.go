@@ -21,9 +21,29 @@ func deployRailway(dir string, cfg *Config) error {
 		return err
 	}
 
+	// Resolve service name (required when Service: None in railway status)
+	serviceName := cfg.Service
+	if serviceName == "" {
+		serviceName = cfg.AppName
+	}
+	if serviceName == "" {
+		serviceName = filepath.Base(dir)
+	}
+	if serviceName == "" {
+		return fmt.Errorf("railway deploy requires app_name or service in deploy.yaml")
+	}
+
+	// Link service if Service: None (fixes "Please specify a service" in non-interactive mode)
+	link := exec.Command("railway", "service", serviceName)
+	link.Dir = dir
+	link.Stdout = os.Stdout
+	link.Stderr = os.Stderr
+	_ = link.Run() // ignore error; may already be linked
+
 	// Railway uses `railway up` which builds from Dockerfile or Nixpacks
+	args := []string{"up", "--detach", "--service", serviceName}
 	fmt.Println("  Deploying to Railway...")
-	cmd := exec.Command("railway", "up", "--detach")
+	cmd := exec.Command("railway", args...)
 	cmd.Dir = dir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

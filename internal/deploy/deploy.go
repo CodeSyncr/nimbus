@@ -26,6 +26,11 @@ func Deploy(dir, target string, cfg *Config) error {
 		return err
 	}
 
+	// Vendor deps when go.mod has local replace (../) - remote builds can't resolve it
+	if err := ensureVendorForDeploy(dir); err != nil {
+		return err
+	}
+
 	switch target {
 	case "fly", "fly.io":
 		if err := requireCLI("fly"); err != nil {
@@ -74,6 +79,27 @@ var cliInstallURLs = map[string]string{
 	"fly":     "https://fly.io/docs/flyctl/install/",
 	"railway": "https://docs.railway.com/develop/cli",
 	"docker":  "https://docs.docker.com/get-docker/",
+}
+
+// ensureVendorForDeploy runs go mod vendor when go.mod has a replace pointing to ../ (local path).
+// Remote builds (Railway, Fly, etc.) can't resolve ../ so vendor is required.
+func ensureVendorForDeploy(dir string) error {
+	data, err := os.ReadFile(filepath.Join(dir, "go.mod"))
+	if err != nil {
+		return nil
+	}
+	if !strings.Contains(string(data), "=> ../") {
+		return nil
+	}
+	fmt.Println("  Vendoring deps (go.mod has local replace)...")
+	cmd := exec.Command("go", "mod", "vendor")
+	cmd.Dir = dir
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("go mod vendor failed: %w", err)
+	}
+	return nil
 }
 
 func requireCLI(name string) error {

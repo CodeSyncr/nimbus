@@ -15,19 +15,23 @@ WORKDIR /app
 # Install build deps (for cgo/sqlite if needed)
 RUN apk add --no-cache gcc musl-dev
 
-# Copy go mod files first for layer caching
+# Copy go mod and source (vendor included if present for replace directives)
 COPY go.mod go.sum ./
-RUN go mod download
-
-# Copy source and build
 COPY . .
-RUN CGO_ENABLED=1 go build -ldflags="-s -w" -o /app/server .
+# Use vendor when present (deploy with replace => ../ fails remotely)
+RUN if [ -d vendor ]; then \
+    CGO_ENABLED=1 go build -mod=vendor -ldflags="-s -w" -o /app/server .; \
+  else \
+    go mod download && CGO_ENABLED=1 go build -ldflags="-s -w" -o /app/server .; \
+  fi
 
 # Minimal runtime image
 FROM alpine:3.19
 RUN apk add --no-cache ca-certificates
 WORKDIR /app
 COPY --from=builder /app/server .
+COPY --from=builder /app/. .
+RUN rm -rf vendor go.mod go.sum
 
 # Nimbus uses PORT env (default 8080)
 ENV PORT=8080
@@ -43,19 +47,22 @@ WORKDIR /app
 # Install build deps (for cgo/sqlite if needed)
 RUN apk add --no-cache gcc musl-dev
 
-# Copy go mod first (go.sum may not exist)
+# Copy go mod and source (vendor included if present for replace directives)
 COPY go.mod ./
-RUN go mod download
-
-# Copy source and build
 COPY . .
-RUN CGO_ENABLED=1 go build -ldflags="-s -w" -o /app/server .
+RUN if [ -d vendor ]; then \
+    CGO_ENABLED=1 go build -mod=vendor -ldflags="-s -w" -o /app/server .; \
+  else \
+    go mod download && CGO_ENABLED=1 go build -ldflags="-s -w" -o /app/server .; \
+  fi
 
 # Minimal runtime image
 FROM alpine:3.19
 RUN apk add --no-cache ca-certificates
 WORKDIR /app
 COPY --from=builder /app/server .
+COPY --from=builder /app/. .
+RUN rm -rf vendor go.mod go.sum
 
 ENV PORT=8080
 EXPOSE 8080

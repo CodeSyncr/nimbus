@@ -6,6 +6,7 @@ const DeployYAMLExample = `# nimbus deploy config
 
 target: fly
 app_name: my-app
+# service: my-app   # Railway only; defaults to app_name
 region: iad
 
 # Run migrations before each deploy (Fly.io release_command)
