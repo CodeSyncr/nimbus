@@ -1,0 +1,25 @@
+@layout('telescope/layout')
+<div>
+  <h1 class="text-2xl font-bold t-text mb-2">Database Queries</h1>
+  <div class="t-card rounded-xl overflow-hidden">
+    <div class="px-5 py-4 border-b t-border t-bg-sidebar flex items-center justify-between">
+      <h2 class="font-semibold t-text">SQL Queries</h2>
+      <a href="/telescope" class="text-sm t-accent hover:opacity-80 transition">← Dashboard</a>
+    </div>
+    <div class="t-divide">
+      @if(.empty)
+      <div class="px-5 py-12 text-center t-text-subtle">No queries recorded. Make some database requests (e.g. visit the Todo demo) to see them here.</div>
+      @else
+      @each(.entries)
+      <div class="px-5 py-4 t-hover transition">
+        <div class="flex items-center gap-2 mb-2">
+          <span class="text-xs font-medium px-2.5 py-1 rounded-full t-accent-bg t-accent">{{ index .Content "duration_ms" }}ms</span>
+          {{ if index .Content "rows" }}<span class="text-xs t-text-subtle">{{ index .Content "rows" }} rows</span>{{ end }}
+        </div>
+        <div class="text-sm t-text-muted font-mono overflow-x-auto whitespace-pre-wrap break-words rounded-lg t-code-block px-4 py-3">{{ index .Content "sql" }}</div>
+      </div>
+      @endeach
+      @endif
+    </div>
+  </div>
+</div>

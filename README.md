@@ -21,6 +21,7 @@
 │   ├── controllers/
 │   ├── models/
 │   └── middleware/
+├── bin/            # Server boot (bin/server.go)
 ├── config/
 ├── database/
 │   └── migrations/
@@ -50,7 +51,7 @@ echo 'export PATH="$HOME/go/bin:$PATH"' >> ~/.zshrc && source ~/.zshrc
 
 Then run `nimbus` again. You can also run your app without the CLI: `go run main.go` (no hot reload) or `go run github.com/air-verse/air@v1.52.3` (hot reload).
 
-**Hot reload:** `nimbus serve` runs [air](https://github.com/air-verse/air) via `go run`, so you don’t install anything extra. The first run may download air once; after that, edits to `.go` and `.nimbus` files restart the app automatically. No need to add air to your app’s `go.mod` or run `go mod tidy` for it.
+**Hot reload:** `nimbus serve` runs [air](https://github.com/air-verse/air) via `go run`, so you don’t install anything extra. The first run may download air once; after that, edits to `.go` and `.nimbus` files restart the app automatically. No need to add air to your app’s `go.mod` or run `go mod tidy` for it. Press **Ctrl+C** to stop the server; it shuts down gracefully and releases the port.
 
 ### Create a new app
 
@@ -120,8 +121,8 @@ Set `PORT`, `APP_ENV`, `APP_NAME`, `DB_DRIVER`, `DB_DSN` in `.env`. Config is lo
 ```go
 import "github.com/CodeSyncr/nimbus/database"
 
-// Connect (e.g. in main)
-db, _ := database.Connect(app.Config.Database.Driver, app.Config.Database.DSN)
+// Connect (e.g. in bin/server.go)
+db, _ := database.Connect(config.Database.Driver, config.Database.DSN)
 
 // Model (embed database.Model)
 type User struct {
@@ -131,6 +132,22 @@ type User struct {
 }
 db.AutoMigrate(&User{})
 ```
+
+### Migrations
+
+Run migrations from your app root:
+
+```bash
+nimbus db:migrate
+```
+
+Or directly: `go run . migrate`. Migrations use an AdonisJS Lucid-style schema builder. Create one with:
+
+```bash
+nimbus make:migration create_users
+```
+
+Then add the new migration to `database/migrations/registry.go`. Each migration runs once; already-run migrations are tracked in `schema_migrations` and shown as *skipped* on subsequent runs.
 
 ### Validation
 
@@ -155,14 +172,22 @@ func createUser(c *context.Context) error {
 
 Put templates in a `views/` folder with the **`.nimbus`** extension. Use `c.View("name", data)` to render (like Edge in AdonisJS).
 
-**Syntax:**
+**Syntax (Edge-aligned):**
 
 | Nimbus | Description |
 |--------|-------------|
-| `{{ variable }}` | Output (becomes `{{ .variable }}`) |
-| `@if(condition)` … `@else` … `@endif` | Conditionals |
-| `@each(list)` … `@endeach` | Loop (range) |
-| `@layout('layout')` | Wrap this view with `views/layout.nimbus`; layout uses `{{ .embed }}` or `{{ .content }}` for the slot |
+| `{{ variable }}` | Output, HTML-escaped |
+| `{{{ variable }}}` | Output, unescaped (for rich content) |
+| `{{-- comment --}}` | Comment (stripped from output) |
+| `@if(cond)` … `@elseif(cond)` … `@else` … `@endif` | Conditionals |
+| `@each(items)` … `@endeach` | Loop; use `{{ . }}` for current item |
+| `@each(post in posts)` … `@endeach` | Loop with named var; use `{{ $post }}` |
+| `@layout('layout')` | Wrap with layout; layout uses `{{ .embed }}` or `{{ .content }}` |
+| `{{ .csrfField }}` | CSRF hidden input (auto-injected when Shield enabled) |
+| `@dump(posts)` | Debug: pretty-print variable (or `@dump(state)` for all) |
+| `@card()` … `@end` | Component: `views/components/card.nimbus` becomes `@card()` |
+
+**Components:** Create `views/components/card.nimbus`; use `@card()` … `@end` in templates. Render the main slot with `{{{ .slots.main }}}` (Edge-style).
 
 **Example:** `views/home.nimbus`
 
@@ -173,6 +198,8 @@ Put templates in a `views/` folder with the **`.nimbus`** extension. Use `c.View
   @each(items)
   <li>{{ . }}</li>
   @endeach
+@else
+  <p>No items.</p>
 @endif
 ```
 
@@ -184,14 +211,47 @@ return c.View("home", map[string]any{"name": "Guest", "title": "Home", "items": 
 
 Views are loaded from the `views/` directory by default. Change with `view.SetRoot("custom/views")` in `main.go`.
 
+## Plugins & packages
+
+### Default plugins (auto-registered with `nimbus new`)
+
+| Plugin | Description | Docs |
+|--------|-------------|------|
+| [Drive](plugins/drive/README.md) | File storage (fs, S3, GCS, R2, Spaces, Supabase) | [README](plugins/drive/README.md) |
+| [Transmit](plugins/transmit/README.md) | SSE for real-time server-to-client push | [README](plugins/transmit/README.md) |
+
+### Core packages
+
+| Package | Description | Docs |
+|---------|-------------|------|
+| [Queue](queue/README.md) | Background jobs (sync, Redis, database, SQS, Kafka) | [README](queue/README.md) |
+
+### Additional plugins (`nimbus add <name>`)
+
+| Plugin | Description | Docs |
+|--------|-------------|------|
+| [AI](plugins/ai/README.md) | AI integration (OpenAI, Ollama, Anthropic, etc.) | [README](plugins/ai/README.md) |
+| [Inertia](plugins/inertia/README.md) | Inertia.js for Vue/React/Svelte SPAs | [README](plugins/inertia/README.md) |
+| [Telescope](plugins/telescope/README.md) | Debugging and introspection dashboard | [README](plugins/telescope/README.md) |
+| [MCP](plugins/mcp/README.md) | Model Context Protocol for AI clients | [README](plugins/mcp/README.md) |
+| Unpoly | Progressive enhancement and partial page updates | `nimbus add unpoly` |
+
+### Redis
+
+Redis is used by **Queue** (`QUEUE_DRIVER=redis`) and **Transmit** (`TRANSMIT_TRANSPORT=redis`) for distributed workers and multi-instance SSE. Set `REDIS_URL=redis://localhost:6379` in `.env` when using these features.
+
 ## Commands
 
 | Command | Description |
 |--------|-------------|
 | `nimbus new <name>` | Create a new Nimbus app |
 | `nimbus serve` | Run the app (from app root; like AdonisJS `ace serve`) |
+| `nimbus db:migrate` | Run database migrations |
+| `nimbus db:rollback` | Rollback the last migration |
 | `nimbus make:model <Name>` | Scaffold a model |
-| `nimbus make:migration <name>` | Scaffold a migration (placeholder) |
+| `nimbus make:migration <name>` | Scaffold a migration |
+| `nimbus queue:work` | Run the queue worker (processes background jobs) |
+| `nimbus add <plugin>` | Install a plugin (drive, telescope, inertia, ai, mcp, etc.) |
 
 ## Publishing (for maintainers)
 

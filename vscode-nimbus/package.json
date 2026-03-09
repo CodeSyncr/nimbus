@@ -1,0 +1,40 @@
+{
+  "name": "nimbus-syntax",
+  "displayName": "Nimbus Syntax",
+  "description": "Syntax highlighting for .nimbus template files (Nimbus framework)",
+  "version": "0.1.0",
+  "publisher": "nimbus",
+  "engines": {
+    "vscode": "^1.60.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "keywords": [
+    "nimbus",
+    "template",
+    "edge",
+    "adonis"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/CodeSyncr/nimbus"
+  },
+  "contributes": {
+    "languages": [
+      {
+        "id": "nimbus",
+        "aliases": ["Nimbus", "nimbus"],
+        "extensions": [".nimbus"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "nimbus",
+        "scopeName": "source.nimbus",
+        "path": "./syntaxes/nimbus.tmLanguage.json"
+      }
+    ]
+  }
+}

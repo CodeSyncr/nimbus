@@ -5,17 +5,8 @@ import (
 	"sync"
 )
 
-// Job is the interface for queue jobs (plan: SendEmailJob, ProcessVideoJob).
-type Job interface {
-	Handle(ctx context.Context) error
-}
-
-// JobFunc adapts a function to Job.
-type JobFunc func(ctx context.Context) error
-
-func (f JobFunc) Handle(ctx context.Context) error { return f(ctx) }
-
-// Queue enqueues and runs jobs (in-memory worker pool).
+// Queue is a legacy in-memory worker pool. Prefer queue.Dispatch() with
+// a configured Manager (Redis/Database) for production.
 type Queue struct {
 	mu      sync.Mutex
 	jobs    chan jobEntry

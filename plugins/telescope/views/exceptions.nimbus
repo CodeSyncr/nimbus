@@ -1,0 +1,22 @@
+@layout('telescope/layout')
+<div>
+  <h1 class="text-2xl font-bold t-text mb-2">Exceptions</h1>
+  <div class="t-card rounded-xl overflow-hidden">
+    <div class="px-5 py-4 border-b t-border t-bg-sidebar flex items-center justify-between">
+      <h2 class="font-semibold t-text">Exceptions & Panics</h2>
+      <a href="/telescope" class="text-sm t-accent hover:opacity-80 transition">← Dashboard</a>
+    </div>
+    <div class="t-divide">
+      @if(.empty)
+      <div class="px-5 py-12 text-center t-text-subtle">No exceptions recorded. Exceptions are captured when the Recover middleware catches panics.</div>
+      @else
+      @each(.entries)
+      <div class="px-5 py-4 t-hover transition">
+        <div class="t-error font-mono text-sm font-medium mb-2">{{ index .Content "message" }}</div>
+        <div class="text-xs t-text-subtle font-mono overflow-x-auto whitespace-pre-wrap rounded-lg t-code-block px-4 py-3">{{ index .Content "trace" }}</div>
+      </div>
+      @endeach
+      @endif
+    </div>
+  </div>
+</div>

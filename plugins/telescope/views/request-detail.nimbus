@@ -1,0 +1,77 @@
+@layout('telescope/layout')
+<div>
+  <h1 class="text-2xl font-bold t-text mb-2">Request Details</h1>
+  <div class="t-card rounded-xl overflow-hidden">
+    <div class="px-5 py-4 border-b t-border t-bg-sidebar flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <span class="text-xs font-medium px-2.5 py-1 rounded-full {{ $s := index .entry.Content "response_status" }}{{ if and $s (ge $s 200) (lt $s 300) }}t-status-2xx{{ else }}{{ if and $s (ge $s 400) (lt $s 500) }}t-status-4xx{{ else }}{{ if and $s (ge $s 500) }}t-status-5xx{{ else }}t-accent-bg t-accent{{ end }}{{ end }}{{ end }}">{{ $s }}</span>
+        <span class="t-text-muted font-mono text-sm">{{ index .entry.Content "method" }}</span>
+        <span class="t-text font-mono text-sm break-all">{{ index .entry.Content "path" }}{{ if index .entry.Content "query" }}?{{ index .entry.Content "query" }}{{ end }}</span>
+      </div>
+      <a href="/telescope/requests" class="text-sm t-accent hover:opacity-80 transition">← Requests</a>
+    </div>
+    <div class="p-5 border-b t-border t-bg-sidebar flex items-center gap-6 text-sm t-text-muted">
+      <span><strong class="t-text">Duration:</strong> {{ index .entry.Content "duration_ms" }}ms</span>
+      <span><strong class="t-text">Size:</strong> {{ index .entry.Content "response_size" }} bytes</span>
+    </div>
+    <div class="border-b t-border">
+      <div class="flex">
+        <button type="button" onclick="showTab('request')" id="tab-request" class="px-5 py-3 text-sm font-medium t-accent border-b-2 border-current -mb-px">Request</button>
+        <button type="button" onclick="showTab('response')" id="tab-response" class="px-5 py-3 text-sm font-medium t-text-subtle hover:t-text border-b-2 border-transparent -mb-px">Response</button>
+      </div>
+    </div>
+    <div id="panel-request" class="p-5">
+      <div class="mb-6">
+        <h3 class="text-sm font-semibold t-text mb-2">Headers</h3>
+        <div class="t-code-block rounded-lg overflow-x-auto">
+          {{ if index .entry.Content "headers" }}
+          <table class="w-full text-sm font-mono">
+            {{ range $k, $v := index .entry.Content "headers" }}
+            <tr class="border-b t-border">
+              <td class="py-2 pr-4 t-accent font-medium">{{ $k }}</td>
+              <td class="py-2 t-text-muted break-all">{{ $v }}</td>
+            </tr>
+            {{ end }}
+          </table>
+          {{ else }}
+          <div class="p-4 t-text-subtle text-sm">No headers</div>
+          {{ end }}
+        </div>
+      </div>
+      <div>
+        <h3 class="text-sm font-semibold t-text mb-2">Payload</h3>
+        <div class="t-code-block rounded-lg overflow-x-auto">
+          <div class="p-4 text-sm font-mono t-text-muted whitespace-pre-wrap">{{ if index .entry.Content "payload" }}{{ index .entry.Content "payload" }}{{ else }}<em class="t-text-subtle">Empty</em>{{ end }}</div>
+        </div>
+      </div>
+    </div>
+    <div id="panel-response" class="p-5 hidden">
+      <div class="mb-6">
+        <h3 class="text-sm font-semibold t-text mb-2">Status</h3>
+        <div class="t-code-block rounded-lg p-4">
+          <span class="font-mono text-sm">{{ index .entry.Content "response_status" }}</span>
+        </div>
+      </div>
+      <div>
+        <h3 class="text-sm font-semibold t-text mb-2">Body</h3>
+        <div class="t-code-block rounded-lg overflow-x-auto">
+          <div class="p-4 text-sm font-mono t-text-muted whitespace-pre-wrap break-words">{{ if index .entry.Content "response_body" }}{{ index .entry.Content "response_body" }}{{ else }}<em class="t-text-subtle">Empty</em>{{ end }}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+  function showTab(name) {
+    document.getElementById('panel-request').classList.toggle('hidden', name !== 'request');
+    document.getElementById('panel-response').classList.toggle('hidden', name !== 'response');
+    document.getElementById('tab-request').classList.toggle('t-accent', name === 'request');
+    document.getElementById('tab-request').classList.toggle('t-text-subtle', name !== 'request');
+    document.getElementById('tab-request').classList.toggle('border-current', name === 'request');
+    document.getElementById('tab-request').classList.toggle('border-transparent', name !== 'request');
+    document.getElementById('tab-response').classList.toggle('t-accent', name === 'response');
+    document.getElementById('tab-response').classList.toggle('t-text-subtle', name !== 'response');
+    document.getElementById('tab-response').classList.toggle('border-current', name === 'response');
+    document.getElementById('tab-response').classList.toggle('border-transparent', name !== 'response');
+  }
+</script>

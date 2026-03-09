@@ -1,0 +1,60 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Nimbus",
+  "scopeName": "source.nimbus",
+  "patterns": [
+    {
+      "comment": "Layout directive",
+      "match": "@layout\\s*\\(\\s*['\"]([^'\"]*)['\"]\\s*\\)",
+      "captures": {
+        "0": { "name": "keyword.control.directive.nimbus" },
+        "1": { "name": "string.quoted.single.nimbus" }
+      }
+    },
+    {
+      "comment": "Conditional: @if(condition)",
+      "match": "@if\\s*\\([^)]*\\)",
+      "name": "keyword.control.conditional.nimbus"
+    },
+    {
+      "comment": "Conditional: @else",
+      "match": "@else\\b",
+      "name": "keyword.control.conditional.nimbus"
+    },
+    {
+      "comment": "Conditional: @endif or @end",
+      "match": "@(endif|end)\\b",
+      "name": "keyword.control.conditional.nimbus"
+    },
+    {
+      "comment": "Loop: @each(list)",
+      "match": "@each\\s*\\([^)]*\\)",
+      "name": "keyword.control.loop.nimbus"
+    },
+    {
+      "comment": "Loop: @endeach",
+      "match": "@endeach\\b",
+      "name": "keyword.control.loop.nimbus"
+    },
+    {
+      "comment": "Output: {{ expression }}",
+      "begin": "\\{\\{",
+      "end": "\\}\\}",
+      "name": "meta.embedded.expression.nimbus",
+      "patterns": [
+        {
+          "match": "\\.",
+          "name": "punctuation.accessor.nimbus"
+        },
+        {
+          "match": "[a-zA-Z_][a-zA-Z0-9_.]*",
+          "name": "variable.other.nimbus"
+        }
+      ]
+    },
+    {
+      "comment": "Embed HTML for the rest of the file",
+      "include": "text.html.basic"
+    }
+  ]
+}

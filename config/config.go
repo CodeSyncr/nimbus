@@ -26,6 +26,7 @@ type DatabaseConfig struct {
 }
 
 // Load reads .env and builds Config (convention: config/*).
+// For type-safe config, use Get[T], LoadInto, or LoadAuto.
 func Load() *Config {
 	_ = godotenv.Load()
 

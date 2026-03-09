@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en" class="">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Telescope · {{ .title }}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>tailwind.config = { darkMode: 'class' };</script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --t-bg: 248 250 252;
+      --t-bg-sidebar: 241 245 249;
+      --t-bg-card: 255 255 255;
+      --t-border: 226 232 240;
+      --t-text: 15 23 42;
+      --t-text-muted: 100 116 139;
+      --t-text-subtle: 148 163 184;
+      --t-accent: 20 184 166;
+      --t-accent-hover: 13 148 136;
+      --t-accent-muted: 204 251 241;
+      --t-hover: 241 245 249;
+      --t-active: 226 232 240;
+      --t-success: 34 197 94;
+      --t-warning: 234 179 8;
+      --t-error: 239 68 68;
+      --t-shadow: 0 1px 3px rgb(0 0 0 / 0.06);
+      --t-shadow-lg: 0 4px 6px -1px rgb(0 0 0 / 0.08), 0 2px 4px -2px rgb(0 0 0 / 0.06);
+    }
+    .dark {
+      --t-bg: 15 23 42;
+      --t-bg-sidebar: 30 41 59;
+      --t-bg-card: 30 41 59;
+      --t-border: 51 65 85;
+      --t-text: 248 250 252;
+      --t-text-muted: 203 213 225;
+      --t-text-subtle: 148 163 184;
+      --t-accent: 45 212 191;
+      --t-accent-hover: 94 234 212;
+      --t-accent-muted: 20 184 166;
+      --t-hover: 51 65 85;
+      --t-active: 71 85 105;
+      --t-success: 74 222 128;
+      --t-warning: 250 204 21;
+      --t-error: 248 113 113;
+      --t-shadow: 0 1px 3px rgb(0 0 0 / 0.3);
+      --t-shadow-lg: 0 4px 6px -1px rgb(0 0 0 / 0.4), 0 2px 4px -2px rgb(0 0 0 / 0.3);
+    }
+    body { font-family: 'Plus Jakarta Sans', system-ui, sans-serif; }
+    .font-mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+    .t-bg { background-color: rgb(var(--t-bg)); }
+    .t-bg-sidebar { background-color: rgb(var(--t-bg-sidebar)); }
+    .t-bg-card { background-color: rgb(var(--t-bg-card)); }
+    .t-border { border-color: rgb(var(--t-border)); }
+    .t-text { color: rgb(var(--t-text)); }
+    .t-text-muted { color: rgb(var(--t-text-muted)); }
+    .t-text-subtle { color: rgb(var(--t-text-subtle)); }
+    .t-accent { color: rgb(var(--t-accent)); }
+    .t-accent-bg { background-color: rgb(var(--t-accent-muted)); }
+    .dark .t-accent-bg { background-color: rgb(var(--t-accent) / 0.15); }
+    .t-hover:hover { background-color: rgb(var(--t-hover)); }
+    .t-active { background-color: rgb(var(--t-active)); }
+    .t-nav-active { background-color: rgb(var(--t-active)); color: rgb(var(--t-text)); }
+    .t-nav-inactive { color: rgb(var(--t-text-muted)); }
+    .t-nav-inactive:hover { color: rgb(var(--t-text)); background-color: rgb(var(--t-hover)); }
+    .t-card { background-color: rgb(var(--t-bg-card)); border: 1px solid rgb(var(--t-border)); box-shadow: var(--t-shadow); }
+    .t-status-2xx { background-color: rgb(var(--t-success) / 0.15); color: rgb(var(--t-success)); }
+    .t-status-4xx { background-color: rgb(var(--t-warning) / 0.15); color: rgb(var(--t-warning)); }
+    .t-status-5xx { background-color: rgb(var(--t-error) / 0.15); color: rgb(var(--t-error)); }
+    .t-error { color: rgb(var(--t-error)); }
+    .t-code-block { background-color: rgb(var(--t-bg-sidebar)); border: 1px solid rgb(var(--t-border)); }
+    .t-divide > * + * { border-top: 1px solid rgb(var(--t-border)); }
+  </style>
+</head>
+<body class="min-h-screen t-bg t-text flex transition-colors duration-200">
+  <script>
+    (function() {
+      const stored = localStorage.getItem('telescope-theme');
+      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      const dark = stored === 'dark' || (stored === null && prefersDark);
+      document.documentElement.classList.toggle('dark', dark);
+    })();
+    function toggleTheme() {
+      const dark = document.documentElement.classList.toggle('dark');
+      localStorage.setItem('telescope-theme', dark ? 'dark' : 'light');
+    }
+    let liveInterval = null;
+    const LIVE_KEY = 'telescope-live';
+    function toggleLive() {
+      const live = localStorage.getItem(LIVE_KEY) !== 'false';
+      const next = !live;
+      localStorage.setItem(LIVE_KEY, next ? 'true' : 'false');
+      const btn = document.getElementById('telescope-live-btn');
+      if (next) {
+        btn.classList.add('t-accent');
+        btn.title = 'Live polling on (click to pause)';
+        startPolling();
+      } else {
+        btn.classList.remove('t-accent');
+        btn.title = 'Live polling off (click to enable)';
+        stopPolling();
+      }
+    }
+    function startPolling() {
+      stopPolling();
+      liveInterval = setInterval(function() { location.reload(); }, 3000);
+    }
+    function stopPolling() {
+      if (liveInterval) { clearInterval(liveInterval); liveInterval = null; }
+    }
+    function initLive() {
+      const live = localStorage.getItem(LIVE_KEY) !== 'false';
+      const btn = document.getElementById('telescope-live-btn');
+      if (btn) {
+        if (live) { btn.classList.add('t-accent'); startPolling(); }
+        else { btn.title = 'Live polling off (click to enable)'; }
+      }
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initLive);
+    else initLive();
+  </script>
+  <!-- Sidebar -->
+  <aside class="w-64 border-r t-border t-bg-sidebar flex flex-col shrink-0 transition-colors duration-200">
+    <div class="p-5 border-b t-border">
+      <a href="/telescope" class="flex items-center gap-2.5 font-semibold t-accent hover:opacity-90 transition">
+        <svg class="w-6 h-6 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+        Telescope
+      </a>
+    </div>
+    <nav class="flex-1 overflow-y-auto py-3 px-2">
+      <a href="/telescope" class="flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg transition {{ if eq .watcher "dashboard" }}t-nav-active{{ else }}t-nav-inactive{{ end }}">
+        <svg class="w-5 h-5 shrink-0 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6z"/></svg>
+        Dashboard
+      </a>
+      <a href="/telescope/requests" class="flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg transition {{ if eq .watcher "requests" }}t-nav-active{{ else }}t-nav-inactive{{ end }}">
+        <svg class="w-5 h-5 shrink-0 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/></svg>
+        Requests
+      </a>
+      <a href="/telescope/commands" class="flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg transition {{ if eq .watcher "commands" }}t-nav-active{{ else }}t-nav-inactive{{ end }}">
+        <svg class="w-5 h-5 shrink-0 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+        Commands
+      </a>
+      <a href="/telescope/schedule" class="flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg transition {{ if eq .watcher "schedule" }}t-nav-active{{ else }}t-nav-inactive{{ end }}">
+        <svg class="w-5 h-5 shrink-0 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        Schedule
+      </a>
+      <a href="/telescope/jobs" class="flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg transition {{ if eq .watcher "jobs" }}t-nav-active{{ else }}t-nav-inactive{{ end }}">
+        <svg class="w-5 h-5 shrink-0 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"/></svg>
+        Jobs
+      </a>
+      <a href="/telescope/batches" class="flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg transition {{ if eq .watcher "batches" }}t-nav-active{{ else }}t-nav-inactive{{ end }}">
+        <svg class="w-5 h-5 shrink-0 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
+        Batches
+      </a>
+      <a href="/telescope/cache" class="flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg transition {{ if eq .watcher "cache" }}t-nav-active{{ else }}t-nav-inactive{{ end }}">
+        <svg class="w-5 h-5 shrink-0 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+        Cache
+      </a>
+      <a href="/telescope/dumps" class="flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg transition {{ if eq .watcher "dumps" }}t-nav-active{{ else }}t-nav-inactive{{ end }}">
+        <svg class="w-5 h-5 shrink-0 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/></svg>
+        Dumps
+      </a>
+      <a href="/telescope/events" class="flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg transition {{ if eq .watcher "events" }}t-nav-active{{ else }}t-nav-inactive{{ end }}">
+        <svg class="w-5 h-5 shrink-0 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z"/></svg>
+        Events
+      </a>
+      <a href="/telescope/exceptions" class="flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg transition {{ if eq .watcher "exceptions" }}t-nav-active{{ else }}t-nav-inactive{{ end }}">
+        <svg class="w-5 h-5 shrink-0 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+        Exceptions
+      </a>
+      <a href="/telescope/gates" class="flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg transition {{ if eq .watcher "gates" }}t-nav-active{{ else }}t-nav-inactive{{ end }}">
+        <svg class="w-5 h-5 shrink-0 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+        Gates
+      </a>
+      <a href="/telescope/http-client" class="flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg transition {{ if eq .watcher "http_client" }}t-nav-active{{ else }}t-nav-inactive{{ end }}">
+        <svg class="w-5 h-5 shrink-0 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"/></svg>
+        HTTP Client
+      </a>
+      <a href="/telescope/logs" class="flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg transition {{ if eq .watcher "logs" }}t-nav-active{{ else }}t-nav-inactive{{ end }}">
+        <svg class="w-5 h-5 shrink-0 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"/></svg>
+        Logs
+      </a>
+      <a href="/telescope/mail" class="flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg transition {{ if eq .watcher "mail" }}t-nav-active{{ else }}t-nav-inactive{{ end }}">
+        <svg class="w-5 h-5 shrink-0 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+        Mail
+      </a>
+      <a href="/telescope/models" class="flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg transition {{ if eq .watcher "models" }}t-nav-active{{ else }}t-nav-inactive{{ end }}">
+        <svg class="w-5 h-5 shrink-0 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"/></svg>
+        Models
+      </a>
+      <a href="/telescope/notifications" class="flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg transition {{ if eq .watcher "notifications" }}t-nav-active{{ else }}t-nav-inactive{{ end }}">
+        <svg class="w-5 h-5 shrink-0 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>
+        Notifications
+      </a>
+      <a href="/telescope/queries" class="flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg transition {{ if eq .watcher "queries" }}t-nav-active{{ else }}t-nav-inactive{{ end }}">
+        <svg class="w-5 h-5 shrink-0 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"/></svg>
+        Queries
+      </a>
+      <a href="/telescope/redis" class="flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg transition {{ if eq .watcher "redis" }}t-nav-active{{ else }}t-nav-inactive{{ end }}">
+        <svg class="w-5 h-5 shrink-0 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 4a2 2 0 114 0v1a1 1 0 001 1h3a1 1 0 011 1v3a1 1 0 01-1 1h-3a2 2 0 100 4h3a1 1 0 011 1v3a1 1 0 01-1 1h-3a1 1 0 01-1-1v-1a2 2 0 10-4 0v1a1 1 0 01-1 1H7a1 1 0 01-1-1v-3a1 1 0 00-1-1H4a2 2 0 110-4h1a1 1 0 001-1V7a1 1 0 011-1h3a1 1 0 001-1V4z"/></svg>
+        Redis
+      </a>
+      <a href="/telescope/views" class="flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg transition {{ if eq .watcher "views" }}t-nav-active{{ else }}t-nav-inactive{{ end }}">
+        <svg class="w-5 h-5 shrink-0 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+        Views
+      </a>
+    </nav>
+    <div class="p-4 border-t t-border">
+      <a href="/" class="text-sm t-text-muted hover:t-text transition">← Back to app</a>
+    </div>
+  </aside>
+  <!-- Main content -->
+  <main class="flex-1 overflow-auto flex flex-col transition-colors duration-200">
+    <div class="border-b t-border t-bg-sidebar px-6 py-3 flex items-center justify-between sticky top-0 z-10">
+      <span class="text-sm t-text-subtle">Nimbus Telescope</span>
+      <div class="flex items-center gap-1">
+        <button type="button" id="telescope-live-btn" onclick="toggleLive()" class="p-2 rounded-lg t-text-subtle hover:t-text hover:t-hover transition" title="Toggle live polling (auto-refresh every 3s)">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+        </button>
+        <button type="button" onclick="toggleTheme()" class="p-2 rounded-lg t-text-subtle hover:t-text hover:t-hover transition" title="Toggle light/dark mode">
+          <svg class="w-5 h-5 dark:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/></svg>
+          <svg class="w-5 h-5 hidden dark:block" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
+        </button>
+        <form method="POST" action="/telescope/clear" class="inline" onsubmit="return confirm('Clear all entries?')">
+          <button type="submit" class="p-2 rounded-lg t-text-subtle hover:t-text hover:t-hover transition" title="Clear entries">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+          </button>
+        </form>
+        <a href="javascript:location.reload()" class="p-2 rounded-lg t-text-subtle hover:t-text hover:t-hover transition" title="Refresh">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+        </a>
+      </div>
+    </div>
+    <div class="flex-1 max-w-6xl w-full mx-auto px-6 py-8">
+      {{ .embed }}
+    </div>
+  </main>
+</body>
+</html>

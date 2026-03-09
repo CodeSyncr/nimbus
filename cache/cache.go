@@ -1,81 +1,92 @@
 package cache
 
 import (
-	"sync"
+	"encoding/json"
 	"time"
 )
 
-// Store is the cache interface (plan: cache.Set, cache.Get, cache.Remember).
-type Store interface {
-	Set(key string, value any, ttl time.Duration) error
-	Get(key string) (any, bool)
-	Delete(key string) error
-	Remember(key string, ttl time.Duration, fn func() (any, error)) (any, error)
-}
-
-type item struct {
-	v   any
-	exp time.Time
-}
-
-// MemoryStore is an in-memory cache (driver: memory).
-type MemoryStore struct {
-	mu   sync.RWMutex
-	data map[string]item
-}
-
-// NewMemoryStore returns a new in-memory cache.
-func NewMemoryStore() *MemoryStore {
-	return &MemoryStore{data: make(map[string]item)}
-}
-
-// Set stores a value with optional TTL. Zero TTL = no expiry.
-func (m *MemoryStore) Set(key string, value any, ttl time.Duration) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	exp := time.Time{}
-	if ttl > 0 {
-		exp = time.Now().Add(ttl)
+// Set stores a value in the global cache. Uses default store if Boot was not called.
+func Set(key string, value any, ttl time.Duration) error {
+	s := GetGlobal()
+	if s == nil {
+		s = Default
 	}
-	m.data[key] = item{v: value, exp: exp}
-	return nil
+	return s.Set(key, value, ttl)
 }
 
-// Get returns the value and true if found and not expired.
-func (m *MemoryStore) Get(key string) (any, bool) {
-	m.mu.RLock()
-	it, ok := m.data[key]
-	m.mu.RUnlock()
-	if !ok {
-		return nil, false
+// Get returns a value from the global cache.
+func Get(key string) (any, bool) {
+	s := GetGlobal()
+	if s == nil {
+		s = Default
 	}
-	if !it.exp.IsZero() && time.Now().After(it.exp) {
-		m.Delete(key)
-		return nil, false
-	}
-	return it.v, true
+	return s.Get(key)
 }
 
-// Delete removes a key.
-func (m *MemoryStore) Delete(key string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	delete(m.data, key)
-	return nil
+// Delete removes a key from the global cache.
+func Delete(key string) error {
+	s := GetGlobal()
+	if s == nil {
+		s = Default
+	}
+	return s.Delete(key)
 }
 
-// Remember returns the cached value or calls fn, stores the result, and returns it.
-func (m *MemoryStore) Remember(key string, ttl time.Duration, fn func() (any, error)) (any, error) {
-	if v, ok := m.Get(key); ok {
-		return v, nil
+// Has returns true if the key exists in the cache.
+func Has(key string) bool {
+	_, ok := Get(key)
+	return ok
+}
+
+// Missing returns true if the key does not exist in the cache.
+func Missing(key string) bool {
+	return !Has(key)
+}
+
+// Pull retrieves a value and immediately deletes it. Useful for one-time-use data (e.g. flash messages).
+func Pull(key string) (any, bool) {
+	v, ok := Get(key)
+	if ok {
+		_ = Delete(key)
 	}
-	v, err := fn()
+	return v, ok
+}
+
+// SetForever stores a value that never expires (TTL = 0 is treated as no expiry for memory store).
+func SetForever(key string, value any) error {
+	return Set(key, value, 0)
+}
+
+// Remember gets from cache or calls fn, stores the result, and returns it.
+func Remember(key string, ttl time.Duration, fn func() (any, error)) (any, error) {
+	s := GetGlobal()
+	if s == nil {
+		s = Default
+	}
+	return s.Remember(key, ttl, fn)
+}
+
+// RememberT is a type-safe Remember. The callback returns T; the value is JSON-serialized for distributed stores.
+func RememberT[T any](key string, ttl time.Duration, fn func() (T, error)) (T, error) {
+	var zero T
+	v, err := Remember(key, ttl, func() (any, error) {
+		return fn()
+	})
 	if err != nil {
-		return nil, err
+		return zero, err
 	}
-	_ = m.Set(key, v, ttl)
-	return v, nil
+	if t, ok := v.(T); ok {
+		return t, nil
+	}
+	// For distributed stores, v may be map[string]any from JSON; try to unmarshal
+	if data, err := json.Marshal(v); err == nil {
+		var out T
+		if err := json.Unmarshal(data, &out); err == nil {
+			return out, nil
+		}
+	}
+	return zero, nil
 }
 
-// Default is the default in-memory store (for apps that don't need Redis).
+// Default is the fallback in-memory store when Boot was not called.
 var Default Store = NewMemoryStore()

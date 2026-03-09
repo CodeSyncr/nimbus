@@ -1,0 +1,32 @@
+@layout('telescope/layout')
+<div>
+  <h1 class="text-2xl font-bold t-text mb-2">Dashboard</h1>
+  <p class="t-text-muted mb-8">Insight into requests, exceptions, and more. Inspired by <a href="https://laravel.com/docs/telescope" target="_blank" rel="noopener" class="t-accent hover:opacity-80 transition">Laravel Telescope</a>.</p>
+
+  <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-8">
+    <a href="/telescope/requests" class="t-card rounded-xl p-6 hover:shadow-lg transition group">
+      <div class="text-3xl font-bold t-accent mb-2 group-hover:opacity-90">{{ .count }}</div>
+      <div class="t-text-muted text-sm">Recent entries</div>
+    </a>
+  </div>
+
+  <div class="t-card rounded-xl overflow-hidden">
+    <div class="px-5 py-4 border-b t-border t-bg-sidebar">
+      <h2 class="font-semibold t-text">Recent activity</h2>
+    </div>
+    <div class="t-divide">
+      @if(.empty)
+      <div class="px-5 py-12 text-center t-text-subtle">No entries yet. Make some requests to see them here.</div>
+      @else
+      @each(.entries)
+      <a href="{{ if eq .Type "request" }}/telescope/requests/{{ .ID }}{{ else }}/telescope{{ end }}" class="block px-5 py-4 flex items-center gap-4 t-hover transition">
+        <span class="text-xs font-medium px-2.5 py-1 rounded-full t-accent-bg t-accent shrink-0">{{ if index .Content "response_status" }}{{ index .Content "response_status" }}{{ else }}{{ .Type }}{{ end }}</span>
+        <span class="t-text-muted font-mono text-sm w-16 shrink-0">{{ index .Content "method" }}</span>
+        <span class="t-text font-mono text-sm break-all flex-1 min-w-0">{{ if index .Content "path" }}{{ index .Content "path" }}{{ else }}{{ if index .Content "sql" }}{{ index .Content "sql" }}{{ else }}{{ if index .Content "model" }}{{ index .Content "event" }} {{ index .Content "model" }}{{ else }}{{ index .Content "label" }}{{ index .Content "message" }}{{ index .Content "name" }}{{ end }}{{ end }}{{ end }}</span>
+        <span class="t-text-subtle text-sm shrink-0">{{ index .Content "duration_ms" }}ms{{ if index .Content "rows" }} · {{ index .Content "rows" }} rows{{ end }}</span>
+      </a>
+      @endeach
+      @endif
+    </div>
+  </div>
+</div>
