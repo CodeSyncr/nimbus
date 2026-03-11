@@ -1,0 +1,18 @@
+package validators
+
+import "github.com/CodeSyncr/nimbus/validation"
+
+// {{.ValidatorName}} validates request input using VineJS-style fluent rules.
+type {{.ValidatorName}} struct {
+	// Add fields matching your model or request payload.
+}
+
+// Rules returns the typed validation schema for this request.
+func (v *{{.ValidatorName}}) Rules() validation.Schema {
+	return validation.Schema{}
+}
+
+// Validate runs the schema rules and returns an error if validation fails.
+func (v *{{.ValidatorName}}) Validate() error {
+	return validation.ValidateStruct(v)
+}

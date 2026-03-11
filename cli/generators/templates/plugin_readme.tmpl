@@ -1,0 +1,55 @@
+# {{.PascalName}} Plugin
+
+> A Nimbus plugin.
+
+## Installation
+
+Register the plugin in `bin/server.go`:
+
+```go
+import "your-module/app/plugins/{{.PluginName}}"
+
+app.Use({{.PluginName}}.New())
+```
+
+## Configuration
+
+Set these in your `.env`:
+
+```env
+# {{.PluginName}} configuration
+# {{.UpperName}}_ENABLED=true
+```
+
+## Routes
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/{{.PluginName}}/status` | Plugin health check |
+
+## Events
+
+| Event | Description |
+|-------|-------------|
+| — | No events registered yet |
+
+## CLI Commands
+
+```bash
+nimbus {{.PluginName}}:status    # Show plugin status
+```
+
+## Folder Structure
+
+```
+app/plugins/{{.PluginName}}/
+├── plugin.go          # Core plugin, Register/Boot lifecycle
+├── config.go          # Configuration & defaults
+├── service.go         # Business logic & SDK wrapper
+├── routes.go          # HTTP route registration
+├── handlers.go        # HTTP handlers
+├── middleware.go       # Named middleware
+├── events.go          # Event listeners
+├── commands.go        # CLI commands
+└── README.md          # This file
+```

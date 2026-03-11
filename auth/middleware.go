@@ -1,9 +1,7 @@
 package auth
 
 import (
-	"net/http"
-
-	"github.com/CodeSyncr/nimbus/context"
+	"github.com/CodeSyncr/nimbus/http"
 	"github.com/CodeSyncr/nimbus/router"
 )
 
@@ -11,7 +9,7 @@ import (
 // If no user and redirectTo is non-empty, redirects; else returns 401.
 func RequireAuth(guard Guard, redirectTo string) router.Middleware {
 	return func(next router.HandlerFunc) router.HandlerFunc {
-		return func(c *context.Context) error {
+		return func(c *http.Context) error {
 			req := c.Request
 			user, err := guard.User(req.Context())
 			if err != nil {

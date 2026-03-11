@@ -1,0 +1,11 @@
+package seeders
+
+import "github.com/CodeSyncr/nimbus"
+
+// {{.SeederName}} seeds data. Add to database.NewSeedRunner(db, []database.Seeder{&{{.SeederName}}{}}).Run()
+type {{.SeederName}} struct{}
+
+func (s *{{.SeederName}}) Run(db *nimbus.DB) error {
+	// db.Create(&Model{...})
+	return nil
+}

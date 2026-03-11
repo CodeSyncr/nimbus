@@ -1,11 +1,11 @@
 package telescope
 
 import (
-	"net/http"
 	"os"
 	"strings"
 
-	reqctx "github.com/CodeSyncr/nimbus/context"
+	"github.com/CodeSyncr/nimbus/http"
+	"github.com/CodeSyncr/nimbus/metrics"
 	"github.com/CodeSyncr/nimbus/router"
 )
 
@@ -46,17 +46,24 @@ func (p *Plugin) viewData(watcher string) map[string]any {
 	return map[string]any{"watcher": watcher}
 }
 
-func (p *Plugin) dashboardHandler(c *reqctx.Context) error {
+func (p *Plugin) dashboardHandler(c *http.Context) error {
 	entries := p.store.All(20)
 	data := p.viewData("dashboard")
 	data["entries"] = entries
 	data["count"] = len(entries)
 	data["empty"] = len(entries) == 0
 	data["path"] = "/telescope"
+	// Flatten runtime stats into a map so templates can use index with string keys.
+	rs := metrics.ReadRuntimeStats()
+	data["runtime"] = map[string]any{
+		"goroutines": rs.Goroutines,
+		"num_gc":     rs.NumGC,
+		"heap_alloc": rs.HeapAlloc,
+	}
 	return c.View("telescope/dashboard", data)
 }
 
-func (p *Plugin) requestsHandler(c *reqctx.Context) error {
+func (p *Plugin) requestsHandler(c *http.Context) error {
 	entries := p.store.Entries(EntryRequest, 50)
 	data := p.viewData("requests")
 	data["entries"] = entries
@@ -64,7 +71,7 @@ func (p *Plugin) requestsHandler(c *reqctx.Context) error {
 	return c.View("telescope/requests", data)
 }
 
-func (p *Plugin) requestDetailHandler(c *reqctx.Context) error {
+func (p *Plugin) requestDetailHandler(c *http.Context) error {
 	id := c.Param("id")
 	entry := p.store.Get(id)
 	if entry == nil {
@@ -79,42 +86,42 @@ func (p *Plugin) requestDetailHandler(c *reqctx.Context) error {
 	return c.View("telescope/request-detail", data)
 }
 
-func (p *Plugin) commandsHandler(c *reqctx.Context) error {
+func (p *Plugin) commandsHandler(c *http.Context) error {
 	data := p.viewData("commands")
 	data["title"] = "Commands"
 	data["message"] = "CLI command watcher. Records nimbus make:*, db:migrate, etc. Coming soon."
 	return c.View("telescope/placeholder", data)
 }
 
-func (p *Plugin) scheduleHandler(c *reqctx.Context) error {
+func (p *Plugin) scheduleHandler(c *http.Context) error {
 	data := p.viewData("schedule")
 	data["title"] = "Schedule"
 	data["message"] = "Scheduled task watcher. Coming soon."
 	return c.View("telescope/placeholder", data)
 }
 
-func (p *Plugin) jobsHandler(c *reqctx.Context) error {
+func (p *Plugin) jobsHandler(c *http.Context) error {
 	data := p.viewData("jobs")
 	data["title"] = "Jobs"
 	data["message"] = "Queued job watcher. Coming soon."
 	return c.View("telescope/placeholder", data)
 }
 
-func (p *Plugin) batchesHandler(c *reqctx.Context) error {
+func (p *Plugin) batchesHandler(c *http.Context) error {
 	data := p.viewData("batches")
 	data["title"] = "Batches"
 	data["message"] = "Job batch watcher. Coming soon."
 	return c.View("telescope/placeholder", data)
 }
 
-func (p *Plugin) cacheHandler(c *reqctx.Context) error {
+func (p *Plugin) cacheHandler(c *http.Context) error {
 	data := p.viewData("cache")
 	data["title"] = "Cache"
 	data["message"] = "Cache operation watcher (get, set, delete). Coming soon."
 	return c.View("telescope/placeholder", data)
 }
 
-func (p *Plugin) dumpsHandler(c *reqctx.Context) error {
+func (p *Plugin) dumpsHandler(c *http.Context) error {
 	entries := p.store.Entries(EntryDump, 50)
 	data := p.viewData("dumps")
 	data["entries"] = entries
@@ -123,14 +130,14 @@ func (p *Plugin) dumpsHandler(c *reqctx.Context) error {
 	return c.View("telescope/dumps", data)
 }
 
-func (p *Plugin) eventsHandler(c *reqctx.Context) error {
+func (p *Plugin) eventsHandler(c *http.Context) error {
 	data := p.viewData("events")
 	data["title"] = "Events"
 	data["message"] = "Event dispatcher watcher. Coming soon."
 	return c.View("telescope/placeholder", data)
 }
 
-func (p *Plugin) exceptionsHandler(c *reqctx.Context) error {
+func (p *Plugin) exceptionsHandler(c *http.Context) error {
 	entries := p.store.Entries(EntryException, 50)
 	data := p.viewData("exceptions")
 	data["entries"] = entries
@@ -138,21 +145,21 @@ func (p *Plugin) exceptionsHandler(c *reqctx.Context) error {
 	return c.View("telescope/exceptions", data)
 }
 
-func (p *Plugin) gatesHandler(c *reqctx.Context) error {
+func (p *Plugin) gatesHandler(c *http.Context) error {
 	data := p.viewData("gates")
 	data["title"] = "Gates"
 	data["message"] = "Authorization gate watcher. Coming soon."
 	return c.View("telescope/placeholder", data)
 }
 
-func (p *Plugin) httpClientHandler(c *reqctx.Context) error {
+func (p *Plugin) httpClientHandler(c *http.Context) error {
 	data := p.viewData("http_client")
 	data["title"] = "HTTP Client"
 	data["message"] = "Outgoing HTTP request watcher. Coming soon."
 	return c.View("telescope/placeholder", data)
 }
 
-func (p *Plugin) logsHandler(c *reqctx.Context) error {
+func (p *Plugin) logsHandler(c *http.Context) error {
 	entries := p.store.Entries(EntryLog, 50)
 	data := p.viewData("logs")
 	data["entries"] = entries
@@ -160,14 +167,14 @@ func (p *Plugin) logsHandler(c *reqctx.Context) error {
 	return c.View("telescope/logs", data)
 }
 
-func (p *Plugin) mailHandler(c *reqctx.Context) error {
+func (p *Plugin) mailHandler(c *http.Context) error {
 	data := p.viewData("mail")
 	data["title"] = "Mail"
 	data["message"] = "Mail watcher. Coming soon."
 	return c.View("telescope/placeholder", data)
 }
 
-func (p *Plugin) modelsHandler(c *reqctx.Context) error {
+func (p *Plugin) modelsHandler(c *http.Context) error {
 	entries := p.store.Entries(EntryModel, 50)
 	data := p.viewData("models")
 	data["entries"] = entries
@@ -176,14 +183,14 @@ func (p *Plugin) modelsHandler(c *reqctx.Context) error {
 	return c.View("telescope/models", data)
 }
 
-func (p *Plugin) notificationsHandler(c *reqctx.Context) error {
+func (p *Plugin) notificationsHandler(c *http.Context) error {
 	data := p.viewData("notifications")
 	data["title"] = "Notifications"
 	data["message"] = "Notification watcher. Coming soon."
 	return c.View("telescope/placeholder", data)
 }
 
-func (p *Plugin) queriesHandler(c *reqctx.Context) error {
+func (p *Plugin) queriesHandler(c *http.Context) error {
 	entries := p.store.Entries(EntryQuery, 50)
 	data := p.viewData("queries")
 	data["entries"] = entries
@@ -191,14 +198,14 @@ func (p *Plugin) queriesHandler(c *reqctx.Context) error {
 	return c.View("telescope/queries", data)
 }
 
-func (p *Plugin) redisHandler(c *reqctx.Context) error {
+func (p *Plugin) redisHandler(c *http.Context) error {
 	data := p.viewData("redis")
 	data["title"] = "Redis"
 	data["message"] = "Redis command watcher. Coming soon."
 	return c.View("telescope/placeholder", data)
 }
 
-func (p *Plugin) viewsHandler(c *reqctx.Context) error {
+func (p *Plugin) viewsHandler(c *http.Context) error {
 	entries := p.store.Entries(EntryView, 50)
 	data := p.viewData("views")
 	data["entries"] = entries
@@ -207,7 +214,7 @@ func (p *Plugin) viewsHandler(c *reqctx.Context) error {
 	return c.View("telescope/views", data)
 }
 
-func (p *Plugin) clearHandler(c *reqctx.Context) error {
+func (p *Plugin) clearHandler(c *http.Context) error {
 	p.store.Clear()
 	if strings.Contains(c.Request.Header.Get("Accept"), "text/html") {
 		c.Redirect(http.StatusSeeOther, "/telescope")

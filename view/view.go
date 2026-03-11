@@ -367,7 +367,10 @@ func escapeTemplateLiterals(s string) string {
 	return strings.ReplaceAll(s, rightPlaceholder, `{{"}}"}}`)
 }
 
-// Default engine (root "views"). Set via SetRoot or use New in app.
+// Default engine. By convention new apps use "resources/views" as the root
+// (mirroring AdonisJS), but older apps may still use a top-level "views"
+// directory. The init logic below prefers "resources/views" when it exists,
+// otherwise falls back to "views".
 var Default *Engine
 
 var (
@@ -376,7 +379,18 @@ var (
 )
 
 func init() {
-	Default = New("views", nil)
+	// Prefer the modern resources/views convention when present.
+	if _, err := os.Stat("resources/views"); err == nil {
+		Default = New("resources/views", nil)
+		return
+	}
+	// Backwards-compatible fallback for apps that still use views/ at root.
+	if _, err := os.Stat("views"); err == nil {
+		Default = New("views", nil)
+		return
+	}
+	// If neither exists yet (e.g. during early tooling), default to resources/views.
+	Default = New("resources/views", nil)
 }
 
 // SetRoot sets the default engine root and clears cache.

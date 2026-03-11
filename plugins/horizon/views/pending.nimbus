@@ -1,0 +1,35 @@
+@layout('horizon/layout')
+<div class="space-y-8">
+  <p class="t-text-muted text-sm max-w-2xl">
+    Jobs waiting in queues. Counts are from in-memory stats since last boot.
+  </p>
+  <div class="t-card rounded-xl overflow-hidden">
+    <div class="px-5 py-4 border-b t-border t-bg-sidebar">
+      <span class="font-medium t-text">Pending by queue</span>
+    </div>
+    <div class="divide-y t-divide">
+      @if(.hasQueues)
+      <div class="px-5 py-3 text-xs font-semibold t-text-subtle grid grid-cols-5 gap-4">
+        <div>Queue</div>
+        <div class="text-right">Dispatched</div>
+        <div class="text-right">Processed</div>
+        <div class="text-right">Pending (approx)</div>
+        <div class="text-right">Last activity</div>
+      </div>
+      @each(.queues)
+      <div class="px-5 py-3 grid grid-cols-5 gap-4 items-center text-sm">
+        <div class="t-text font-mono">{{ index . "name" }}</div>
+        <div class="text-right t-text">{{ index . "dispatched" }}</div>
+        <div class="text-right t-text">{{ index . "processed" }}</div>
+        <div class="text-right t-text">—</div>
+        <div class="text-right t-text-subtle text-xs">
+          {{ if index . "last_dispatched" }}{{ index . "last_dispatched" }}{{ else }}—{{ end }}
+        </div>
+      </div>
+      @endeach
+      @else
+      <div class="px-5 py-12 text-center t-text-subtle text-sm">No queues with activity yet.</div>
+      @endif
+    </div>
+  </div>
+</div>

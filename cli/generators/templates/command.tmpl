@@ -1,0 +1,31 @@
+package commands
+
+import (
+	"fmt"
+
+	"github.com/CodeSyncr/nimbus/cli"
+	"github.com/spf13/cobra"
+)
+
+func init() {
+	cli.RegisterCommand(&{{.CommandName}}{})
+}
+
+type {{.CommandName}} struct{}
+
+func (c *{{.CommandName}}) Name() string        { return "{{.FullName}}" }
+func (c *{{.CommandName}}) Description() string { return "Describe what this command does" }
+
+func (c *{{.CommandName}}) Register(root *cli.Root) {
+	cmd := &cobra.Command{
+		Use:   "{{.FullName}}",
+		Short: c.Description(),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := cli.NewContext(cmd, args)
+			ctx.UI.Infof("Hello from {{.FullName}}")
+			return nil
+		},
+	}
+	root.AddCommand(cmd)
+}
+

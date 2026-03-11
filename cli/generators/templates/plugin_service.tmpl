@@ -1,0 +1,29 @@
+package {{.PluginName}}
+
+// ── Service ─────────────────────────────────────────────────────
+// Core business logic for the {{.PascalName}} plugin.
+// This is where you initialise SDK clients, API wrappers,
+// or any service the rest of the app can use.
+//
+// Register it in plugin.go → Register() using app.Container:
+//
+//	app.Container.Singleton("{{.PluginName}}", func() (*Service, error) {
+//	    return NewService(cfg), nil
+//	})
+//
+// Then resolve it anywhere:
+//
+//	svc := app.Container.MustMake("{{.PluginName}}").(*{{.PluginName}}.Service)
+
+// Service wraps the {{.PascalName}} SDK / client.
+type Service struct {
+	// apiKey string
+	// client *SomeSDK
+}
+
+// NewService creates a new {{.PascalName}} service.
+func NewService() *Service {
+	return &Service{}
+}
+
+// Add methods on Service to wrap your SDK calls…

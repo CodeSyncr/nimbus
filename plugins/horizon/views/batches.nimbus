@@ -1,0 +1,11 @@
+@layout('horizon/layout')
+<div class="space-y-8">
+  <p class="t-text-muted text-sm max-w-2xl">
+    Batch job monitoring. Track batch progress and completion.
+  </p>
+  <div class="t-card rounded-xl p-12 text-center t-text-subtle">
+    <svg class="w-12 h-12 mx-auto mb-4 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012 2h6a2 2 0 012 2v2M7 7h10"/></svg>
+    <p class="font-medium t-text mb-1">Batches</p>
+    <p class="text-sm">Batch monitoring will be available in a future release.</p>
+  </div>
+</div>

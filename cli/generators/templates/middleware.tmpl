@@ -1,0 +1,18 @@
+package middleware
+
+import (
+	"github.com/CodeSyncr/nimbus/http"
+	"github.com/CodeSyncr/nimbus/router"
+)
+
+// {{.MiddlewareName}} returns a middleware that runs before the handler.
+func {{.MiddlewareName}}() router.Middleware {
+	return func(next router.HandlerFunc) router.HandlerFunc {
+		return func(c *http.Context) error {
+			// Before handler
+			err := next(c)
+			// After handler
+			return err
+		}
+	}
+}

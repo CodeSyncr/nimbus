@@ -1,9 +1,7 @@
 package router
 
 import (
-	"net/http"
-
-	"github.com/CodeSyncr/nimbus/context"
+	"github.com/CodeSyncr/nimbus/http"
 )
 
 // ResourceController defines the 7 RESTful actions for a resource.
@@ -11,13 +9,13 @@ import (
 //
 //	app.Router.Resource("posts", &PostsController{})
 type ResourceController interface {
-	Index(c *context.Context) error   // GET    /posts
-	Create(c *context.Context) error  // GET    /posts/create
-	Store(c *context.Context) error   // POST   /posts
-	Show(c *context.Context) error    // GET    /posts/:id
-	Edit(c *context.Context) error    // GET    /posts/:id/edit
-	Update(c *context.Context) error  // PUT    /posts/:id
-	Destroy(c *context.Context) error // DELETE /posts/:id
+	Index(c *http.Context) error   // GET    /posts
+	Create(c *http.Context) error  // GET    /posts/create
+	Store(c *http.Context) error   // POST   /posts
+	Show(c *http.Context) error    // GET    /posts/:id
+	Edit(c *http.Context) error    // GET    /posts/:id/edit
+	Update(c *http.Context) error  // PUT    /posts/:id
+	Destroy(c *http.Context) error // DELETE /posts/:id
 }
 
 // ResourceOption configures which actions to register.
@@ -69,9 +67,9 @@ func (cfg *resourceConfig) shouldRegister(action string) bool {
 }
 
 type resourceAction struct {
-	action  string
-	method  string
-	suffix  string
+	action string
+	method string
+	suffix string
 }
 
 var allResourceActions = []resourceAction{

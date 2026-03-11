@@ -12,7 +12,10 @@ type Task struct {
 	Run      func(ctx context.Context) error
 }
 
-// Scheduler runs tasks at intervals.
+// Scheduler runs in-process tasks at fixed intervals. It is lightweight and
+// well-suited for maintenance jobs that do not need the durability and
+// visibility of the queue system (for those, prefer the queue Scheduler plus
+// workers).
 type Scheduler struct {
 	mu    sync.Mutex
 	tasks []Task
@@ -50,6 +53,15 @@ func (s *Scheduler) Weekly(fn func(context.Context) error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.tasks = append(s.tasks, Task{Interval: 7 * 24 * time.Hour, Run: fn})
+}
+
+// Tasks returns a snapshot of registered tasks.
+func (s *Scheduler) Tasks() []Task {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]Task, len(s.tasks))
+	copy(out, s.tasks)
+	return out
 }
 
 // Run starts the scheduler (blocks until Stop). Call in a goroutine.

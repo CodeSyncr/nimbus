@@ -1,0 +1,61 @@
+@layout('horizon/layout')
+<div class="space-y-8">
+  <p class="t-text-muted text-sm max-w-2xl">
+    Overview of your queue system. Use the sidebar to open Monitoring, Metrics, Pending and Completed jobs, and Failed jobs.
+  </p>
+
+  <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+    <div class="t-card rounded-xl p-6 border-l-4 border-l-indigo-500 dark:border-l-indigo-400">
+      <div class="flex items-center gap-3">
+        <span class="flex items-center justify-center w-10 h-10 rounded-lg bg-indigo-500/10 dark:bg-indigo-400/10">
+          <svg class="w-5 h-5 t-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .843-3 1.885V11h6v-1.115C15 8.843 13.657 8 12 8z"/></svg>
+        </span>
+        <div>
+          <div class="text-xs font-medium uppercase t-text-subtle">Dispatched</div>
+          <div class="text-2xl font-bold t-text">{{ index .stats "total_dispatched" }}</div>
+        </div>
+      </div>
+    </div>
+    <div class="t-card rounded-xl p-6 border-l-4 border-l-emerald-500 dark:border-l-emerald-400">
+      <div class="flex items-center gap-3">
+        <span class="flex items-center justify-center w-10 h-10 rounded-lg bg-emerald-500/10 dark:bg-emerald-400/10">
+          <svg class="w-5 h-5 text-emerald-600 dark:text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        </span>
+        <div>
+          <div class="text-xs font-medium uppercase t-text-subtle">Processed</div>
+          <div class="text-2xl font-bold t-text">{{ index .stats "total_processed" }}</div>
+        </div>
+      </div>
+    </div>
+    <div class="t-card rounded-xl p-6 border-l-4 {{ if .hasFailed }}border-l-red-500 dark:border-l-red-400{{ else }}border-l-slate-300 dark:border-l-slate-600{{ end }}">
+      <div class="flex items-center gap-3">
+        <span class="flex items-center justify-center w-10 h-10 rounded-lg {{ if .hasFailed }}bg-red-500/10 dark:bg-red-400/10{{ else }}bg-slate-200/50 dark:bg-slate-600/30{{ end }}">
+          <svg class="w-5 h-5 {{ if .hasFailed }}text-red-600 dark:text-red-400{{ else }}t-text-subtle{{ end }}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        </span>
+        <div>
+          <div class="text-xs font-medium uppercase t-text-subtle">Failed</div>
+          <div class="text-2xl font-bold {{ if .hasFailed }}text-red-600 dark:text-red-400{{ else }}t-text{{ end }}">{{ index .stats "total_failed" }}</div>
+        </div>
+      </div>
+    </div>
+    <div class="t-card rounded-xl p-6 border-l-4 border-l-amber-500 dark:border-l-amber-400">
+      <div class="flex items-center gap-3">
+        <span class="flex items-center justify-center w-10 h-10 rounded-lg bg-amber-500/10 dark:bg-amber-400/10">
+          <svg class="w-5 h-5 text-amber-600 dark:text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        </span>
+        <div>
+          <div class="text-xs font-medium uppercase t-text-subtle">Started</div>
+          <div class="text-sm font-medium t-text">{{ index .stats "started_at" }}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="t-card rounded-xl p-6 t-text-muted text-sm">
+    <strong class="t-text">Quick links:</strong>
+    <a href="{{ .horizonPath }}/monitoring" class="t-accent hover:underline ml-2">Monitoring</a>,
+    <a href="{{ .horizonPath }}/metrics" class="t-accent hover:underline ml-1">Metrics</a>,
+    <a href="{{ .horizonPath }}/pending" class="t-accent hover:underline ml-1">Pending jobs</a>,
+    <a href="{{ .horizonPath }}/failed" class="t-accent hover:underline ml-1">Failed jobs</a>
+  </div>
+</div>

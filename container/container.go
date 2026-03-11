@@ -111,3 +111,23 @@ func (c *Container) MustMake(name string) any {
 	}
 	return v
 }
+
+// Instance registers a pre-built value directly (no constructor).
+// Subsequent Make calls return this exact value.
+//
+//	c.Instance("stripe", stripeClient)
+func (c *Container) Instance(name string, value any) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.bindings[name] = func() any { return value }
+	c.singletons[name] = value
+	c.singletonOk[name] = true
+}
+
+// Has returns true if a binding exists for the given name.
+func (c *Container) Has(name string) bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	_, ok := c.bindings[name]
+	return ok
+}

@@ -1,13 +1,16 @@
 package database
 
 import (
+	"database/sql"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 const (
@@ -35,7 +38,11 @@ type Migrator struct {
 
 // NewMigrator creates a migrator with the given migrations.
 func NewMigrator(db *gorm.DB, migrations []Migration) *Migrator {
-	m := &Migrator{db: db, run: migrations}
+	// Use a quiet logger so nimbus db:migrate does not spam low-level SQL logs.
+	quietDB := db.Session(&gorm.Session{
+		Logger: logger.Default.LogMode(logger.Error),
+	})
+	m := &Migrator{db: quietDB, run: migrations}
 	m.sorted = make([]Migration, len(migrations))
 	copy(m.sorted, migrations)
 	sort.Slice(m.sorted, func(i, j int) bool { return m.sorted[i].Name < m.sorted[j].Name })
@@ -43,7 +50,29 @@ func NewMigrator(db *gorm.DB, migrations []Migration) *Migrator {
 }
 
 func (m *Migrator) ensureSchemaMigrations() error {
-	return m.db.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (name TEXT PRIMARY KEY)`).Error
+	switch m.db.Dialector.Name() {
+	case "postgres":
+		return m.db.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
+			id BIGSERIAL PRIMARY KEY,
+			name TEXT UNIQUE,
+			batch INT NOT NULL,
+			migration_time TIMESTAMP NOT NULL
+		)`).Error
+	case "mysql":
+		return m.db.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
+			id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+			name VARCHAR(255) UNIQUE,
+			batch INT NOT NULL,
+			migration_time TIMESTAMP NOT NULL
+		)`).Error
+	default: // sqlite and others
+		return m.db.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			name TEXT UNIQUE,
+			batch INT NOT NULL,
+			migration_time DATETIME NOT NULL
+		)`).Error
+	}
 }
 
 func (m *Migrator) isMigrated(name string) (bool, error) {
@@ -52,14 +81,35 @@ func (m *Migrator) isMigrated(name string) (bool, error) {
 	return count > 0, err
 }
 
-func (m *Migrator) recordMigration(name string) error {
-	return m.db.Exec("INSERT INTO schema_migrations (name) VALUES (?)", name).Error
+func (m *Migrator) recordMigration(name string, batch int) error {
+	return m.db.Exec(
+		"INSERT INTO schema_migrations (name, batch, migration_time) VALUES (?, ?, ?)",
+		name,
+		batch,
+		time.Now().UTC(),
+	).Error
+}
+
+// nextBatch returns the next batch number (max(batch)+1), starting from 1.
+func (m *Migrator) nextBatch() (int, error) {
+	var maxBatch sql.NullInt64
+	if err := m.db.Raw("SELECT MAX(batch) FROM schema_migrations").Scan(&maxBatch).Error; err != nil {
+		return 0, err
+	}
+	if !maxBatch.Valid {
+		return 1, nil
+	}
+	return int(maxBatch.Int64) + 1, nil
 }
 
 // Up runs all pending migrations.
 func (m *Migrator) Up() error {
 	if err := m.ensureSchemaMigrations(); err != nil {
 		return fmt.Errorf("schema_migrations: %w", err)
+	}
+	batch, err := m.nextBatch()
+	if err != nil {
+		return fmt.Errorf("schema_migrations batch: %w", err)
 	}
 	for _, mig := range m.sorted {
 		done, err := m.isMigrated(mig.Name)
@@ -74,7 +124,7 @@ func (m *Migrator) Up() error {
 			fmt.Fprintf(os.Stdout, "  %s %s%s failed%s\n", mig.Name, colorRed, crossMark, colorReset)
 			return fmt.Errorf("migration %s: %w", mig.Name, err)
 		}
-		if err := m.recordMigration(mig.Name); err != nil {
+		if err := m.recordMigration(mig.Name, batch); err != nil {
 			return fmt.Errorf("record migration %s: %w", mig.Name, err)
 		}
 		fmt.Fprintf(os.Stdout, "  %s %s%s completed%s\n", mig.Name, colorGreen, checkMark, colorReset)
@@ -82,13 +132,52 @@ func (m *Migrator) Up() error {
 	return nil
 }
 
-// Down runs the last migration's Down.
+// Down rolls back the last batch of migrations (Laravel/Adonis-style).
 func (m *Migrator) Down() error {
-	if len(m.sorted) == 0 {
+	if err := m.ensureSchemaMigrations(); err != nil {
+		return fmt.Errorf("schema_migrations: %w", err)
+	}
+
+	// Find last batch number.
+	var maxBatch sql.NullInt64
+	if err := m.db.Raw("SELECT MAX(batch) FROM schema_migrations").Scan(&maxBatch).Error; err != nil {
+		return fmt.Errorf("schema_migrations batch: %w", err)
+	}
+	if !maxBatch.Valid {
+		// Nothing to rollback.
 		return nil
 	}
-	last := m.sorted[len(m.sorted)-1]
-	return last.Down(m.db)
+
+	// Load migration names in this batch, most recent first.
+	var applied []string
+	if err := m.db.Raw("SELECT name FROM schema_migrations WHERE batch = ? ORDER BY id DESC", maxBatch.Int64).Scan(&applied).Error; err != nil {
+		return fmt.Errorf("schema_migrations names: %w", err)
+	}
+	if len(applied) == 0 {
+		return nil
+	}
+
+	// Map migration name -> Migration for quick lookup.
+	migMap := make(map[string]Migration, len(m.sorted))
+	for _, mig := range m.sorted {
+		migMap[mig.Name] = mig
+	}
+
+	for _, name := range applied {
+		mig, ok := migMap[name]
+		if !ok || mig.Down == nil {
+			// No matching migration in code; skip but keep row so we don't lose history.
+			continue
+		}
+		if err := mig.Down(m.db); err != nil {
+			return fmt.Errorf("rollback %s: %w", name, err)
+		}
+		if err := m.db.Exec("DELETE FROM schema_migrations WHERE name = ?", name).Error; err != nil {
+			return fmt.Errorf("delete schema_migration %s: %w", name, err)
+		}
+		fmt.Fprintf(os.Stdout, "  %s %srolled back%s\n", name, colorYellow, colorReset)
+	}
+	return nil
 }
 
 // RunMigrationsFromDir discovers Go files in dir and runs Up on a migrator.

@@ -1,0 +1,29 @@
+package {{.PluginName}}
+
+import "github.com/CodeSyncr/nimbus/cli"
+
+// ── CLI Commands ────────────────────────────────────────────────
+// Declare CLI commands here. They are registered automatically
+// when the plugin implements nimbus.HasCommands.
+//
+// Uncomment the HasCommands check in plugin.go to enable.
+//
+// Usage:  nimbus {{.PluginName}}:status
+
+// func (p *{{.PascalName}}Plugin) Commands() []cli.Command {
+// 	return []cli.Command{
+// 		&StatusCommand{plugin: p},
+// 	}
+// }
+
+// StatusCommand is an example CLI command for the {{.PascalName}} plugin.
+type StatusCommand struct {
+	plugin *{{.PascalName}}Plugin
+}
+
+func (c *StatusCommand) Name() string        { return "{{.PluginName}}:status" }
+func (c *StatusCommand) Description() string { return "Show {{.PascalName}} plugin status" }
+func (c *StatusCommand) Run(ctx *cli.Context) error {
+	ctx.UI.Successf("%s v%s is running", c.plugin.Name(), c.plugin.Version())
+	return nil
+}

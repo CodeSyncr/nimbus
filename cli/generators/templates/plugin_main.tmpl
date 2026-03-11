@@ -1,0 +1,32 @@
+package {{.PluginName}}
+
+import "github.com/CodeSyncr/nimbus"
+
+// Compile-time interface checks.
+var (
+	_ nimbus.Plugin        = (*{{.PascalName}}Plugin)(nil)
+	_ nimbus.HasRoutes     = (*{{.PascalName}}Plugin)(nil)
+	_ nimbus.HasMiddleware = (*{{.PascalName}}Plugin)(nil)
+	_ nimbus.HasConfig     = (*{{.PascalName}}Plugin)(nil)
+	// Uncomment to enable:
+	// _ nimbus.HasBindings     = (*{{.PascalName}}Plugin)(nil)
+	// _ nimbus.HasCommands     = (*{{.PascalName}}Plugin)(nil)
+	// _ nimbus.HasSchedule     = (*{{.PascalName}}Plugin)(nil)
+	// _ nimbus.HasEvents       = (*{{.PascalName}}Plugin)(nil)
+	// _ nimbus.HasHealthChecks = (*{{.PascalName}}Plugin)(nil)
+)
+
+// {{.PascalName}}Plugin is a Nimbus plugin.
+type {{.PascalName}}Plugin struct {
+	nimbus.BasePlugin
+}
+
+// New creates a new {{.PascalName}}Plugin instance.
+func New() *{{.PascalName}}Plugin {
+	return &{{.PascalName}}Plugin{
+		BasePlugin: nimbus.BasePlugin{
+			PluginName:    "{{.PluginName}}",
+			PluginVersion: "0.1.0",
+		},
+	}
+}

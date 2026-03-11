@@ -1,0 +1,46 @@
+@layout('horizon/layout')
+<div class="space-y-8">
+  <p class="t-text-muted text-sm max-w-2xl">
+    Key metrics for your queues. Raw JSON is available for API or polling.
+  </p>
+
+  <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+    <div class="t-card rounded-xl p-6">
+      <div class="text-xs font-semibold uppercase t-text-subtle mb-1">Total dispatched</div>
+      <div class="text-2xl font-bold t-text">{{ index .stats "total_dispatched" }}</div>
+    </div>
+    <div class="t-card rounded-xl p-6">
+      <div class="text-xs font-semibold uppercase t-text-subtle mb-1">Total processed</div>
+      <div class="text-2xl font-bold t-text">{{ index .stats "total_processed" }}</div>
+    </div>
+    <div class="t-card rounded-xl p-6">
+      <div class="text-xs font-semibold uppercase t-text-subtle mb-1">Total failed</div>
+      <div class="text-2xl font-bold {{ if index .stats "total_failed" }}text-red-600 dark:text-red-400{{ else }}t-text{{ end }}">{{ index .stats "total_failed" }}</div>
+    </div>
+    <div class="t-card rounded-xl p-6">
+      <div class="text-xs font-semibold uppercase t-text-subtle mb-1">Started at</div>
+      <div class="text-sm t-text">{{ index .stats "started_at" }}</div>
+    </div>
+  </div>
+
+  <div class="t-card rounded-xl p-6">
+    <h3 class="font-medium t-text mb-3">Per-queue metrics</h3>
+    @if(.hasQueues)
+    <div class="space-y-3">
+      @each(.queues)
+      <div class="flex items-center justify-between py-2 border-b t-border last:border-0">
+        <span class="font-mono text-sm t-text">{{ index . "name" }}</span>
+        <span class="text-sm t-text-subtle">dispatched {{ index . "dispatched" }} · processed {{ index . "processed" }} · failed {{ index . "failed" }}</span>
+      </div>
+      @endeach
+    </div>
+    @else
+    <p class="t-text-subtle text-sm">No queue activity yet.</p>
+    @endif
+  </div>
+
+  <div class="t-card rounded-xl p-4 t-text-muted text-sm flex items-center justify-between">
+    <span>Get raw metrics as JSON for API or dashboards</span>
+    <a href="{{ .horizonPath }}/api/metrics" target="_blank" rel="noopener" class="t-accent hover:underline font-medium">Open API →</a>
+  </div>
+</div>

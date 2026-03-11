@@ -3,11 +3,10 @@ package telescope
 import (
 	"bytes"
 	"io"
-	"net/http"
 	"strings"
 	"time"
 
-	reqctx "github.com/CodeSyncr/nimbus/context"
+	"github.com/CodeSyncr/nimbus/http"
 	"github.com/CodeSyncr/nimbus/router"
 )
 
@@ -45,7 +44,7 @@ func (r *responseRecorder) Write(b []byte) (int, error) {
 // RequestWatcher returns middleware that records HTTP requests.
 func (p *Plugin) RequestWatcher() router.Middleware {
 	return func(next router.HandlerFunc) router.HandlerFunc {
-		return func(c *reqctx.Context) error {
+		return func(c *http.Context) error {
 			// Skip telescope's own routes
 			if strings.HasPrefix(c.Request.URL.Path, "/telescope") {
 				return next(c)

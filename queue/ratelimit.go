@@ -72,4 +72,3 @@ func (r *RateLimitAdapter) Complete(ctx context.Context, payload *JobPayload) er
 }
 
 var _ Adapter = (*RateLimitAdapter)(nil)
-var _ CompletableAdapter = (*RateLimitAdapter)(nil)

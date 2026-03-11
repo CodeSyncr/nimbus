@@ -1,0 +1,76 @@
+package controllers
+
+import (
+	"github.com/CodeSyncr/nimbus"
+	"github.com/CodeSyncr/nimbus/auth"
+	"github.com/CodeSyncr/nimbus/http"
+
+	"{{.Module}}/app/models"
+)
+
+// AuthController handles login, register, logout. Wire DB and Guard in routes.
+type AuthController struct {
+	DB    *nimbus.DB
+	Guard auth.Guard
+}
+
+// LoginForm shows the login page.
+func (c *AuthController) LoginForm(ctx *http.Context) error {
+	return ctx.View("auth/login", map[string]any{"title": "Login"})
+}
+
+// Login processes login. POST /login with email, password.
+func (c *AuthController) Login(ctx *http.Context) error {
+	email := ctx.Request.FormValue("email")
+	password := ctx.Request.FormValue("password")
+	if email == "" || password == "" {
+		return ctx.View("auth/login", map[string]any{"error": "Email and password required"})
+	}
+	var u models.User
+	if err := c.DB.Where("email = ?", email).First(&u).Error; err != nil {
+		return ctx.View("auth/login", map[string]any{"error": "Invalid credentials"})
+	}
+	if !u.CheckPassword(password) {
+		return ctx.View("auth/login", map[string]any{"error": "Invalid credentials"})
+	}
+	if c.Guard != nil {
+		_ = c.Guard.Login(ctx.Request.Context(), &u)
+	}
+	ctx.Redirect(http.StatusFound, "/")
+	return nil
+}
+
+// RegisterForm shows the register page.
+func (c *AuthController) RegisterForm(ctx *http.Context) error {
+	return ctx.View("auth/register", map[string]any{"title": "Register"})
+}
+
+// Register processes registration.
+func (c *AuthController) Register(ctx *http.Context) error {
+	email := ctx.Request.FormValue("email")
+	password := ctx.Request.FormValue("password")
+	if email == "" || password == "" {
+		return ctx.View("auth/register", map[string]any{"error": "Email and password required"})
+	}
+	u := models.User{Email: email}
+	if err := u.SetPassword(password); err != nil {
+		return ctx.View("auth/register", map[string]any{"error": "Failed to hash password"})
+	}
+	if err := c.DB.Create(&u).Error; err != nil {
+		return ctx.View("auth/register", map[string]any{"error": "Email already exists"})
+	}
+	if c.Guard != nil {
+		_ = c.Guard.Login(ctx.Request.Context(), &u)
+	}
+	ctx.Redirect(http.StatusFound, "/")
+	return nil
+}
+
+// Logout logs the user out.
+func (c *AuthController) Logout(ctx *http.Context) error {
+	if c.Guard != nil {
+		_ = c.Guard.Logout(ctx.Request.Context())
+	}
+	ctx.Redirect(http.StatusFound, "/login")
+	return nil
+}

@@ -1,0 +1,24 @@
+package migrations
+
+import (
+	"github.com/CodeSyncr/nimbus"
+	"github.com/CodeSyncr/nimbus/database/schema"
+)
+
+// {{.SchemaName}} migration.
+type {{.SchemaName}} struct {
+	schema.BaseSchema
+}
+
+func (m *{{.SchemaName}}) TableName() string { return "{{.MigrationName}}" }
+
+func (m *{{.SchemaName}}) Up(db *nimbus.DB) error {
+	return schema.New(db).CreateTable("{{.TableName}}", func(table *schema.Table) {
+		table.Increments("id")
+		table.Timestamps()
+	})
+}
+
+func (m *{{.SchemaName}}) Down(db *nimbus.DB) error {
+	return schema.New(db).DropTable("{{.TableName}}")
+}

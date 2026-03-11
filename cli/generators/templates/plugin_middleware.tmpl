@@ -1,0 +1,27 @@
+package {{.PluginName}}
+
+import (
+	"github.com/CodeSyncr/nimbus/http"
+	"github.com/CodeSyncr/nimbus/router"
+)
+
+// Middleware returns named middleware provided by this plugin.
+// Assign them to routes in start/routes.go:
+//
+//	app.Router.Get("/protected", handler, start.Middleware["{{.PluginName}}"])
+func (p *{{.PascalName}}Plugin) Middleware() map[string]router.Middleware {
+	return map[string]router.Middleware{
+		"{{.PluginName}}": p.exampleMiddleware(),
+	}
+}
+
+func (p *{{.PascalName}}Plugin) exampleMiddleware() router.Middleware {
+	return func(next router.HandlerFunc) router.HandlerFunc {
+		return func(c *http.Context) error {
+			// before handler
+			err := next(c)
+			// after handler
+			return err
+		}
+	}
+}

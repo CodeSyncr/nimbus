@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/CodeSyncr/nimbus/context"
+	"github.com/CodeSyncr/nimbus/http"
 	"github.com/CodeSyncr/nimbus/router"
 )
 
@@ -23,7 +23,7 @@ func Guard(cfg Config) router.Middleware {
 	headers := buildStaticHeaders(cfg)
 
 	return func(next router.HandlerFunc) router.HandlerFunc {
-		return func(c *context.Context) error {
+		return func(c *http.Context) error {
 			h := c.Response.Header()
 			for k, v := range headers {
 				h.Set(k, v)
@@ -115,7 +115,7 @@ func RemoveHeader(names ...string) router.Middleware {
 		lower[i] = strings.ToLower(n)
 	}
 	return func(next router.HandlerFunc) router.HandlerFunc {
-		return func(c *context.Context) error {
+		return func(c *http.Context) error {
 			err := next(c)
 			h := c.Response.Header()
 			for _, n := range lower {

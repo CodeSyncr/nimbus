@@ -54,7 +54,7 @@ app.Use(transmit.New(&transmit.Config{
 ```go
 import "github.com/CodeSyncr/nimbus/plugins/transmit"
 
-func createPost(c *context.Context) error {
+func createPost(c *http.Context) error {
     post := createPostFromRequest(c)
     transmit.Broadcast("posts", map[string]any{
         "id":    post.ID,
@@ -74,12 +74,12 @@ Restrict access to private channels:
 ```go
 import (
     "fmt"
-    "github.com/CodeSyncr/nimbus/context"
+    "github.com/CodeSyncr/nimbus/http"
     "github.com/CodeSyncr/nimbus/plugins/transmit"
 )
 
 func init() {
-    transmit.Authorize("users/:id", func(ctx *context.Context, params map[string]string) bool {
+    transmit.Authorize("users/:id", func(ctx *http.Context, params map[string]string) bool {
         userID, ok := ctx.Get("user_id")  // from your auth middleware
         return ok && fmt.Sprint(userID) == params["id"]
     })

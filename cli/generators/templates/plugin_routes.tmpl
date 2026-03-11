@@ -1,0 +1,14 @@
+package {{.PluginName}}
+
+import (
+	"github.com/CodeSyncr/nimbus/router"
+)
+
+// RegisterRoutes mounts the plugin's HTTP routes onto the application router.
+func (p *{{.PascalName}}Plugin) RegisterRoutes(r *router.Router) {
+	r.Group("/{{.PluginName}}", func(g *router.Group) {
+		g.Get("/status", p.statusHandler)
+
+		// Add more routes here…
+	})
+}

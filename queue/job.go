@@ -27,6 +27,19 @@ type FailedJob interface {
 	Failed(ctx context.Context, err error)
 }
 
+// Tagger is optionally implemented to assign tags for Horizon dashboard (Laravel-style).
+type Tagger interface {
+	Job
+	Tags() []string
+}
+
+// Silenced is optionally implemented to hide the job from Horizon's completed jobs list.
+type Silenced interface {
+	Job
+	// Silenced returns true to hide this job from the completed list.
+	Silenced() bool
+}
+
 // JobFunc adapts a function to Job.
 type JobFunc func(ctx context.Context) error
 

@@ -1,0 +1,14 @@
+package controllers
+
+import (
+	"github.com/CodeSyncr/nimbus/http"
+)
+
+// {{.ControllerName}} controller.
+type {{.ControllerName}} struct{}
+
+// Index lists resources.
+func (c *{{.ControllerName}}) Index(ctx *http.Context) error {
+	return ctx.JSON(http.StatusOK, map[string]string{"message": "index"})
+}
+

@@ -4,25 +4,33 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"log"
-	"net/http"
 	"sync"
 	"time"
 
-	reqctx "github.com/CodeSyncr/nimbus/context"
+	"github.com/CodeSyncr/nimbus/http"
+	"github.com/CodeSyncr/nimbus/logger"
 	"github.com/CodeSyncr/nimbus/router"
 )
 
-// Logger logs each request (AdonisJS middleware style).
+// Logger logs each request (AdonisJS middleware style) using the Nimbus
+// structured logger package. Applications can override the underlying logger
+// via logger.Set for custom formatting or destinations.
 func Logger() router.Middleware {
 	return func(next router.HandlerFunc) router.HandlerFunc {
-		return func(c *reqctx.Context) error {
+		return func(c *http.Context) error {
 			start := time.Now()
 			path := c.Request.URL.Path
 			method := c.Request.Method
 			clientIP := c.Request.RemoteAddr
 			err := next(c)
-			log.Printf("[%s] %s %s %s %v", method, path, clientIP, time.Since(start), err != nil)
+			duration := time.Since(start)
+			logger.Info("http_request",
+				"method", method,
+				"path", path,
+				"client_ip", clientIP,
+				"duration_ms", duration.Milliseconds(),
+				"error", err != nil,
+			)
 			return err
 		}
 	}
@@ -31,7 +39,7 @@ func Logger() router.Middleware {
 // Recover recovers from panics and returns 500.
 func Recover() router.Middleware {
 	return func(next router.HandlerFunc) router.HandlerFunc {
-		return func(c *reqctx.Context) (err error) {
+		return func(c *http.Context) (err error) {
 			defer func() {
 				if r := recover(); r != nil {
 					err = nil
@@ -46,7 +54,7 @@ func Recover() router.Middleware {
 // CORS sets basic CORS headers (configurable in real apps via config).
 func CORS(origin string) router.Middleware {
 	return func(next router.HandlerFunc) router.HandlerFunc {
-		return func(c *reqctx.Context) error {
+		return func(c *http.Context) error {
 			c.Response.Header().Set("Access-Control-Allow-Origin", origin)
 			c.Response.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 			c.Response.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
@@ -67,7 +75,7 @@ const CSRFFormKey = "csrf_token"
 // Token can be in header X-CSRF-Token or form field csrf_token. Use GenerateCSRFToken() to create tokens.
 func CSRF(store CSRFStore) router.Middleware {
 	return func(next router.HandlerFunc) router.HandlerFunc {
-		return func(c *reqctx.Context) error {
+		return func(c *http.Context) error {
 			if c.Request.Method == http.MethodGet || c.Request.Method == http.MethodHead || c.Request.Method == http.MethodOptions {
 				return next(c)
 			}
@@ -141,7 +149,7 @@ type rateEntry struct {
 func RateLimit(limit int, window time.Duration, keyFn func(*http.Request) string) router.Middleware {
 	rl := &rateLimiter{counts: make(map[string]*rateEntry), limit: limit, window: window}
 	return func(next router.HandlerFunc) router.HandlerFunc {
-		return func(c *reqctx.Context) error {
+		return func(c *http.Context) error {
 			key := keyFn(c.Request)
 			if key == "" {
 				key = c.Request.RemoteAddr

@@ -50,6 +50,10 @@ func ConnectWithConfig(cfg ConnectConfig) (*gorm.DB, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// Register the Nimbus events plugin to broadcast DB operations
+	_ = db.Use(&eventPlugin{})
+
 	DB = db
 	return db, nil
 }

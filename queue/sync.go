@@ -17,13 +17,21 @@ func NewSyncAdapter(m *Manager) *SyncAdapter {
 	return &SyncAdapter{manager: m}
 }
 
-// Push runs the job immediately by marshaling and processing.
+// Push runs the job immediately in-process. It mirrors the behavior of
+// Manager.Process enough to keep observers (e.g. Horizon) informed.
 func (s *SyncAdapter) Push(ctx context.Context, payload *JobPayload) error {
 	job, err := s.manager.deserialize(payload)
 	if err != nil {
+		if o := getObserver(); o != nil {
+			o.JobProcessed(payload, err)
+		}
 		return err
 	}
-	return job.Handle(ctx)
+	err = job.Handle(ctx)
+	if o := getObserver(); o != nil {
+		o.JobProcessed(payload, err)
+	}
+	return err
 }
 
 // Pop always blocks (sync has no persisted jobs). Use Redis/Database for workers.

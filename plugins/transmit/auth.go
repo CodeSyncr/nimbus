@@ -15,7 +15,7 @@ import (
 	"strings"
 	"sync"
 
-	reqctx "github.com/CodeSyncr/nimbus/context"
+	reqctx "github.com/CodeSyncr/nimbus/http"
 )
 
 // AuthorizeFunc returns true to allow subscription, false to deny.

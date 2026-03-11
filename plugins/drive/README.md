@@ -103,7 +103,7 @@ app.Use(drive.New(&drive.Config{
 ```go
 import "github.com/CodeSyncr/nimbus/plugins/drive"
 
-func uploadHandler(c *context.Context) error {
+func uploadHandler(c *http.Context) error {
     disk, err := drive.Use("")  // default disk
     if err != nil {
         return err

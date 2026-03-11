@@ -1,0 +1,26 @@
+package migrations
+
+import (
+	"github.com/CodeSyncr/nimbus"
+	"github.com/CodeSyncr/nimbus/database/schema"
+)
+
+// CreateUsers migration.
+type CreateUsers struct {
+	schema.BaseSchema
+}
+
+func (m *CreateUsers) TableName() string { return "users" }
+
+func (m *CreateUsers) Up(db *nimbus.DB) error {
+	return schema.New(db).CreateTable("users", func(table *schema.Table) {
+		table.Increments("id")
+		table.String("email", 255).Unique()
+		table.String("password_hash", 255)
+		table.Timestamps()
+	})
+}
+
+func (m *CreateUsers) Down(db *nimbus.DB) error {
+	return schema.New(db).DropTable("users")
+}

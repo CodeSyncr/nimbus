@@ -29,13 +29,12 @@ package drive
 
 import (
 	"io"
-	"net/http"
 	"os"
 	"strings"
 
-	reqctx "github.com/CodeSyncr/nimbus/context"
-	"github.com/CodeSyncr/nimbus/router"
 	"github.com/CodeSyncr/nimbus"
+	"github.com/CodeSyncr/nimbus/http"
+	"github.com/CodeSyncr/nimbus/router"
 )
 
 var (
@@ -104,7 +103,7 @@ func (p *Plugin) RegisterRoutes(r *router.Router) {
 }
 
 func (p *Plugin) serveHandler(d *FSDisk, basePath string) router.HandlerFunc {
-	return func(c *reqctx.Context) error {
+	return func(c *http.Context) error {
 		path := strings.TrimPrefix(c.Request.URL.Path, basePath+"/")
 		path, err := SafePath(path)
 		if err != nil {

@@ -1,0 +1,24 @@
+package {{.PluginName}}
+
+import "github.com/CodeSyncr/nimbus/events"
+
+// ── Event Listeners ─────────────────────────────────────────────
+// Declare event listeners here. They are registered automatically
+// when the plugin implements nimbus.HasEvents.
+//
+// Uncomment the HasEvents check in plugin.go to enable.
+
+// Listeners returns event → handlers mapping.
+// func (p *{{.PascalName}}Plugin) Listeners() map[string][]events.Listener {
+// 	return map[string][]events.Listener{
+// 		"user.created": {p.onUserCreated},
+// 	}
+// }
+
+// func (p *{{.PascalName}}Plugin) onUserCreated(payload any) error {
+// 	// Handle event…
+// 	return nil
+// }
+
+// Keep the import used.
+var _ = events.Listener(nil)

@@ -1,15 +1,17 @@
-package context
+package http
 
 import (
 	"encoding/json"
+	"fmt"
 	"html"
 	"html/template"
 	"net/http"
+	stdlib "net/http"
 
 	"github.com/CodeSyncr/nimbus/view"
 )
 
-// Context wraps http.Request and ResponseWriter with AdonisJS-style helpers.
+// Context wraps an HTTP request and response with AdonisJS-style helpers.
 type Context struct {
 	Request  *http.Request
 	Response http.ResponseWriter
@@ -45,13 +47,26 @@ func (c *Context) MustGet(key string) any {
 }
 
 // New creates a new request context.
-func New(w http.ResponseWriter, r *http.Request, params map[string]string) *Context {
+func New(w stdlib.ResponseWriter, r *stdlib.Request, params map[string]string) *Context {
 	return &Context{
 		Request:  r,
 		Response: w,
 		Params:   params,
-		status:   http.StatusOK,
+		status:   stdlib.StatusOK,
 	}
+}
+
+// QueryInt returns a query parameter as an integer, or the default value.
+func (c *Context) QueryInt(key string, def int) int {
+	v := c.Request.URL.Query().Get(key)
+	if v == "" {
+		return def
+	}
+	var n int
+	if _, err := fmt.Sscanf(v, "%d", &n); err != nil {
+		return def
+	}
+	return n
 }
 
 // Param returns a route parameter by name.
@@ -82,7 +97,7 @@ func (c *Context) String(code int, s string) {
 
 // Redirect sends a redirect response.
 func (c *Context) Redirect(code int, url string) {
-	http.Redirect(c.Response, c.Request, url, code)
+	stdlib.Redirect(c.Response, c.Request, url, code)
 }
 
 // View renders a .nimbus template and sends HTML response.

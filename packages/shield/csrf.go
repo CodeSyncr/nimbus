@@ -5,16 +5,15 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
-	"net/http"
 	"strings"
 	"time"
 
-	"github.com/CodeSyncr/nimbus/context"
+	"github.com/CodeSyncr/nimbus/http"
 	"github.com/CodeSyncr/nimbus/router"
 )
 
 const (
-	tokenBytes = 32 // 256-bit random tokens
+	tokenBytes = 32  // 256-bit random tokens
 	separator  = "." // raw.signature in cookie
 )
 
@@ -58,7 +57,7 @@ func CSRFGuard(cfg CSRFConfig) router.Middleware {
 	secret := []byte(cfg.Secret)
 
 	return func(next router.HandlerFunc) router.HandlerFunc {
-		return func(c *context.Context) error {
+		return func(c *http.Context) error {
 			rawToken := tokenFromCookie(c, cfg.CookieName, secret)
 
 			if rawToken == "" {
@@ -105,7 +104,7 @@ func signToken(raw string, secret []byte) string {
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
-func tokenFromCookie(c *context.Context, name string, secret []byte) string {
+func tokenFromCookie(c *http.Context, name string, secret []byte) string {
 	cookie, err := c.Request.Cookie(name)
 	if err != nil || cookie.Value == "" {
 		return ""
@@ -122,7 +121,7 @@ func tokenFromCookie(c *context.Context, name string, secret []byte) string {
 	return raw
 }
 
-func setCSRFCookie(c *context.Context, cfg CSRFConfig, raw string, secret []byte) {
+func setCSRFCookie(c *http.Context, cfg CSRFConfig, raw string, secret []byte) {
 	sig := signToken(raw, secret)
 	http.SetCookie(c.Response, &http.Cookie{
 		Name:     cfg.CookieName,
@@ -136,7 +135,7 @@ func setCSRFCookie(c *context.Context, cfg CSRFConfig, raw string, secret []byte
 	})
 }
 
-func extractSubmittedToken(c *context.Context, headerName, fieldName string) string {
+func extractSubmittedToken(c *http.Context, headerName, fieldName string) string {
 	if t := c.Request.Header.Get(headerName); t != "" {
 		return t
 	}
@@ -175,7 +174,7 @@ func isExceptPath(path string, except []string) bool {
 	return false
 }
 
-func csrfForbidden(c *context.Context) error {
+func csrfForbidden(c *http.Context) error {
 	c.Response.Header().Set("Content-Type", "application/json")
 	c.Response.WriteHeader(http.StatusForbidden)
 	_, _ = c.Response.Write([]byte(`{"error":"CSRF token mismatch"}`))
@@ -202,7 +201,7 @@ func VerifyOrigin(allowedHosts ...string) router.Middleware {
 	}
 
 	return func(next router.HandlerFunc) router.HandlerFunc {
-		return func(c *context.Context) error {
+		return func(c *http.Context) error {
 			if isSafeMethod(c.Request.Method) {
 				return next(c)
 			}
@@ -249,7 +248,7 @@ func extractHost(raw string) string {
 //	app.Router.Post("/login", handler, shield.NoTimingLeak(500*time.Millisecond))
 func NoTimingLeak(duration time.Duration) router.Middleware {
 	return func(next router.HandlerFunc) router.HandlerFunc {
-		return func(c *context.Context) error {
+		return func(c *http.Context) error {
 			start := time.Now()
 			err := next(c)
 			elapsed := time.Since(start)

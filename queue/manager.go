@@ -26,6 +26,31 @@ var (
 	globalMu      sync.RWMutex
 )
 
+// Observer can be used to observe queue lifecycle events (for dashboards
+// like Horizon). It is optional and only called when set.
+type Observer interface {
+	JobDispatched(payload *JobPayload)
+	JobProcessed(payload *JobPayload, err error)
+}
+
+var (
+	observerMu sync.RWMutex
+	observer   Observer
+)
+
+// SetObserver sets a global queue observer (e.g. Horizon plugin).
+func SetObserver(o Observer) {
+	observerMu.Lock()
+	defer observerMu.Unlock()
+	observer = o
+}
+
+func getObserver() Observer {
+	observerMu.RLock()
+	defer observerMu.RUnlock()
+	return observer
+}
+
 // Manager manages adapters and job dispatch.
 type Manager struct {
 	adapter  Adapter
@@ -44,6 +69,9 @@ func NewManager(adapter Adapter) *Manager {
 	}
 	return m
 }
+
+// Adapter returns the underlying queue adapter (for Horizon retry, etc.).
+func (m *Manager) Adapter() Adapter { return m.adapter }
 
 // Register registers a job type for deserialization. Call with a zero-value instance.
 //   queue.Register(&jobs.SendEmail{})
@@ -118,7 +146,13 @@ func (b *DispatchBuilder) Dispatch(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	return b.manager.adapter.Push(ctx, payload)
+	if err := b.manager.adapter.Push(ctx, payload); err != nil {
+		return err
+	}
+	if o := getObserver(); o != nil {
+		o.JobDispatched(payload)
+	}
+	return nil
 }
 
 func (b *DispatchBuilder) serialize() (*JobPayload, error) {
@@ -163,10 +197,20 @@ func (m *Manager) Process(ctx context.Context, queue string) error {
 		if fj, ok := job.(FailedJob); ok {
 			fj.Failed(ctx, err)
 		}
+		// Laravel Horizon: record in failed job store for dashboard (list/forget/retry)
+		if store := GetFailedJobStore(); store != nil {
+			_ = store.Push(ctx, payload, err.Error())
+		}
+		if o := getObserver(); o != nil {
+			o.JobProcessed(payload, err)
+		}
 		return err
 	}
 	if ca, ok := m.adapter.(CompletableAdapter); ok {
 		_ = ca.Complete(ctx, payload)
+	}
+	if o := getObserver(); o != nil {
+		o.JobProcessed(payload, err)
 	}
 	return nil
 }

@@ -1,7 +1,7 @@
 package unpoly
 
 import (
-	"github.com/CodeSyncr/nimbus/context"
+	"github.com/CodeSyncr/nimbus/http"
 	"github.com/CodeSyncr/nimbus/router"
 )
 
@@ -26,7 +26,7 @@ func (p *Plugin) Middleware() map[string]router.Middleware {
 // Non-Unpoly requests pass through untouched.
 func ServerProtocol() router.Middleware {
 	return func(next router.HandlerFunc) router.HandlerFunc {
-		return func(c *context.Context) error {
+		return func(c *http.Context) error {
 			if !IsUnpoly(c) {
 				return next(c)
 			}

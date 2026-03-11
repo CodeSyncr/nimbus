@@ -1,0 +1,9 @@
+package {{.PluginName}}
+
+// DefaultConfig returns the default configuration for the {{.PascalName}} plugin.
+// These values can be overridden by the application's .env file.
+func (p *{{.PascalName}}Plugin) DefaultConfig() map[string]any {
+	return map[string]any{
+		"enabled": true,
+	}
+}

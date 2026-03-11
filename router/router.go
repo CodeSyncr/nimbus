@@ -1,15 +1,15 @@
 package router
 
 import (
-	"net/http"
 	"strings"
 
-	"github.com/CodeSyncr/nimbus/context"
+	"github.com/CodeSyncr/nimbus/http"
+	"github.com/CodeSyncr/nimbus/validation"
 	"github.com/go-chi/chi/v5"
 )
 
 // HandlerFunc is the handler signature (AdonisJS controller action style).
-type HandlerFunc func(*context.Context) error
+type HandlerFunc func(*http.Context) error
 
 // Middleware runs before/after handlers.
 type Middleware func(HandlerFunc) HandlerFunc
@@ -25,7 +25,7 @@ type Router struct {
 func New() *Router {
 	return &Router{
 		chi:         chi.NewRouter(),
-		middlewares:  nil,
+		middlewares: nil,
 		namedRoutes: make(map[string]*Route),
 	}
 }
@@ -162,7 +162,7 @@ func (r *Router) addRoute(method, path string, handler HandlerFunc, groupMiddlew
 	return &Route{router: r, method: method, path: path}
 }
 
-func toHandler(fn HandlerFunc) http.HandlerFunc {
+func toHandler(fn HandlerFunc) http.StdHandlerFunc {
 	return func(w http.ResponseWriter, req *http.Request) {
 		params := make(map[string]string)
 		if rc := chi.RouteContext(req.Context()); rc != nil {
@@ -172,8 +172,14 @@ func toHandler(fn HandlerFunc) http.HandlerFunc {
 				}
 			}
 		}
-		ctx := context.New(w, req, params)
+		ctx := http.New(w, req, params)
 		if err := fn(ctx); err != nil {
+			// Fallback safety net when no global error middleware is installed.
+			// For richer behavior (HTTPError, custom JSON), install errors.Handler.
+			if ve, ok := err.(validation.ValidationErrors); ok {
+				_ = ctx.JSON(http.StatusUnprocessableEntity, ve.ToMap())
+				return
+			}
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
 	}

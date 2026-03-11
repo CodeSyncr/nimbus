@@ -1,8 +1,9 @@
 package router
 
 import (
-	"net/http"
 	"strings"
+
+	"github.com/CodeSyncr/nimbus/http"
 )
 
 // Group allows defining routes with a shared prefix and middleware (AdonisJS Route.group).

@@ -1,0 +1,45 @@
+package models
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/CodeSyncr/nimbus"
+	"github.com/CodeSyncr/nimbus/auth"
+	"github.com/CodeSyncr/nimbus/database"
+	"github.com/CodeSyncr/nimbus/hash"
+)
+
+// User implements auth.User for session-based authentication.
+type User struct {
+	database.Model
+	Email        string 
+	Password     string
+	PasswordHash string
+}
+
+func (u *User) GetID() string { return fmt.Sprintf("%d", u.ID) }
+
+func (u *User) SetPassword(plain string) error {
+	h, err := hash.Make(plain)
+	if err != nil {
+		return err
+	}
+	u.PasswordHash = h
+	return nil
+}
+
+func (u *User) CheckPassword(plain string) bool {
+	return hash.Check(plain, u.PasswordHash)
+}
+
+// UserByID loads a user for auth.SessionGuard.
+func UserByID(db *nimbus.DB) auth.UserLoaderFunc {
+	return func(ctx context.Context, id string) (auth.User, error) {
+		var u User
+		if err := db.WithContext(ctx).First(&u, "id = ?", id).Error; err != nil {
+			return nil, nil
+		}
+		return &u, nil
+	}
+}

@@ -46,6 +46,13 @@ var pluginRegistry = map[string]PluginDef{
 	}
 `,
 	},
+	"horizon": {
+		Name:        "horizon",
+		ImportPath:  "github.com/CodeSyncr/nimbus/plugins/horizon",
+		PackageName: "horizon",
+		Description: "Queue dashboard similar to Laravel Horizon (basic stats and per-queue metrics)",
+		ServerInsert: "\tapp.Use(horizon.New())\n",
+	},
 	"inertia": {
 		Name:        "inertia",
 		ImportPath:  "github.com/CodeSyncr/nimbus/plugins/inertia",
@@ -104,7 +111,7 @@ var pluginRegistry = map[string]PluginDef{
 		ImportPath:   "github.com/CodeSyncr/nimbus/plugins/transmit",
 		PackageName:  "transmit",
 		Description:  "SSE (Server-Sent Events) for real-time streaming",
-		ServerInsert: "\tapp.Use(transmit.New())\n",
+		ServerInsert: "\tapp.Use(transmit.New(nil))\n",
 	},
 }
 
@@ -382,7 +389,12 @@ func Boot() *nimbus.App {
 
 	start.RegisterRoutes(app)
 
-	_, _ = database.Connect(config.Database.Driver, config.Database.DSN)
+	db, err := database.Connect(config.Database.Driver, config.Database.DSN)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Database connection failed: %v\n", err)
+		os.Exit(1)
+	}
+	_ = db
 
 	queue.Boot(&queue.BootConfig{RegisterJobs: start.RegisterQueueJobs})
 
@@ -402,6 +414,18 @@ func RunQueueWorker() {
 // RunMigrations runs database migrations. Called when main is invoked with "migrate" arg.
 func RunMigrations() {
 	config.Load()
+	// Ensure database exists before running migrations.
+	if err := database.CreateDatabaseIfNotExists(database.CreateConfig{
+		Driver:   config.Database.Driver,
+		Host:     config.Database.Host,
+		Port:     config.Database.Port,
+		User:     config.Database.User,
+		Password: config.Database.Password,
+		Database: config.Database.Database,
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "Database create failed: %v\n", err)
+		os.Exit(1)
+	}
 	db, err := database.Connect(config.Database.Driver, config.Database.DSN)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Database connection failed: %v\n", err)
@@ -413,6 +437,23 @@ func RunMigrations() {
 		os.Exit(1)
 	}
 	fmt.Println("Migrations completed.")
+}
+
+// RunDbCreate creates the configured database if it does not exist.
+func RunDbCreate() {
+	config.Load()
+	if err := database.CreateDatabaseIfNotExists(database.CreateConfig{
+		Driver:   config.Database.Driver,
+		Host:     config.Database.Host,
+		Port:     config.Database.Port,
+		User:     config.Database.User,
+		Password: config.Database.Password,
+		Database: config.Database.Database,
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "Database create failed: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println("Database created (or already exists).")
 }
 `
 }

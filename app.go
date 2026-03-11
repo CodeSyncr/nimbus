@@ -3,17 +3,25 @@ package nimbus
 import (
 	"context"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
+	"github.com/CodeSyncr/nimbus/cli"
 	"github.com/CodeSyncr/nimbus/config"
 	"github.com/CodeSyncr/nimbus/container"
+	"github.com/CodeSyncr/nimbus/events"
+	"github.com/CodeSyncr/nimbus/health"
 	"github.com/CodeSyncr/nimbus/router"
+	"github.com/CodeSyncr/nimbus/schedule"
 )
 
 // Provider is the service provider interface (AdonisJS/Laravel style).
@@ -25,16 +33,22 @@ type Provider interface {
 
 // App is the core Nimbus application (AdonisJS-style).
 type App struct {
-	Config    *config.Config
-	Router    *router.Router
-	Server    *http.Server
-	Container *container.Container
-
+	Config          *config.Config
+	Router          *router.Router
+	Server          *http.Server
+	Container       *container.Container
+	Events          *events.Dispatcher
+	Scheduler       *schedule.Scheduler
+	Health          *health.Checker
 	providers       []Provider
 	plugins         []Plugin
 	pluginIndex     map[string]Plugin
 	namedMiddleware map[string]router.Middleware
 	pluginConfigs   map[string]map[string]any
+
+	bootHooks     []func(*App)
+	startHooks    []func(*App)
+	shutdownHooks []func(*App)
 }
 
 // New creates a new Nimbus application with default config.
@@ -45,6 +59,9 @@ func New() *App {
 		Config:          cfg,
 		Router:          r,
 		Container:       container.New(),
+		Events:          events.New(),
+		Scheduler:       schedule.New(),
+		Health:          health.New(),
 		Server:          &http.Server{Addr: ":" + cfg.App.Port, Handler: r},
 		pluginIndex:     make(map[string]Plugin),
 		namedMiddleware: make(map[string]router.Middleware),
@@ -102,6 +119,38 @@ func (a *App) PluginConfig(name string) map[string]any {
 }
 
 // ---------------------------------------------------------------------------
+// Lifecycle Hooks
+// ---------------------------------------------------------------------------
+
+// OnBoot registers a callback that runs after providers/plugins have been
+// booted and plugin routes/middleware have been applied, but before the
+// server starts listening.
+func (a *App) OnBoot(fn func(*App)) {
+	if fn == nil {
+		return
+	}
+	a.bootHooks = append(a.bootHooks, fn)
+}
+
+// OnStart registers a callback that runs right before the HTTP server begins
+// serving requests (after Boot and listen/port selection).
+func (a *App) OnStart(fn func(*App)) {
+	if fn == nil {
+		return
+	}
+	a.startHooks = append(a.startHooks, fn)
+}
+
+// OnShutdown registers a callback that runs during graceful shutdown, before
+// plugin HasShutdown hooks are executed.
+func (a *App) OnShutdown(fn func(*App)) {
+	if fn == nil {
+		return
+	}
+	a.shutdownHooks = append(a.shutdownHooks, fn)
+}
+
+// ---------------------------------------------------------------------------
 // Boot
 // ---------------------------------------------------------------------------
 
@@ -120,13 +169,18 @@ func (a *App) Boot() error {
 			return fmt.Errorf("provider register: %w", err)
 		}
 	}
+	a.Events.Dispatch(events.ProviderRegister, nil)
 
-	// Pass 2 — Plugin.Register
+	// Pass 2 — Plugin.Register + HasBindings
 	for _, p := range a.plugins {
 		if err := p.Register(a); err != nil {
 			return fmt.Errorf("plugin %s register: %w", p.Name(), err)
 		}
+		if hb, ok := p.(HasBindings); ok {
+			hb.Bindings(a.Container)
+		}
 	}
+	a.Events.Dispatch(events.PluginRegister, nil)
 
 	// Pass 3 — Collect plugin default configs
 	for _, p := range a.plugins {
@@ -141,6 +195,7 @@ func (a *App) Boot() error {
 			return fmt.Errorf("provider boot: %w", err)
 		}
 	}
+	a.Events.Dispatch(events.ProviderBoot, nil)
 
 	// Pass 5 — Plugin.Boot
 	for _, p := range a.plugins {
@@ -148,24 +203,66 @@ func (a *App) Boot() error {
 			return fmt.Errorf("plugin %s boot: %w", p.Name(), err)
 		}
 	}
+	a.Events.Dispatch(events.PluginBoot, nil)
 
 	// Pass 6 — Apply plugin capabilities
 	for _, p := range a.plugins {
+		// Routes
 		if hr, ok := p.(HasRoutes); ok {
 			hr.RegisterRoutes(a.Router)
 		}
+		// Named middleware
 		if hm, ok := p.(HasMiddleware); ok {
 			for name, mw := range hm.Middleware() {
 				a.namedMiddleware[name] = mw
 			}
 		}
 	}
+	a.Events.Dispatch(events.RouteRegistered, nil)
+	a.Events.Dispatch(events.MiddlewareRegistered, nil)
 
+	// Pass 6b — Remaining capabilities (commands, schedule, events, health)
+	for _, p := range a.plugins {
+		// CLI commands
+		if hcmd, ok := p.(HasCommands); ok {
+			for _, cmd := range hcmd.Commands() {
+				cli.RegisterCommand(cmd)
+			}
+		}
+		// Scheduled tasks
+		if hs, ok := p.(HasSchedule); ok {
+			hs.Schedule(a.Scheduler)
+		}
+		// Event listeners
+		if he, ok := p.(HasEvents); ok {
+			for event, listeners := range he.Listeners() {
+				for _, ln := range listeners {
+					a.Events.Listen(event, ln)
+				}
+			}
+		}
+		// Health checks
+		if hh, ok := p.(HasHealthChecks); ok {
+			for name, check := range hh.HealthChecks() {
+				a.Health.Add(name, check)
+			}
+		}
+	}
+
+	// Pass 7 — App-level boot hooks
+	for _, fn := range a.bootHooks {
+		fn(a)
+	}
+
+	a.Events.Dispatch(events.AppBooted, nil)
 	return nil
 }
 
 // Shutdown calls Shutdown on every plugin that implements HasShutdown.
 func (a *App) Shutdown() error {
+	for i := len(a.shutdownHooks) - 1; i >= 0; i-- {
+		a.shutdownHooks[i](a)
+	}
 	for i := len(a.plugins) - 1; i >= 0; i-- {
 		if hs, ok := a.plugins[i].(HasShutdown); ok {
 			if err := hs.Shutdown(); err != nil {
@@ -184,6 +281,8 @@ func (a *App) Shutdown() error {
 // If the configured port is busy, it automatically picks a free port.
 // Listens for SIGINT/SIGTERM and gracefully shuts down to release the port.
 func (a *App) Run() error {
+	configureGOGCFromEnv()
+	startPprofIfEnabled()
 	if err := a.Boot(); err != nil {
 		return err
 	}
@@ -193,6 +292,16 @@ func (a *App) Run() error {
 	}
 	a.Config.App.Port = port
 	a.printStartup("http", port)
+
+	for _, fn := range a.startHooks {
+		fn(a)
+	}
+	a.Events.Dispatch(events.AppStarted, port)
+
+	// Start scheduler if tasks were registered.
+	if a.Scheduler.Count() > 0 {
+		a.Scheduler.Start(context.Background())
+	}
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
@@ -204,12 +313,14 @@ func (a *App) Run() error {
 
 	select {
 	case sig := <-quit:
+		a.Events.Dispatch(events.AppShutdown, sig)
 		fmt.Printf("\n  \033[33m⚠\033[0m  Received %v, shutting down...\n", sig)
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := a.Server.Shutdown(ctx); err != nil {
 			return fmt.Errorf("server shutdown: %w", err)
 		}
+		a.Scheduler.Stop()
 		_ = a.Shutdown()
 		return nil
 	case err := <-serveErr:
@@ -230,6 +341,10 @@ func (a *App) RunTLS(certFile, keyFile string) error {
 	}
 	a.Config.App.Port = port
 	a.printStartup("https", port)
+
+	for _, fn := range a.startHooks {
+		fn(a)
+	}
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
@@ -286,4 +401,51 @@ func (a *App) printStartup(scheme, port string) {
 
 	fmt.Printf("  \033[32m➜\033[0m  \033[1m%s\033[0m running at \033[36m%s\033[0m\n", name, url)
 	fmt.Printf("  \033[2m   env: %s · %d plugin(s) loaded\033[0m\n\n", env, len(a.plugins))
+}
+
+// configureGOGCFromEnv reads NIMBUS_GOGC and applies it via debug.SetGCPercent.
+// Examples:
+//
+//	NIMBUS_GOGC=50   → aggressive GC
+//	NIMBUS_GOGC=100  → default
+//	NIMBUS_GOGC=200  → fewer GC cycles
+//	NIMBUS_GOGC=off  → disable GC (not recommended in production)
+func configureGOGCFromEnv() {
+	val := strings.TrimSpace(os.Getenv("NIMBUS_GOGC"))
+	if val == "" {
+		return
+	}
+	if strings.EqualFold(val, "off") {
+		debug.SetGCPercent(-1)
+		log.Println("[nimbus] GC disabled via NIMBUS_GOGC=off (not recommended in production)")
+		return
+	}
+	percent, err := strconv.Atoi(val)
+	if err != nil {
+		log.Printf("[nimbus] invalid NIMBUS_GOGC value %q (expected integer or \"off\")\n", val)
+		return
+	}
+	debug.SetGCPercent(percent)
+	log.Printf("[nimbus] GC percent set to %d via NIMBUS_GOGC\n", percent)
+}
+
+// startPprofIfEnabled starts a pprof HTTP server when NIMBUS_PPROF is set.
+// By default it listens on :6060 and exposes /debug/pprof endpoints.
+// You can override the address by setting NIMBUS_PPROF to a full address,
+// e.g. NIMBUS_PPROF="127.0.0.1:6060".
+func startPprofIfEnabled() {
+	val := strings.TrimSpace(os.Getenv("NIMBUS_PPROF"))
+	if val == "" || strings.EqualFold(val, "off") || val == "0" {
+		return
+	}
+	addr := ":6060"
+	if strings.Contains(val, ":") {
+		addr = val
+	}
+	go func() {
+		log.Printf("[nimbus] pprof server listening on %s (set NIMBUS_PPROF=off to disable)\n", addr)
+		if err := http.ListenAndServe(addr, nil); err != nil && err != http.ErrServerClosed {
+			log.Printf("[nimbus] pprof server error: %v\n", err)
+		}
+	}()
 }

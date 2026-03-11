@@ -26,14 +26,13 @@ package transmit
 import (
 	"context"
 	"encoding/json"
-	"net/http"
 	"os"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/CodeSyncr/nimbus"
-	reqctx "github.com/CodeSyncr/nimbus/context"
+	"github.com/CodeSyncr/nimbus/http"
 	"github.com/CodeSyncr/nimbus/router"
 )
 
@@ -42,9 +41,9 @@ var _ nimbus.HasRoutes = (*Plugin)(nil)
 var _ nimbus.HasShutdown = (*Plugin)(nil)
 
 var (
-	globalStore   *Store
+	globalStore     *Store
 	globalTransport Transport
-	globalMu      sync.RWMutex
+	globalMu        sync.RWMutex
 )
 
 func setGlobalStore(s *Store) {
@@ -77,17 +76,17 @@ type Config struct {
 	Path         string              // route prefix, default __transmit
 	PingInterval string              // e.g. "30s", "1m", empty to disable
 	Middleware   []router.Middleware // optional middleware for all transmit routes (e.g. auth)
-	Transport    Transport          // optional; Redis for multi-instance sync
+	Transport    Transport           // optional; Redis for multi-instance sync
 }
 
 // Plugin integrates SSE into Nimbus.
 type Plugin struct {
 	nimbus.BasePlugin
-	store         *Store
-	path          string
-	pingInterval  time.Duration
-	middleware    []router.Middleware
-	transport     Transport
+	store        *Store
+	path         string
+	pingInterval time.Duration
+	middleware   []router.Middleware
+	transport    Transport
 }
 
 // New creates a new Transmit plugin.
@@ -181,7 +180,7 @@ func (p *Plugin) RegisterRoutes(r *router.Router) {
 	}
 }
 
-func (p *Plugin) eventsHandler(c *reqctx.Context) error {
+func (p *Plugin) eventsHandler(c *http.Context) error {
 	w := c.Response
 	req := c.Request
 
@@ -238,7 +237,7 @@ func (p *Plugin) eventsHandler(c *reqctx.Context) error {
 	}
 }
 
-func (p *Plugin) subscribeHandler(c *reqctx.Context) error {
+func (p *Plugin) subscribeHandler(c *http.Context) error {
 	var body struct {
 		Channel string `json:"channel"`
 		UID     string `json:"uid"`
@@ -260,7 +259,7 @@ func (p *Plugin) subscribeHandler(c *reqctx.Context) error {
 	return c.JSON(200, map[string]string{"status": "subscribed"})
 }
 
-func (p *Plugin) unsubscribeHandler(c *reqctx.Context) error {
+func (p *Plugin) unsubscribeHandler(c *http.Context) error {
 	var body struct {
 		Channel string `json:"channel"`
 		UID     string `json:"uid"`

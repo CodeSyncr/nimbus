@@ -1,0 +1,46 @@
+@layout('horizon/layout')
+<div class="space-y-8">
+  <p class="t-text-muted text-sm max-w-2xl">
+    Jobs that failed after all retries. Retry or forget them. Requires Redis and Horizon RedisURL to be set.
+  </p>
+
+  <div class="t-card rounded-xl overflow-hidden">
+    <div class="px-5 py-4 border-b t-border t-bg-sidebar flex items-center justify-between">
+      <span class="font-medium t-text">Failed job records</span>
+      {{ if .failedCount }}
+      <form method="post" action="{{ .horizonPath }}/failed/forget-all" class="inline" onsubmit="return confirm('Delete all failed jobs?');">
+        <button type="submit" class="text-xs font-medium px-3 py-1.5 rounded-lg bg-red-500/10 text-red-600 dark:text-red-400 hover:bg-red-500/20 transition">Forget all</button>
+      </form>
+      {{ end }}
+    </div>
+    <div class="divide-y t-divide">
+      {{ if .failedCount }}
+      <div class="px-5 py-3 text-xs font-semibold t-text-subtle grid grid-cols-12 gap-4">
+        <div class="col-span-2">Job</div>
+        <div class="col-span-2">Queue</div>
+        <div class="col-span-4">Exception</div>
+        <div class="col-span-2">Failed at</div>
+        <div class="col-span-2 text-right">Actions</div>
+      </div>
+      @each(.failedJobs)
+      <div class="px-5 py-3 grid grid-cols-12 gap-4 items-center text-sm hover:t-hover transition">
+        <div class="col-span-2 t-text font-mono text-xs">{{ .JobName }}</div>
+        <div class="col-span-2 t-text font-mono text-xs">{{ .Queue }}</div>
+        <div class="col-span-4 t-text-subtle text-xs truncate" title="{{ .Exception }}">{{ .Exception }}</div>
+        <div class="col-span-2 t-text-subtle text-xs">{{ .FailedAt }}</div>
+        <div class="col-span-2 flex gap-2 justify-end">
+          <form method="post" action="{{ $.horizonPath }}/failed/{{ .ID }}/retry" class="inline">
+            <button type="submit" class="text-xs font-medium px-2.5 py-1 rounded-lg t-accent-bg t-accent hover:opacity-90 transition">Retry</button>
+          </form>
+          <form method="post" action="{{ $.horizonPath }}/failed/{{ .ID }}/forget" class="inline" onsubmit="return confirm('Forget this job?');">
+            <button type="submit" class="text-xs font-medium text-red-600 dark:text-red-400 hover:underline">Forget</button>
+          </form>
+        </div>
+      </div>
+      @endeach
+      @else
+      <div class="px-5 py-12 text-center t-text-subtle text-sm">No failed jobs. Set Horizon RedisURL to persist and manage failed jobs.</div>
+      @endif
+    </div>
+  </div>
+</div>

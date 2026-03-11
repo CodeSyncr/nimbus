@@ -73,7 +73,7 @@ createInertiaApp({
 ### 4. Render Inertia pages in handlers
 
 ```go
-func (c *HomeController) Index(ctx *context.Context) error {
+func (c *HomeController) Index(ctx *http.Context) error {
     users := loadUsers()
     return inertia.Render(ctx, "Home/Index", map[string]any{
         "users": users,

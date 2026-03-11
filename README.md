@@ -86,21 +86,21 @@ Then run `nimbus serve` again.
 package main
 
 import (
-	"net/http"
 	"github.com/CodeSyncr/nimbus"
 	"github.com/CodeSyncr/nimbus/context"
 	"github.com/CodeSyncr/nimbus/middleware"
+	"github.com/CodeSyncr/nimbus/http"
 )
 
 func main() {
 	app := nimbus.New()
 	app.Router.Use(middleware.Logger(), middleware.Recover())
 
-	app.Router.Get("/", func(c *context.Context) error {
-		return c.JSON(http.StatusOK, map[string]string{"hello": "nimbus"})
+	app.Router.Get("/", func(c *http.Context) error {
+		return c.JSON(httpx.StatusOK, map[string]string{"hello": "nimbus"})
 	})
-	app.Router.Get("/users/:id", func(c *context.Context) error {
-		return c.JSON(http.StatusOK, map[string]string{"id": c.Param("id")})
+	app.Router.Get("/users/:id", func(c *http.Context) error {
+		return c.JSON(httpx.StatusOK, map[string]string{"id": c.Param("id")})
 	})
 
 	// Route groups
@@ -159,7 +159,7 @@ type CreateUserRequest struct {
 	Email string `json:"email" validate:"required,email"`
 }
 
-func createUser(c *context.Context) error {
+func createUser(c *http.Context) error {
 	var req CreateUserRequest
 	if err := validation.ValidateRequestJSON(c.Request.Body, &req); err != nil {
 		return c.JSON(http.StatusUnprocessableEntity, map[string]any{"errors": err})

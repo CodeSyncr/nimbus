@@ -21,7 +21,7 @@ type Driver interface {
 	Send(m *Message) error
 }
 
-// SMTPDriver sends via SMTP (plan: SMTP driver).
+// SMTPDriver sends via SMTP.
 type SMTPDriver struct {
 	Addr     string
 	Auth     smtp.Auth
@@ -69,3 +69,63 @@ func Send(m *Message) error {
 	}
 	return Default.Send(m)
 }
+
+// ── Provider-specific drivers (SMTP-backed) ─────────────────────
+
+// SESDriver is a thin wrapper around SMTPDriver configured for Amazon SES SMTP.
+// Use the SMTP credentials from your SES console.
+type SESDriver struct {
+	smtp *SMTPDriver
+}
+
+// NewSESDriver creates an SES driver. Example addr: "email-smtp.us-east-1.amazonaws.com:587".
+func NewSESDriver(addr string, auth smtp.Auth, fromAddr string) *SESDriver {
+	return &SESDriver{smtp: NewSMTPDriver(addr, auth, fromAddr)}
+}
+
+func (d *SESDriver) Send(m *Message) error {
+	return d.smtp.Send(m)
+}
+
+// MailgunDriver wraps SMTPDriver for Mailgun.
+// Example addr: "smtp.mailgun.org:587".
+type MailgunDriver struct {
+	smtp *SMTPDriver
+}
+
+func NewMailgunDriver(addr string, auth smtp.Auth, fromAddr string) *MailgunDriver {
+	return &MailgunDriver{smtp: NewSMTPDriver(addr, auth, fromAddr)}
+}
+
+func (d *MailgunDriver) Send(m *Message) error {
+	return d.smtp.Send(m)
+}
+
+// SendGridDriver wraps SMTPDriver for SendGrid.
+// Example addr: "smtp.sendgrid.net:587".
+type SendGridDriver struct {
+	smtp *SMTPDriver
+}
+
+func NewSendGridDriver(addr string, auth smtp.Auth, fromAddr string) *SendGridDriver {
+	return &SendGridDriver{smtp: NewSMTPDriver(addr, auth, fromAddr)}
+}
+
+func (d *SendGridDriver) Send(m *Message) error {
+	return d.smtp.Send(m)
+}
+
+// PostmarkDriver wraps SMTPDriver for Postmark.
+// Example addr: "smtp.postmarkapp.com:587".
+type PostmarkDriver struct {
+	smtp *SMTPDriver
+}
+
+func NewPostmarkDriver(addr string, auth smtp.Auth, fromAddr string) *PostmarkDriver {
+	return &PostmarkDriver{smtp: NewSMTPDriver(addr, auth, fromAddr)}
+}
+
+func (d *PostmarkDriver) Send(m *Message) error {
+	return d.smtp.Send(m)
+}
+

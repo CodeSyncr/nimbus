@@ -55,7 +55,7 @@ OPENAI_API_KEY=sk-...
 ```go
 import "github.com/CodeSyncr/nimbus/plugins/ai"
 
-func myHandler(c *context.Context) error {
+func myHandler(c *http.Context) error {
     response, err := ai.Generate(c.Request().Context(), "Explain quantum computing in simple terms")
     if err != nil {
         return err
@@ -67,7 +67,7 @@ func myHandler(c *context.Context) error {
 ### Streaming
 
 ```go
-func streamHandler(c *context.Context) error {
+func streamHandler(c *http.Context) error {
     c.Response().Header().Set("Content-Type", "text/event-stream")
     c.Response().Header().Set("Cache-Control", "no-cache")
     c.Response().Header().Set("Connection", "keep-alive")

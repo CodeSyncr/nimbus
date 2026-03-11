@@ -1,0 +1,19 @@
+package {{.PluginName}}
+
+import (
+	"github.com/CodeSyncr/nimbus/http"
+)
+
+// ── Handlers ────────────────────────────────────────────────────
+// HTTP handlers for the {{.PascalName}} plugin.
+// These are mounted by RegisterRoutes in routes.go.
+
+func (p *{{.PascalName}}Plugin) statusHandler(c *http.Context) error {
+	return c.JSON(http.StatusOK, map[string]any{
+		"plugin":  p.Name(),
+		"version": p.Version(),
+		"status":  "ok",
+	})
+}
+
+// Add more handlers below…

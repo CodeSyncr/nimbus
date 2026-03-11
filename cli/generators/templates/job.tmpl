@@ -1,0 +1,14 @@
+package jobs
+
+import "context"
+
+// {{.JobName}} implements queue.Job. Register in start/jobs.go and dispatch with:
+//   queue.Dispatch(&jobs.{{.JobName}}{...}).Dispatch(ctx)
+type {{.JobName}} struct {
+	// Add payload fields
+}
+
+func (j *{{.JobName}}) Handle(ctx context.Context) error {
+	// Do work
+	return nil
+}

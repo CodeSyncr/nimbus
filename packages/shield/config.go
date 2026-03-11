@@ -1,10 +1,9 @@
 package shield
 
 import (
-	"net/http"
 	"time"
 
-	"github.com/CodeSyncr/nimbus/context"
+	"github.com/CodeSyncr/nimbus/http"
 	"github.com/CodeSyncr/nimbus/router"
 )
 
@@ -176,7 +175,7 @@ type csrfTokenKey struct{}
 // Token returns the CSRF token for the current request. Use this when
 // you need the raw token (e.g. for Ajax headers). For forms, use {{ .csrfField }}
 // in templates — it is auto-injected by context.View when Shield CSRF is enabled.
-func Token(c *context.Context) string {
+func Token(c *http.Context) string {
 	if v, ok := c.Get("_csrf_token"); ok {
 		if s, ok := v.(string); ok {
 			return s
@@ -187,6 +186,6 @@ func Token(c *context.Context) string {
 
 // TokenField returns a full HTML hidden input for embedding in forms.
 // Prefer {{ .csrfField }} in templates — it is auto-injected by context.View.
-func TokenField(c *context.Context) string {
+func TokenField(c *http.Context) string {
 	return `<input type="hidden" name="_csrf" value="` + Token(c) + `">`
 }

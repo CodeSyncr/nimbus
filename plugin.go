@@ -3,8 +3,13 @@ package nimbus
 import (
 	"io/fs"
 
+	"github.com/CodeSyncr/nimbus/cli"
+	"github.com/CodeSyncr/nimbus/container"
 	"github.com/CodeSyncr/nimbus/database"
+	"github.com/CodeSyncr/nimbus/events"
+	"github.com/CodeSyncr/nimbus/health"
 	"github.com/CodeSyncr/nimbus/router"
+	"github.com/CodeSyncr/nimbus/schedule"
 )
 
 // ---------------------------------------------------------------------------
@@ -16,10 +21,10 @@ import (
 // the Provider pattern (Register → Boot).
 //
 // Plugins may optionally implement one or more capability interfaces
-// (HasRoutes, HasMiddleware, HasConfig, HasMigrations, HasViews,
-// HasShutdown) to hook into the framework at well-defined points.
+// to hook into the framework at well-defined points. This design allows
+// integrating anything — Stripe, Sentry, MongoDB, WhatsApp, etc.
 type Plugin interface {
-	// Name returns the plugin's unique identifier (e.g. "auth", "redis").
+	// Name returns the plugin's unique identifier (e.g. "stripe", "sentry").
 	Name() string
 
 	// Version returns the semantic version string (e.g. "1.0.0").
@@ -77,6 +82,66 @@ type HasShutdown interface {
 	Shutdown() error
 }
 
+// HasBindings allows a plugin to declare container bindings that are
+// automatically registered during the Register phase. Use this to bind
+// SDK clients, API wrappers, or any service the app can resolve.
+//
+//	func (p *StripePlugin) Bindings(c *container.Container) {
+//	    c.Singleton("stripe", func() (*stripe.Client, error) {
+//	        return stripe.New(os.Getenv("STRIPE_KEY"))
+//	    })
+//	}
+type HasBindings interface {
+	Bindings(c *container.Container)
+}
+
+// HasCommands allows a plugin to register CLI commands (Artisan-style).
+// Commands are added to the Nimbus CLI and available via `nimbus <cmd>`.
+//
+//	func (p *SentryPlugin) Commands() []cli.Command {
+//	    return []cli.Command{&SentryTestCommand{}}
+//	}
+type HasCommands interface {
+	Commands() []cli.Command
+}
+
+// HasSchedule allows a plugin to register periodic background tasks.
+// The scheduler runs automatically when the app starts.
+//
+//	func (p *TelemetryPlugin) Schedule(s *schedule.Scheduler) {
+//	    s.Every(5*time.Minute, "telemetry-flush", p.flush)
+//	}
+type HasSchedule interface {
+	Schedule(s *schedule.Scheduler)
+}
+
+// HasEvents allows a plugin to declare event listeners that are
+// registered on the application's event dispatcher during boot.
+//
+//	func (p *AuditPlugin) Listeners() map[string][]events.Listener {
+//	    return map[string][]events.Listener{
+//	        "user.created": {p.onUserCreated},
+//	        "order.placed": {p.onOrderPlaced},
+//	    }
+//	}
+type HasEvents interface {
+	Listeners() map[string][]events.Listener
+}
+
+// HasHealthChecks allows a plugin to report health status. Registered
+// checks are added to the application's health checker.
+//
+//	func (p *RedisPlugin) HealthChecks() map[string]health.Check {
+//	    return map[string]health.Check{
+//	        "redis": func(ctx context.Context) error {
+//	            return p.client.Ping(ctx).Err()
+//	        },
+//	    }
+//	}
+type HasHealthChecks interface {
+	HealthChecks() map[string]health.Check
+}
+
 // ---------------------------------------------------------------------------
 // BasePlugin — embed to get default implementations
 // ---------------------------------------------------------------------------
@@ -88,16 +153,12 @@ type HasShutdown interface {
 //	type MyPlugin struct {
 //	    nimbus.BasePlugin
 //	}
-//
-//	func init() {
-//	    _ = nimbus.Plugin(&MyPlugin{}) // compile-time check
-//	}
 type BasePlugin struct {
 	PluginName    string
 	PluginVersion string
 }
 
-func (b *BasePlugin) Name() string              { return b.PluginName }
-func (b *BasePlugin) Version() string           { return b.PluginVersion }
-func (b *BasePlugin) Register(_ *App) error     { return nil }
-func (b *BasePlugin) Boot(_ *App) error         { return nil }
+func (b *BasePlugin) Name() string          { return b.PluginName }
+func (b *BasePlugin) Version() string       { return b.PluginVersion }
+func (b *BasePlugin) Register(_ *App) error { return nil }
+func (b *BasePlugin) Boot(_ *App) error     { return nil }

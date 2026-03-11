@@ -8,6 +8,16 @@
       <div class="text-3xl font-bold t-accent mb-2 group-hover:opacity-90">{{ .count }}</div>
       <div class="t-text-muted text-sm">Recent entries</div>
     </a>
+    <div class="t-card rounded-xl p-6">
+      <div class="flex items-baseline justify-between mb-2">
+        <div class="text-2xl font-semibold t-accent">{{ index .runtime "goroutines" }}</div>
+        <span class="t-text-muted text-xs uppercase tracking-wide">runtime</span>
+      </div>
+      <div class="t-text-muted text-sm mb-1">Goroutines</div>
+      <div class="t-text-subtle text-xs">
+        GC cycles: {{ index .runtime "num_gc" }} · Heap: {{ index .runtime "heap_alloc" }} bytes
+      </div>
+    </div>
   </div>
 
   <div class="t-card rounded-xl overflow-hidden">

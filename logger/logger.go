@@ -5,7 +5,9 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
-// Logger wraps zap.SugaredLogger for structured logging (plan: uber-go/zap).
+// Logger wraps zap.SugaredLogger for structured logging. Nimbus uses this
+// logger in its own middleware and internals, and applications are free to
+// replace it at startup (or in tests) via Set with their own zap.Logger.
 var Log *zap.SugaredLogger
 
 func init() {

@@ -30,9 +30,9 @@ func newOllamaProvider(cfg *Config) (*ollamaProvider, error) {
 }
 
 type ollamaChatReq struct {
-	Model    string        `json:"model"`
-	Messages []ollamaMsg   `json:"messages"`
-	Stream   bool          `json:"stream"`
+	Model    string      `json:"model"`
+	Messages []ollamaMsg `json:"messages"`
+	Stream   bool        `json:"stream"`
 }
 
 type ollamaMsg struct {
@@ -41,10 +41,10 @@ type ollamaMsg struct {
 }
 
 type ollamaChatResp struct {
-	Message      ollamaMsg `json:"message"`
-	Done         bool      `json:"done"`
-	EvalCount    int       `json:"eval_count,omitempty"`
-	PromptEvalCount int    `json:"prompt_eval_count,omitempty"`
+	Message         ollamaMsg `json:"message"`
+	Done            bool      `json:"done"`
+	EvalCount       int       `json:"eval_count,omitempty"`
+	PromptEvalCount int       `json:"prompt_eval_count,omitempty"`
 }
 
 func (p *ollamaProvider) Generate(ctx context.Context, req *GenerateRequest) (*GenerateResponse, error) {
