@@ -1,0 +1,13 @@
+package listeners
+
+import "log"
+
+// {{.ListenerName}} handles the "{{.SnakeName}}" event.
+// Register in start/kernel.go or a plugin's Events() method:
+//
+//	app.Events.Listen("{{.SnakeName}}", listeners.{{.ListenerName}})
+func {{.ListenerName}}(payload any) error {
+	log.Printf("[{{.SnakeName}}] listener fired with payload: %v", payload)
+	// TODO: handle event
+	return nil
+}

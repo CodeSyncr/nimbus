@@ -50,36 +50,83 @@ func Middleware(cfg Config) router.Middleware {
 			if data == nil {
 				data = make(map[string]any)
 			}
-			ctx := context.WithValue(c.Request.Context(), sessionKey, &sessionData{
+			sd := &sessionData{
 				id:     sid,
 				data:   data,
 				store:  cfg.Store,
 				config: cfg,
 				dirty:  false,
-			})
-			c.Request = c.Request.WithContext(ctx)
-			err := next(c)
-			// Save session if dirty (after response)
-			sd, _ := c.Request.Context().Value(sessionKey).(*sessionData)
-			if sd != nil && sd.dirty {
-				newID, _ := cfg.Store.Set(c.Request.Context(), sd.id, sd.data, cfg.MaxAge)
-				if newID != "" {
-					sd.id = newID
-				}
-				cookie := &http.Cookie{
-					Name:     cfg.CookieName,
-					Value:    sd.id,
-					Path:     "/",
-					MaxAge:   int(cfg.MaxAge.Seconds()),
-					HttpOnly: cfg.HttpOnly,
-					Secure:   cfg.Secure,
-					SameSite: cfg.SameSite,
-				}
-				http.SetCookie(c.Response, cookie)
 			}
+			ctx := context.WithValue(c.Request.Context(), sessionKey, sd)
+			c.Request = c.Request.WithContext(ctx)
+
+			// Wrap the response writer so the session cookie is added
+			// BEFORE Go's WriteHeader sends response headers on the wire.
+			// Once WriteHeader fires, subsequent header mutations are
+			// silently ignored, so we must persist the session just
+			// before that call.
+			sw := &sessionWriter{
+				ResponseWriter: c.Response,
+				sd:             sd,
+				cfg:            cfg,
+			}
+			c.Response = sw
+
+			err := next(c)
+
+			// Safety net: if the handler never wrote a response (no
+			// WriteHeader/Write call), persist the session now.
+			sw.persistSession()
+
 			return err
 		}
 	}
+}
+
+// sessionWriter intercepts WriteHeader and Write so the session cookie can
+// be added to the response headers just before they are flushed to the wire.
+type sessionWriter struct {
+	http.ResponseWriter
+	sd    *sessionData
+	cfg   Config
+	saved bool
+}
+
+// persistSession saves dirty session data to the store and adds the
+// Set-Cookie header. Safe to call multiple times; only acts once.
+func (sw *sessionWriter) persistSession() {
+	if sw.saved {
+		return
+	}
+	sw.saved = true
+	if sw.sd == nil || !sw.sd.dirty {
+		return
+	}
+	newID, _ := sw.sd.config.Store.Set(
+		context.Background(), sw.sd.id, sw.sd.data, sw.sd.config.MaxAge,
+	)
+	if newID != "" {
+		sw.sd.id = newID
+	}
+	http.SetCookie(sw.ResponseWriter, &http.Cookie{
+		Name:     sw.cfg.CookieName,
+		Value:    sw.sd.id,
+		Path:     "/",
+		MaxAge:   int(sw.cfg.MaxAge.Seconds()),
+		HttpOnly: sw.cfg.HttpOnly,
+		Secure:   sw.cfg.Secure,
+		SameSite: sw.cfg.SameSite,
+	})
+}
+
+func (sw *sessionWriter) WriteHeader(code int) {
+	sw.persistSession()
+	sw.ResponseWriter.WriteHeader(code)
+}
+
+func (sw *sessionWriter) Write(b []byte) (int, error) {
+	sw.persistSession()
+	return sw.ResponseWriter.Write(b)
 }
 
 type sessionData struct {

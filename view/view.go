@@ -23,7 +23,10 @@ func defaultFuncs() template.FuncMap {
 			}
 			return template.HTML(fmt.Sprint(v))
 		},
-		"dump": func(v any) template.HTML { b, _ := json.MarshalIndent(v, "", "  "); return template.HTML("<pre>" + template.HTMLEscapeString(string(b)) + "</pre>") },
+		"dump": func(v any) template.HTML {
+			b, _ := json.MarshalIndent(v, "", "  ")
+			return template.HTML("<pre>" + template.HTMLEscapeString(string(b)) + "</pre>")
+		},
 		"dict": func(kv ...any) map[string]any {
 			m := make(map[string]any)
 			for i := 0; i+1 < len(kv); i += 2 {
@@ -32,6 +35,21 @@ func defaultFuncs() template.FuncMap {
 				}
 			}
 			return m
+		},
+		"len": func(v any) int {
+			if v == nil {
+				return 0
+			}
+			switch val := v.(type) {
+			case string:
+				return len(val)
+			case []any:
+				return len(val)
+			case map[string]any:
+				return len(val)
+			}
+			// Fallback for reflection if needed, but the above covers common cases in this framework.
+			return 0
 		},
 	}
 }
@@ -266,14 +284,30 @@ func (e *Engine) convertNimbusToGo(s string) string {
 	})
 
 	// @if(condition) -> {{ if condition }}
-	s = regexp.MustCompile(`@if\s*\((.*?)\)`).ReplaceAllString(s, "{{ if $1 }}")
+	s = regexp.MustCompile(`@if\s*\((.*?)\)`).ReplaceAllStringFunc(s, func(m string) string {
+		sub := regexp.MustCompile(`@if\s*\((.*?)\)`).FindStringSubmatch(m)
+		condition := strings.TrimSpace(sub[1])
+		// Convert ! to not for Go templates
+		condition = strings.ReplaceAll(condition, "!", "not ")
+		return "{{ if " + condition + " }}"
+	})
 	// @else if(condition) or @elseif(condition) -> {{ else if condition }} (must run before @else)
-	s = regexp.MustCompile(`@else\s+if\s*\((.*?)\)`).ReplaceAllString(s, "{{ else if $1 }}")
-	s = regexp.MustCompile(`@elseif\s*\((.*?)\)`).ReplaceAllString(s, "{{ else if $1 }}")
+	s = regexp.MustCompile(`@else\s+if\s*\((.*?)\)`).ReplaceAllStringFunc(s, func(m string) string {
+		sub := regexp.MustCompile(`@else\s+if\s*\((.*?)\)`).FindStringSubmatch(m)
+		condition := strings.TrimSpace(sub[1])
+		condition = strings.ReplaceAll(condition, "!", "not ")
+		return "{{ else if " + condition + " }}"
+	})
+	s = regexp.MustCompile(`@elseif\s*\((.*?)\)`).ReplaceAllStringFunc(s, func(m string) string {
+		sub := regexp.MustCompile(`@elseif\s*\((.*?)\)`).FindStringSubmatch(m)
+		condition := strings.TrimSpace(sub[1])
+		condition = strings.ReplaceAll(condition, "!", "not ")
+		return "{{ else if " + condition + " }}"
+	})
 	// @else -> {{ else }}
 	s = strings.ReplaceAll(s, "@else", "{{ else }}")
-	// @endeach, @endif, or @end -> {{ end }} (match endeach before end so @endeach doesn't become {{ end }}each)
-	s = regexp.MustCompile(`@(endeach|endif|end)`).ReplaceAllString(s, "{{ end }}")
+	// @endeach, @endif, @endrange, or @end -> {{ end }}
+	s = regexp.MustCompile(`@(endeach|endif|endrange|end)`).ReplaceAllString(s, "{{ end }}")
 
 	// @each(item in collection) or @each(collection) -> {{ range }}
 	s = regexp.MustCompile(`@each\s*\((.*?)\)`).ReplaceAllStringFunc(s, func(m string) string {
@@ -299,6 +333,16 @@ func (e *Engine) convertNimbusToGo(s string) string {
 			collection = "." + collection
 		}
 		return "{{ range " + collection + " }}"
+	})
+
+	// @range $k, $v := .expr -> {{ range $k, $v := .expr }}
+	s = regexp.MustCompile(`@range\s+(.*)`).ReplaceAllStringFunc(s, func(m string) string {
+		sub := regexp.MustCompile(`@range\s+(.*)`).FindStringSubmatch(m)
+		if len(sub) < 2 {
+			return m
+		}
+		expr := strings.TrimSpace(sub[1])
+		return "{{ range " + expr + " }}"
 	})
 
 	// Restore in reverse order so nested blocks (e.g. <pre><code>...</code></pre>) get inner placeholders replaced

@@ -49,6 +49,7 @@ func (c *NewCommand) Run(ctx *cli.Context) error {
 
 	dbDriver := "sqlite"
 	var selectedPlugins []string
+	authGuard := "none"
 
 	if interactive {
 		pt, err := ctx.UI.AskSelect("Select project type", []string{"Basic (server-rendered views)", "Inertia (Inertia.js SPA)"}, "Basic (server-rendered views)")
@@ -75,10 +76,37 @@ func (c *NewCommand) Run(ctx *cli.Context) error {
 			dbDriver = "sqlite"
 		}
 
+		// ── Authentication Guard ────────────────────────────────
+		wantAuth, err := ctx.UI.AskConfirm("Would you like to add authentication?", true)
+		if err != nil {
+			return err
+		}
+		if wantAuth {
+			guardAns, err := ctx.UI.AskSelect("Select auth guard", []string{
+				"Session (cookie-based, ideal for web apps & SPAs on same domain)",
+				"Access Token (opaque tokens, ideal for APIs, mobile & 3rd-party)",
+				"Basic Auth (HTTP basic, ideal for internal tools & development)",
+			}, "Session (cookie-based, ideal for web apps & SPAs on same domain)")
+			if err != nil {
+				return err
+			}
+			switch {
+			case strings.Contains(guardAns, "Session"):
+				authGuard = "session"
+			case strings.Contains(guardAns, "Access Token"):
+				authGuard = "access_token"
+			case strings.Contains(guardAns, "Basic Auth"):
+				authGuard = "basic"
+			}
+		}
+
 		options := []string{
 			"AI (OpenAI/Ollama)",
 			"MCP (Model Context Protocol)",
 			"Telescope (debug dashboard)",
+			"Pulse (app monitoring & metrics)",
+			"Scout (full-text search)",
+			"Socialite (OAuth social login)",
 		}
 		if c.kit == "" {
 			options = append(options, "Unpoly (progressive enhancement)")
@@ -95,6 +123,12 @@ func (c *NewCommand) Run(ctx *cli.Context) error {
 				selectedPlugins = append(selectedPlugins, "mcp")
 			} else if strings.Contains(o, "Telescope") {
 				selectedPlugins = append(selectedPlugins, "telescope")
+			} else if strings.Contains(o, "Pulse") {
+				selectedPlugins = append(selectedPlugins, "pulse")
+			} else if strings.Contains(o, "Scout") {
+				selectedPlugins = append(selectedPlugins, "scout")
+			} else if strings.Contains(o, "Socialite") {
+				selectedPlugins = append(selectedPlugins, "socialite")
 			} else if strings.Contains(o, "Unpoly") {
 				selectedPlugins = append(selectedPlugins, "unpoly")
 			}
@@ -200,6 +234,19 @@ func (c *NewCommand) Run(ctx *cli.Context) error {
 	_ = os.WriteFile(filepath.Join(dir, "config", "config.go"), []byte(configLoader), 0644)
 	_ = os.WriteFile(filepath.Join(dir, "config", "app.go"), []byte(configApp), 0644)
 	_ = os.WriteFile(filepath.Join(dir, "config", "database.go"), []byte(configDatabase), 0644)
+	_ = os.WriteFile(filepath.Join(dir, "config", "env.go"), []byte(configEnv), 0644)
+	_ = os.WriteFile(filepath.Join(dir, "config", "cors.go"), []byte(configCORS), 0644)
+	_ = os.WriteFile(filepath.Join(dir, "config", "session.go"), []byte(configSession), 0644)
+	_ = os.WriteFile(filepath.Join(dir, "config", "hash.go"), []byte(configHash), 0644)
+	_ = os.WriteFile(filepath.Join(dir, "config", "logger.go"), []byte(configLogger), 0644)
+	_ = os.WriteFile(filepath.Join(dir, "config", "mail.go"), []byte(configMail), 0644)
+	_ = os.WriteFile(filepath.Join(dir, "config", "queue.go"), []byte(configQueue), 0644)
+	_ = os.WriteFile(filepath.Join(dir, "config", "storage.go"), []byte(configStorage), 0644)
+	_ = os.WriteFile(filepath.Join(dir, "config", "static.go"), []byte(configStatic), 0644)
+	_ = os.WriteFile(filepath.Join(dir, "config", "bodyparser.go"), []byte(configBodyParser), 0644)
+	_ = os.WriteFile(filepath.Join(dir, "config", "limiter.go"), []byte(configLimiter), 0644)
+	_ = os.WriteFile(filepath.Join(dir, "config", "cache.go"), []byte(configCache), 0644)
+	_ = os.WriteFile(filepath.Join(dir, "config", "shield.go"), []byte(configShield), 0644)
 
 	te := template.Must(template.New("env").Parse(envExample))
 	ef, _ := os.Create(filepath.Join(dir, ".env.example"))
@@ -232,6 +279,15 @@ func (c *NewCommand) Run(ctx *cli.Context) error {
 
 	_ = os.WriteFile(filepath.Join(dir, "database", "migrations", "registry.go"), []byte(migrationsRegistryStub), 0644)
 
+	// ── Scaffold auth based on selected guard ───────────────
+	if authGuard != "none" {
+		if err := scaffoldAuth(dir, name, authGuard); err != nil {
+			ctx.UI.Warnf("failed to scaffold auth: %v", err)
+		} else {
+			ctx.UI.Successf("Auth guard scaffolded: %s", authGuard)
+		}
+	}
+
 	if interactive {
 		if err := updateEnvDB(dir, name, dbDriver); err != nil {
 			ctx.UI.Warnf("failed to update DB settings in env files: %v", err)
@@ -258,6 +314,9 @@ func (c *NewCommand) Run(ctx *cli.Context) error {
 	ctx.UI.Successf("Project %s successfully created!", name)
 
 	msg := fmt.Sprintf("Selected DB: %s", dbDriver)
+	if authGuard != "none" {
+		msg += fmt.Sprintf("\nAuth guard: %s", authGuard)
+	}
 	if len(selectedPlugins) > 0 {
 		msg += fmt.Sprintf("\nPlugins selected: %s (run nimbus plugin install for each in your app directory)", strings.Join(selectedPlugins, ", "))
 	}

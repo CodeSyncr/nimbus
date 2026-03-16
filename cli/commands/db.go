@@ -15,6 +15,9 @@ func init() {
 	cli.RegisterCommand(&DBCreate{})
 	cli.RegisterCommand(&DBSeed{})
 	cli.RegisterCommand(&DBRollback{})
+	cli.RegisterCommand(&MigrateFresh{})
+	cli.RegisterCommand(&MigrateStatus{})
+	cli.RegisterCommand(&RouteList{})
 }
 
 func isNimbusApp(dir string) bool {
@@ -97,4 +100,67 @@ func (c *DBRollback) Run(ctx *cli.Context) error {
 	}
 	fmt.Fprintln(ctx.Stdout, "Rollback: run migrator.Down() from your app (e.g. `go run . rollback`).")
 	return nil
+}
+
+// -----------------------------------------------------------------------------
+// migrate:fresh
+// -----------------------------------------------------------------------------
+
+type MigrateFresh struct{}
+
+func (c *MigrateFresh) Name() string        { return "migrate:fresh" }
+func (c *MigrateFresh) Description() string { return "Drop all tables and re-run all migrations" }
+func (c *MigrateFresh) Args() int           { return 0 }
+func (c *MigrateFresh) Run(ctx *cli.Context) error {
+	if !isNimbusApp(ctx.AppRoot) {
+		ctx.UI.Errorf("Not a Nimbus app. Run 'nimbus migrate:fresh' from your app root.")
+		return nil
+	}
+	cmd := exec.Command("go", "run", ".", "migrate:fresh")
+	cmd.Dir = ctx.AppRoot
+	cmd.Stdout = ctx.Stdout
+	cmd.Stderr = ctx.Stderr
+	return cmd.Run()
+}
+
+// -----------------------------------------------------------------------------
+// migrate:status
+// -----------------------------------------------------------------------------
+
+type MigrateStatus struct{}
+
+func (c *MigrateStatus) Name() string        { return "migrate:status" }
+func (c *MigrateStatus) Description() string { return "Show the status of each migration" }
+func (c *MigrateStatus) Args() int           { return 0 }
+func (c *MigrateStatus) Run(ctx *cli.Context) error {
+	if !isNimbusApp(ctx.AppRoot) {
+		ctx.UI.Errorf("Not a Nimbus app. Run 'nimbus migrate:status' from your app root.")
+		return nil
+	}
+	cmd := exec.Command("go", "run", ".", "migrate:status")
+	cmd.Dir = ctx.AppRoot
+	cmd.Stdout = ctx.Stdout
+	cmd.Stderr = ctx.Stderr
+	return cmd.Run()
+}
+
+// -----------------------------------------------------------------------------
+// route:list
+// -----------------------------------------------------------------------------
+
+type RouteList struct{}
+
+func (c *RouteList) Name() string        { return "route:list" }
+func (c *RouteList) Description() string { return "List all registered routes" }
+func (c *RouteList) Args() int           { return 0 }
+func (c *RouteList) Run(ctx *cli.Context) error {
+	if !isNimbusApp(ctx.AppRoot) {
+		ctx.UI.Errorf("Not a Nimbus app. Run 'nimbus route:list' from your app root.")
+		return nil
+	}
+	cmd := exec.Command("go", "run", ".", "route:list")
+	cmd.Dir = ctx.AppRoot
+	cmd.Stdout = ctx.Stdout
+	cmd.Stderr = ctx.Stderr
+	return cmd.Run()
 }

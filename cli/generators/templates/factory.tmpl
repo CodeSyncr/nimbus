@@ -1,0 +1,48 @@
+package factories
+
+import (
+	"fmt"
+	"math/rand"
+)
+
+// {{.FactoryName}}Factory generates fake {{.FactoryName}} records for testing and seeding.
+//
+// Usage:
+//   factory := factories.{{.FactoryName}}()
+//   record := factory.Make()         // Single instance (not persisted)
+//   records := factory.MakeMany(10)  // Slice of instances
+//   factory.Create(db)               // Persist to database
+type {{.FactoryName}}Factory struct {
+	overrides map[string]any
+}
+
+// {{.FactoryName}} returns a new factory for {{.FactoryName}} models.
+func {{.FactoryName}}() *{{.FactoryName}}Factory {
+	return &{{.FactoryName}}Factory{overrides: make(map[string]any)}
+}
+
+// State applies overrides to the factory.
+func (f *{{.FactoryName}}Factory) State(overrides map[string]any) *{{.FactoryName}}Factory {
+	for k, v := range overrides {
+		f.overrides[k] = v
+	}
+	return f
+}
+
+// Make returns a single record with fake data (not persisted).
+func (f *{{.FactoryName}}Factory) Make() map[string]any {
+	return map[string]any{
+		"name":  fmt.Sprintf("{{.FactoryName}}_%d", rand.Intn(10000)),
+		"email": fmt.Sprintf("user%d@example.com", rand.Intn(10000)),
+		// TODO: add more fields
+	}
+}
+
+// MakeMany returns n records with fake data.
+func (f *{{.FactoryName}}Factory) MakeMany(n int) []map[string]any {
+	records := make([]map[string]any, n)
+	for i := range records {
+		records[i] = f.Make()
+	}
+	return records
+}

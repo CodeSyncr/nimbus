@@ -1,0 +1,10 @@
+package events
+
+// {{.EventName}} is dispatched when...
+// Listen for it with: app.Events.Listen(events.{{.EventName}}Event, handler)
+const {{.EventName}}Event = "{{.SnakeName}}"
+
+// {{.EventName}}Payload carries data for the {{.EventName}} event.
+type {{.EventName}}Payload struct {
+	// TODO: add payload fields
+}

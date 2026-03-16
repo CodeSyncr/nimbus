@@ -17,15 +17,12 @@ type cohereProvider struct {
 	model  string
 }
 
+func (p *cohereProvider) Name() string { return "cohere" }
+
 func (p *cohereProvider) Generate(ctx context.Context, req *GenerateRequest) (*GenerateResponse, error) {
 	return nil, fmt.Errorf("ai: Cohere provider not yet implemented - use AI_PROVIDER=openai or ollama")
 }
 
-func (p *cohereProvider) Stream(ctx context.Context, req *GenerateRequest) (<-chan string, <-chan error) {
-	errCh := make(chan error, 1)
-	textCh := make(chan string)
-	errCh <- fmt.Errorf("ai: Cohere provider not yet implemented")
-	close(textCh)
-	close(errCh)
-	return textCh, errCh
+func (p *cohereProvider) Stream(ctx context.Context, req *GenerateRequest) (*StreamResponse, error) {
+	return nil, fmt.Errorf("ai: Cohere provider not yet implemented")
 }

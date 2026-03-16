@@ -1,6 +1,9 @@
 package router
 
 import (
+	"fmt"
+	"io"
+	"os"
 	"strings"
 
 	"github.com/CodeSyncr/nimbus/http"
@@ -16,9 +19,11 @@ type Middleware func(HandlerFunc) HandlerFunc
 
 // Router wraps Chi as the HTTP router (solid, net/http compatible).
 type Router struct {
-	chi         chi.Router
-	middlewares []Middleware
-	namedRoutes map[string]*Route
+	chi             chi.Router
+	middlewares     []Middleware
+	namedRoutes     map[string]*Route
+	allRoutes       []*Route
+	fallbackHandler HandlerFunc
 }
 
 // New creates a new Router backed by Chi.
@@ -100,6 +105,23 @@ func (r *Router) Mount(path string, handler http.Handler) {
 	r.chi.Mount(path, handler)
 }
 
+// Fallback registers a catch-all handler that is invoked when no routes match.
+// This is the equivalent of AdonisJS's Route.fallback(). If no Fallback is
+// registered, Chi's default 404 handling applies.
+//
+//	app.Router.Fallback(func(c *http.Context) error {
+//	    return c.JSON(404, map[string]string{"error": "Not found"})
+//	})
+func (r *Router) Fallback(handler HandlerFunc) {
+	r.fallbackHandler = handler
+	r.chi.NotFound(func(w http.ResponseWriter, req *http.Request) {
+		ctx := http.New(w, req, nil)
+		if err := handler(ctx); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+	})
+}
+
 // URL generates a URL for a named route, substituting params.
 // Params are key-value pairs: router.URL("users.show", "id", "42") → "/users/42".
 func (r *Router) URL(name string, params ...string) string {
@@ -159,7 +181,14 @@ func (r *Router) addRoute(method, path string, handler HandlerFunc, groupMiddlew
 	case http.MethodOptions:
 		r.chi.Options(chiPath, h)
 	}
-	return &Route{router: r, method: method, path: path}
+	rt := &Route{router: r, method: method, path: path}
+	r.allRoutes = append(r.allRoutes, rt)
+	return rt
+}
+
+// Routes returns all registered routes.
+func (r *Router) Routes() []*Route {
+	return r.allRoutes
 }
 
 func toHandler(fn HandlerFunc) http.StdHandlerFunc {
@@ -195,4 +224,50 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		req.URL = &u2
 	}
 	r.chi.ServeHTTP(w, req)
+}
+
+// PrintRoutes prints a formatted table of all registered routes.
+// If w is nil, it prints to os.Stdout.
+func (r *Router) PrintRoutes(w io.Writer) {
+	if w == nil {
+		w = os.Stdout
+	}
+	routes := r.Routes()
+	if len(routes) == 0 {
+		fmt.Fprintln(w, "  No routes registered.")
+		return
+	}
+
+	// Determine column widths.
+	maxMethod, maxPath, maxName := 6, 4, 4
+	for _, rt := range routes {
+		if len(rt.Method()) > maxMethod {
+			maxMethod = len(rt.Method())
+		}
+		if len(rt.Path()) > maxPath {
+			maxPath = len(rt.Path())
+		}
+		if len(rt.Name()) > maxName {
+			maxName = len(rt.Name())
+		}
+	}
+	if maxPath > 60 {
+		maxPath = 60
+	}
+
+	header := fmt.Sprintf("  %-*s  %-*s  %-*s  %s", maxMethod, "Method", maxPath, "Path", maxName, "Name", "Summary")
+	sep := "  " + strings.Repeat("─", len(header))
+
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, header)
+	fmt.Fprintln(w, sep)
+	for _, rt := range routes {
+		name := rt.Name()
+		if name == "" {
+			name = "·"
+		}
+		summary := rt.Meta.Summary
+		fmt.Fprintf(w, "  %-*s  %-*s  %-*s  %s\n", maxMethod, rt.Method(), maxPath, rt.Path(), maxName, name, summary)
+	}
+	fmt.Fprintln(w)
 }

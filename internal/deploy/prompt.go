@@ -16,7 +16,7 @@ func PromptTarget(dir string, cfg *Config) (target string, outCfg *Config, err e
 		cfg = &Config{}
 	}
 	if !isTerminal(os.Stdin) {
-		return "", nil, fmt.Errorf("no deploy target specified. Use: nimbus deploy fly|railway|aws|docker")
+		return "", nil, fmt.Errorf("no deploy target specified. Use: nimbus deploy fly|railway|render|aws|docker")
 	}
 
 	reader := bufio.NewReader(os.Stdin)
@@ -30,10 +30,11 @@ func PromptTarget(dir string, cfg *Config) (target string, outCfg *Config, err e
 	fmt.Println("  Where do you want to deploy?")
 	fmt.Println("    1) Fly.io    - Global edge, fast cold starts")
 	fmt.Println("    2) Railway   - Simple, great DX")
-	fmt.Println("    3) AWS       - ECS, App Runner, EKS")
-	fmt.Println("    4) Docker    - Build image locally (for K8s or custom)")
+	fmt.Println("    3) Render    - GitOps PaaS, Free tier")
+	fmt.Println("    4) AWS       - ECS, App Runner, EKS")
+	fmt.Println("    5) Docker    - Build image locally (for K8s or custom)")
 	fmt.Println()
-	fmt.Printf("  Select target (1-4) [%s]: ", defaultTarget)
+	fmt.Printf("  Select target (1-5) [%s]: ", defaultTarget)
 
 	choice, err := readLine(reader)
 	if err != nil {
@@ -46,9 +47,11 @@ func PromptTarget(dir string, cfg *Config) (target string, outCfg *Config, err e
 		target = "fly"
 	case "2", "railway":
 		target = "railway"
-	case "3", "aws":
+	case "3", "render":
+		target = "render"
+	case "4", "aws":
 		target = "aws"
-	case "4", "docker":
+	case "5", "docker":
 		target = "docker"
 	default:
 		if choice != "" {
@@ -67,6 +70,11 @@ func PromptTarget(dir string, cfg *Config) (target string, outCfg *Config, err e
 		}
 	case "railway":
 		cfg, err = promptRailwayConfig(reader, dir, cfg, defaultApp)
+		if err != nil {
+			return "", nil, err
+		}
+	case "render":
+		cfg, err = promptRenderConfig(reader, dir, cfg, defaultApp)
 		if err != nil {
 			return "", nil, err
 		}
@@ -157,6 +165,24 @@ func promptFlyConfig(r *bufio.Reader, dir string, cfg *Config, defaultApp string
 func promptRailwayConfig(r *bufio.Reader, dir string, cfg *Config, defaultApp string) (*Config, error) {
 	cfg.AppName = defaultApp
 	fmt.Println("  Railway will use your project from 'railway link' or current directory.")
+	fmt.Println()
+	return cfg, nil
+}
+
+func promptRenderConfig(r *bufio.Reader, dir string, cfg *Config, defaultApp string) (*Config, error) {
+	if cfg.AppName == "" {
+		fmt.Print("  Service name (Render) [" + defaultApp + "]: ")
+		val, err := readLine(r)
+		if err != nil {
+			return nil, err
+		}
+		val = strings.TrimSpace(val)
+		if val == "" {
+			cfg.AppName = defaultApp
+		} else {
+			cfg.AppName = val
+		}
+	}
 	fmt.Println()
 	return cfg, nil
 }

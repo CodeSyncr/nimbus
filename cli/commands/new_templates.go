@@ -27,6 +27,10 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "db:create" {
+		bin.RunDbCreate()
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "migrate" {
 		bin.RunMigrations()
 		return
@@ -85,7 +89,7 @@ func bootCache() {
 func bootDatabase(app *nimbus.App) {
 	db, err := database.Connect(config.Database.Driver, config.Database.DSN)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Database connection failed: %%v\n", err)
+		fmt.Fprintf(os.Stderr, "Database connection failed: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -118,17 +122,17 @@ func RunMigrations() {
 		Password: config.Database.Password,
 		Database: config.Database.Database,
 	}); err != nil {
-		fmt.Fprintf(os.Stderr, "Database create failed: %%v\n", err)
+		fmt.Fprintf(os.Stderr, "Database create failed: %v\n", err)
 		os.Exit(1)
 	}
 	db, err := database.Connect(config.Database.Driver, config.Database.DSN)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Database connection failed: %%v\n", err)
+		fmt.Fprintf(os.Stderr, "Database connection failed: %v\n", err)
 		os.Exit(1)
 	}
 	migrator := database.NewMigrator(db, migrations.All())
 	if err := migrator.Up(); err != nil {
-		fmt.Fprintf(os.Stderr, "Migration failed: %%v\n", err)
+		fmt.Fprintf(os.Stderr, "Migration failed: %v\n", err)
 		os.Exit(1)
 	}
 	fmt.Println("Migrations completed.")
@@ -144,7 +148,7 @@ func RunDbCreate() {
 		Password: config.Database.Password,
 		Database: config.Database.Database,
 	}); err != nil {
-		fmt.Fprintf(os.Stderr, "Database create failed: %%v\n", err)
+		fmt.Fprintf(os.Stderr, "Database create failed: %v\n", err)
 		os.Exit(1)
 	}
 	fmt.Println("Database created (or already exists).")
@@ -253,12 +257,12 @@ func RunMigrations() {
 	config.Load()
 	db, err := database.Connect(config.Database.Driver, config.Database.DSN)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Database connection failed: %%v\n", err)
+		fmt.Fprintf(os.Stderr, "Database connection failed: %v\n", err)
 		os.Exit(1)
 	}
 	migrator := database.NewMigrator(db, migrations.All())
 	if err := migrator.Up(); err != nil {
-		fmt.Fprintf(os.Stderr, "Migration failed: %%v\n", err)
+		fmt.Fprintf(os.Stderr, "Migration failed: %v\n", err)
 		os.Exit(1)
 	}
 	fmt.Println("Migrations completed.")
@@ -274,7 +278,7 @@ func RunDbCreate() {
 		Password: config.Database.Password,
 		Database: config.Database.Database,
 	}); err != nil {
-		fmt.Fprintf(os.Stderr, "Database create failed: %%v\n", err)
+		fmt.Fprintf(os.Stderr, "Database create failed: %v\n", err)
 		os.Exit(1)
 	}
 	fmt.Println("Database created (or already exists).")
@@ -732,6 +736,13 @@ const inertiaLayoutNimbus = `<!DOCTYPE html>
     }
     </style>
     {{ if .viteDev }}
+    <script type="module">
+      import RefreshRuntime from 'http://localhost:5173/@react-refresh'
+      RefreshRuntime.injectIntoGlobalHook(window)
+      window.$RefreshReg$ = () => {}
+      window.$RefreshSig$ = () => (type) => type
+      window.__vite_plugin_react_preamble_installed__ = true
+    </script>
     <script type="module" src="http://localhost:5173/@vite/client"></script>
     <script type="module" src="http://localhost:5173/inertia/app.tsx"></script>
     {{ else }}
@@ -1396,12 +1407,25 @@ const inertiaPageHomeSvelte = `<script>
 
 // ── Inertia kit: package.json ──────────────────────────────────
 func inertiaPackageJSON(kit string) string {
-	deps := `"@inertiajs/react": "^1.0.0", "react": "^18.2.0", "react-dom": "^18.2.0"`
 	return `{
   "name": "nimbus-inertia-app",
   "type": "module",
-  "scripts": { "dev": "vite", "build": "vite build" },
-  "dependencies": { ` + deps + ` }
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "@inertiajs/react": "^1.0.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "@vitejs/plugin-react": "^4.2.0",
+    "typescript": "^5.3.0",
+    "vite": "^5.0.0"
+  }
 }
 `
 }
@@ -1412,6 +1436,13 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   plugins: [react()],
+  server: {
+    origin: 'http://localhost:5173',
+    cors: true,
+    hmr: {
+      host: 'localhost',
+    },
+  },
   build: {
     outDir: 'public/build',
     manifest: true,
@@ -1421,13 +1452,90 @@ export default defineConfig({
 `
 }
 
-const inertiaTsconfig = `{ "compilerOptions": { "strict": true } }`
-const inertiaTsconfigNode = `{ "compilerOptions": { "strict": true } }`
-const inertiaTsconfigInertia = `{ "compilerOptions": { "strict": true } }`
-const inertiaTypesTS = `export {}`
+const inertiaTsconfig = `{
+  "compilerOptions": {
+    "target": "ES2020",
+    "useDefineForClassFields": true,
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "noFallthroughCasesInSwitch": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["inertia"]
+}`
+
+const inertiaTsconfigNode = `{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2023"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+    "strict": true,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "noFallthroughCasesInSwitch": true
+  },
+  "include": ["vite.config.ts"]
+}`
+
+const inertiaTsconfigInertia = `{
+  "compilerOptions": {
+    "target": "ES2020",
+    "useDefineForClassFields": true,
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "strict": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["."]
+}`
+
+const inertiaTypesTS = `/// <reference types="vite/client" />
+
+declare module '*.tsx' {
+  const component: React.FC<any>
+  export default component
+}
+
+export {}`
 
 func inertiaIndexHTML(kit string) string {
-	return `<html><body><div id="app"></div><script src="/inertia/app.tsx" type="module"></script></body></html>`
+	return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Nimbus App</title>
+</head>
+<body>
+  <div id="app"></div>
+  <script src="/inertia/app.tsx" type="module"></script>
+</body>
+</html>`
 }
 
 // ── config/config.go ───────────────────────────────────────────
@@ -1440,6 +1548,18 @@ func Load() {
 	_ = nimbusconfig.LoadInto(&App)
 	_ = nimbusconfig.LoadInto(&Database)
 	buildDatabaseDSN()
+
+	loadBodyParser()
+	loadCache()
+	loadCORS()
+	loadHash()
+	loadLimiter()
+	loadLogger()
+	loadMail()
+	loadSession()
+	loadShield()
+	loadStatic()
+	loadStorage()
 }
 `
 
@@ -1460,7 +1580,15 @@ const configDatabase = `package config
 
 import "fmt"
 
+// DatabaseConnectionConfig holds settings for a single named connection.
+type DatabaseConnectionConfig struct {
+	Driver string
+	DSN    string
+}
+
+// DatabaseConfig holds primary and additional connection settings.
 type DatabaseConfig struct {
+	// Primary SQL connection
 	Driver   string ` + "`config:\"database.driver\" env:\"DB_DRIVER\" default:\"sqlite\"`" + `
 	DSN      string ` + "`config:\"database.dsn\" env:\"DB_DSN\" default:\"\"`" + `
 	Host     string ` + "`config:\"database.host\" env:\"DB_HOST\" default:\"localhost\"`" + `
@@ -1468,6 +1596,14 @@ type DatabaseConfig struct {
 	User     string ` + "`config:\"database.user\" env:\"DB_USER\" default:\"\"`" + `
 	Password string ` + "`config:\"database.password\" env:\"DB_PASSWORD\" default:\"\"`" + `
 	Database string ` + "`config:\"database.database\" env:\"DB_DATABASE\" default:\"nimbus\"`" + `
+
+	// Additional named SQL connections (e.g. "analytics", "logs").
+	// Register them in start/kernel.go with database.ConnectAll().
+	Connections map[string]DatabaseConnectionConfig
+
+	// MongoDB / NoSQL
+	MongoURI      string ` + "`config:\"mongo.uri\" env:\"MONGO_URI\" default:\"\"`" + `
+	MongoDatabase string ` + "`config:\"mongo.database\" env:\"MONGO_DATABASE\" default:\"\"`" + `
 }
 
 var Database DatabaseConfig
@@ -1491,6 +1627,482 @@ func buildDatabaseDSN() {
 			Database.User, Database.Password, Database.Host, Database.Port, Database.Database)
 	default:
 		Database.DSN = "database.sqlite"
+	}
+}
+`
+
+// ── config/env.go ──────────────────────────────────────────────
+const configEnv = `package config
+
+import (
+	"os"
+	"strconv"
+)
+
+func env(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
+func envInt(key string, fallback int) int {
+	if v := os.Getenv(key); v != "" {
+		if i, err := strconv.Atoi(v); err == nil {
+			return i
+		}
+	}
+	return fallback
+}
+
+func envBool(key string, fallback bool) bool {
+	if v := os.Getenv(key); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			return b
+		}
+	}
+	return fallback
+}
+`
+
+// ── config/cors.go ─────────────────────────────────────────────
+const configCORS = `/*
+|--------------------------------------------------------------------------
+| CORS Configuration
+|--------------------------------------------------------------------------
+|
+| Cross-Origin Resource Sharing controls which external domains can
+| make requests to your API.
+|
+| AllowOrigins:
+|   - ["*"]                         - allow all origins
+|   - ["https://app.example.com"]   - specific domain(s)
+|
+| When AllowCredentials is true, browsers reject the "*" origin.
+| Nimbus automatically reflects the requesting origin instead.
+|
+*/
+
+package config
+
+var CORS CORSConfig
+
+type CORSConfig struct {
+	Enabled          bool
+	AllowOrigins     []string
+	AllowMethods     []string
+	AllowHeaders     []string
+	ExposeHeaders    []string
+	AllowCredentials bool
+	MaxAge           int
+}
+
+func loadCORS() {
+	CORS = CORSConfig{
+		Enabled:          envBool("CORS_ENABLED", true),
+		AllowOrigins:     []string{env("CORS_ORIGIN", "*")},
+		AllowMethods:     []string{"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		AllowHeaders:     []string{"Content-Type", "Authorization", "X-Requested-With"},
+		ExposeHeaders:    []string{},
+		AllowCredentials: envBool("CORS_CREDENTIALS", false),
+		MaxAge:           envInt("CORS_MAX_AGE", 86400),
+	}
+}
+`
+
+// ── config/session.go ──────────────────────────────────────────
+const configSession = `/*
+|--------------------------------------------------------------------------
+| Session Configuration
+|--------------------------------------------------------------------------
+|
+| Supported drivers: "cookie", "memory", "redis", "database"
+|
+*/
+
+package config
+
+var Session SessionConfig
+
+type SessionConfig struct {
+	Driver     string
+	CookieName string
+	MaxAge     int
+	HttpOnly   bool
+	Secure     bool
+	SameSite   string
+}
+
+func loadSession() {
+	Session = SessionConfig{
+		Driver:     env("SESSION_DRIVER", "cookie"),
+		CookieName: env("SESSION_COOKIE", "nimbus_session"),
+		MaxAge:     envInt("SESSION_MAX_AGE", 604800),
+		HttpOnly:   true,
+		Secure:     env("APP_ENV", "development") == "production",
+		SameSite:   "lax",
+	}
+}
+`
+
+// ── config/hash.go ─────────────────────────────────────────────
+const configHash = `/*
+|--------------------------------------------------------------------------
+| Hashing Configuration
+|--------------------------------------------------------------------------
+|
+| Algorithm and cost for password hashing.
+|
+*/
+
+package config
+
+var Hash HashConfig
+
+type HashConfig struct {
+	Driver     string
+	BcryptCost int
+}
+
+func loadHash() {
+	Hash = HashConfig{
+		Driver:     env("HASH_DRIVER", "bcrypt"),
+		BcryptCost: envInt("HASH_BCRYPT_COST", 10),
+	}
+}
+`
+
+// ── config/logger.go ───────────────────────────────────────────
+const configLogger = `/*
+|--------------------------------------------------------------------------
+| Logger Configuration
+|--------------------------------------------------------------------------
+|
+| Structured logging settings (backed by uber-go/zap).
+|
+*/
+
+package config
+
+var Logger LoggerConfig
+
+type LoggerConfig struct {
+	Level  string
+	Format string
+}
+
+func loadLogger() {
+	Logger = LoggerConfig{
+		Level:  env("LOG_LEVEL", "info"),
+		Format: env("LOG_FORMAT", "json"),
+	}
+}
+`
+
+// ── config/mail.go ─────────────────────────────────────────────
+const configMail = `/*
+|--------------------------------------------------------------------------
+| Mail Configuration
+|--------------------------------------------------------------------------
+|
+| SMTP driver settings for outbound email.
+|
+*/
+
+package config
+
+var Mail MailConfig
+
+type MailConfig struct {
+	Driver string
+	SMTP   SMTPConfig
+}
+
+type SMTPConfig struct {
+	Host     string
+	Port     int
+	Username string
+	Password string
+	From     string
+	FromName string
+}
+
+func loadMail() {
+	Mail = MailConfig{
+		Driver: env("MAIL_DRIVER", "smtp"),
+		SMTP: SMTPConfig{
+			Host:     env("SMTP_HOST", "localhost"),
+			Port:     envInt("SMTP_PORT", 1025),
+			Username: env("SMTP_USERNAME", ""),
+			Password: env("SMTP_PASSWORD", ""),
+			From:     env("MAIL_FROM", "noreply@example.com"),
+			FromName: env("MAIL_FROM_NAME", "Nimbus App"),
+		},
+	}
+}
+`
+
+// ── config/queue.go ────────────────────────────────────────────
+const configQueue = `/*
+|--------------------------------------------------------------------------
+| Queue Configuration
+|--------------------------------------------------------------------------
+|
+| Supported drivers: "sync", "redis", "database", "sqs", "kafka"
+|
+*/
+
+package config
+
+var Queue QueueConfig
+
+type QueueConfig struct {
+	Driver       string
+	RedisURL     string
+	SQSQueueURL  string
+	KafkaBrokers string
+	KafkaTopic   string
+	KafkaGroupID string
+}
+
+func loadQueue() {
+	Queue = QueueConfig{
+		Driver:       env("QUEUE_DRIVER", "sync"),
+		RedisURL:     env("REDIS_URL", ""),
+		SQSQueueURL:  env("SQS_QUEUE_URL", ""),
+		KafkaBrokers: env("KAFKA_BROKERS", ""),
+		KafkaTopic:   env("KAFKA_TOPIC", "nimbus-queue"),
+		KafkaGroupID: env("KAFKA_GROUP_ID", "nimbus-queue"),
+	}
+}
+`
+
+// ── config/storage.go ──────────────────────────────────────────
+const configStorage = `/*
+|--------------------------------------------------------------------------
+| Storage / Drive Configuration
+|--------------------------------------------------------------------------
+|
+| File storage driver for uploads and generated files.
+|
+*/
+
+package config
+
+var Storage StorageConfig
+
+type StorageConfig struct {
+	Driver string
+	Local  LocalStorageConfig
+}
+
+type LocalStorageConfig struct {
+	Root string
+}
+
+func loadStorage() {
+	Storage = StorageConfig{
+		Driver: env("STORAGE_DRIVER", "local"),
+		Local: LocalStorageConfig{
+			Root: env("STORAGE_ROOT", "storage"),
+		},
+	}
+}
+`
+
+// ── config/static.go ───────────────────────────────────────────
+const configStatic = `/*
+|--------------------------------------------------------------------------
+| Static Files Configuration
+|--------------------------------------------------------------------------
+|
+| Serve static assets from the public/ directory.
+|
+*/
+
+package config
+
+var Static StaticConfig
+
+type StaticConfig struct {
+	Enabled bool
+	Root    string
+	Prefix  string
+	MaxAge  int
+}
+
+func loadStatic() {
+	Static = StaticConfig{
+		Enabled: envBool("STATIC_ENABLED", true),
+		Root:    env("STATIC_ROOT", "public"),
+		Prefix:  env("STATIC_PREFIX", "/public"),
+		MaxAge:  envInt("STATIC_MAX_AGE", 86400),
+	}
+}
+`
+
+// ── config/bodyparser.go ───────────────────────────────────────
+const configBodyParser = `/*
+|--------------------------------------------------------------------------
+| Body Parser Configuration
+|--------------------------------------------------------------------------
+|
+| Limits and allowed content types for incoming request bodies.
+|
+*/
+
+package config
+
+var BodyParser BodyParserConfig
+
+type BodyParserConfig struct {
+	JSONLimit      string
+	FormLimit      string
+	MultipartLimit string
+	AllowedTypes   []string
+}
+
+func loadBodyParser() {
+	BodyParser = BodyParserConfig{
+		JSONLimit:      env("BODY_JSON_LIMIT", "1mb"),
+		FormLimit:      env("BODY_FORM_LIMIT", "1mb"),
+		MultipartLimit: env("BODY_MULTIPART_LIMIT", "10mb"),
+		AllowedTypes:   []string{"application/json", "application/x-www-form-urlencoded", "multipart/form-data"},
+	}
+}
+`
+
+// ── config/limiter.go ──────────────────────────────────────────
+const configLimiter = `/*
+|--------------------------------------------------------------------------
+| Rate Limiter Configuration
+|--------------------------------------------------------------------------
+|
+| Throttle requests per client. KeyFunc: "ip" | "user" | "custom".
+| Store: "memory" (single instance) or "redis" (distributed).
+|
+*/
+
+package config
+
+import "time"
+
+var Limiter LimiterConfig
+
+type LimiterConfig struct {
+	Enabled       bool
+	Requests      int
+	Window        time.Duration
+	KeyFunc       string
+	Store         string
+	RedisURL      string
+	Headers       bool
+	BlockDuration time.Duration
+}
+
+func loadLimiter() {
+	window := time.Duration(envInt("RATE_LIMIT_WINDOW_SECONDS", 60)) * time.Second
+	Limiter = LimiterConfig{
+		Enabled:       envBool("RATE_LIMIT_ENABLED", true),
+		Requests:      envInt("RATE_LIMIT_REQUESTS", 100),
+		Window:        window,
+		KeyFunc:       env("RATE_LIMIT_KEY", "ip"),
+		Store:         env("RATE_LIMIT_STORE", "memory"),
+		RedisURL:      env("REDIS_URL", ""),
+		Headers:       envBool("RATE_LIMIT_HEADERS", true),
+		BlockDuration: window,
+	}
+}
+`
+
+// ── config/cache.go ────────────────────────────────────────────
+const configCache = `/*
+|--------------------------------------------------------------------------
+| Cache Configuration
+|--------------------------------------------------------------------------
+|
+| Supported drivers: "memory", "redis", "memcached", "dynamodb"
+|
+*/
+
+package config
+
+import "time"
+
+var Cache CacheConfig
+
+type CacheConfig struct {
+	Driver     string
+	DefaultTTL time.Duration
+}
+
+func loadCache() {
+	Cache = CacheConfig{
+		Driver:     env("CACHE_DRIVER", "memory"),
+		DefaultTTL: time.Duration(envInt("CACHE_TTL_MINUTES", 60)) * time.Minute,
+	}
+}
+`
+
+// ── config/shield.go ───────────────────────────────────────────
+const configShield = `/*
+|--------------------------------------------------------------------------
+| Shield Configuration
+|--------------------------------------------------------------------------
+|
+| Shield protects your app by setting security HTTP headers and
+| providing CSRF protection.
+|
+| ExceptPaths: routes to exclude from CSRF validation (e.g. webhooks).
+|
+*/
+
+package config
+
+import "net/http"
+
+var Shield ShieldConfig
+
+type ShieldConfig struct {
+	ContentTypeNosniff bool
+	XSSProtection      string
+	FrameGuard         string
+	ReferrerPolicy     string
+	CSRF               CSRFConfig
+}
+
+type CSRFConfig struct {
+	Enabled     bool
+	CookieName  string
+	HeaderName  string
+	FieldName   string
+	MaxAge      int
+	Secure      bool
+	SameSite    http.SameSite
+	Path        string
+	HttpOnly    bool
+	ExceptPaths []string
+}
+
+func loadShield() {
+	isProd := env("APP_ENV", "development") == "production"
+	Shield = ShieldConfig{
+		ContentTypeNosniff: true,
+		XSSProtection:      "0",
+		FrameGuard:         "SAMEORIGIN",
+		ReferrerPolicy:     "strict-origin-when-cross-origin",
+		CSRF: CSRFConfig{
+			Enabled:     envBool("CSRF_ENABLED", true),
+			CookieName:  "__nimbus_csrf",
+			HeaderName:  "X-CSRF-Token",
+			FieldName:   "_csrf",
+			MaxAge:      86400,
+			Secure:      isProd,
+			SameSite:    http.SameSiteLaxMode,
+			Path:        "/",
+			HttpOnly:    true,
+			ExceptPaths: []string{},
+		},
 	}
 }
 `

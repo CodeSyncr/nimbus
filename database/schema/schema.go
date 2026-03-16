@@ -2,6 +2,7 @@ package schema
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"gorm.io/gorm"
@@ -83,13 +84,13 @@ type indexDef struct {
 
 // Increments adds an auto-increment primary key (id).
 func (t *Table) Increments(name string) *Table {
-	t.columns = append(t.columns, columnDef{name: name, typ: "INTEGER PRIMARY KEY AUTOINCREMENT"})
+	t.columns = append(t.columns, columnDef{name: name, typ: "__SERIAL_PK__"})
 	return t
 }
 
 // BigIncrements adds a bigint auto-increment primary key.
 func (t *Table) BigIncrements(name string) *Table {
-	t.columns = append(t.columns, columnDef{name: name, typ: "INTEGER PRIMARY KEY AUTOINCREMENT"})
+	t.columns = append(t.columns, columnDef{name: name, typ: "__BIGSERIAL_PK__"})
 	return t
 }
 
@@ -176,13 +177,13 @@ func (t *Table) Time(name string) *Table {
 
 // Timestamp adds a timestamp column (created_at, updated_at).
 func (t *Table) Timestamp(name string) *Table {
-	t.columns = append(t.columns, columnDef{name: name, typ: "DATETIME"})
+	t.columns = append(t.columns, columnDef{name: name, typ: "__TIMESTAMP__"})
 	return t
 }
 
 // DateTime adds a DATETIME column.
 func (t *Table) DateTime(name string) *Table {
-	t.columns = append(t.columns, columnDef{name: name, typ: "DATETIME"})
+	t.columns = append(t.columns, columnDef{name: name, typ: "__TIMESTAMP__"})
 	return t
 }
 
@@ -206,7 +207,7 @@ func (t *Table) UUID(name string) *Table {
 
 // Binary adds a binary/BLOB column.
 func (t *Table) Binary(name string) *Table {
-	t.columns = append(t.columns, columnDef{name: name, typ: "BLOB"})
+	t.columns = append(t.columns, columnDef{name: name, typ: "__BINARY__"})
 	return t
 }
 
@@ -218,14 +219,14 @@ func (t *Table) Enum(name string, _ []string) *Table {
 
 // Timestamps adds created_at and updated_at columns.
 func (t *Table) Timestamps() *Table {
-	t.columns = append(t.columns, columnDef{name: "created_at", typ: "DATETIME"})
-	t.columns = append(t.columns, columnDef{name: "updated_at", typ: "DATETIME"})
+	t.columns = append(t.columns, columnDef{name: "created_at", typ: "__TIMESTAMP__"})
+	t.columns = append(t.columns, columnDef{name: "updated_at", typ: "__TIMESTAMP__"})
 	return t
 }
 
 // SoftDeletes adds deleted_at column (nullable) for GORM soft delete.
 func (t *Table) SoftDeletes() *Table {
-	t.columns = append(t.columns, columnDef{name: "deleted_at", typ: "DATETIME", nullable: true})
+	t.columns = append(t.columns, columnDef{name: "deleted_at", typ: "__TIMESTAMP__", nullable: true})
 	return t
 }
 
@@ -375,19 +376,104 @@ func (s *Schema) AlterTable(name string, fn func(*Table)) error {
 	return t.execAlter()
 }
 
+// driverName returns "postgres", "mysql", or "sqlite" based on the gorm Dialector.
+func (t *Table) driverName() string {
+	if t.db == nil || t.db.Dialector == nil {
+		return "sqlite"
+	}
+	name := t.db.Dialector.Name()
+	switch name {
+	case "postgres", "pgx":
+		return "postgres"
+	case "mysql":
+		return "mysql"
+	default:
+		return "sqlite"
+	}
+}
+
+// resolveType translates internal marker types to driver-specific SQL types.
+func (t *Table) resolveType(typ string) string {
+	driver := t.driverName()
+	switch typ {
+	case "__SERIAL_PK__":
+		switch driver {
+		case "postgres":
+			return "SERIAL PRIMARY KEY"
+		case "mysql":
+			return "INTEGER PRIMARY KEY AUTO_INCREMENT"
+		default:
+			return "INTEGER PRIMARY KEY AUTOINCREMENT"
+		}
+	case "__BIGSERIAL_PK__":
+		switch driver {
+		case "postgres":
+			return "BIGSERIAL PRIMARY KEY"
+		case "mysql":
+			return "BIGINT PRIMARY KEY AUTO_INCREMENT"
+		default:
+			return "INTEGER PRIMARY KEY AUTOINCREMENT"
+		}
+	case "__TIMESTAMP__":
+		if driver == "postgres" {
+			return "TIMESTAMP"
+		}
+		return "DATETIME"
+	case "__BINARY__":
+		if driver == "postgres" {
+			return "BYTEA"
+		}
+		return "BLOB"
+	}
+	return typ
+}
+
+// isAutoIncrementPK returns true for marker types that include PRIMARY KEY.
+func isAutoIncrementPK(typ string) bool {
+	return typ == "__SERIAL_PK__" || typ == "__BIGSERIAL_PK__"
+}
+
+// quoteDefault returns a properly quoted SQL default value.
+// Numeric values and SQL keywords (TRUE, FALSE, NULL, CURRENT_TIMESTAMP) are
+// passed through as-is; everything else is single-quoted as a string literal.
+func quoteDefault(val string) string {
+	// Numeric literal?
+	if _, err := strconv.ParseFloat(val, 64); err == nil {
+		return val
+	}
+	upper := strings.ToUpper(val)
+	switch upper {
+	case "TRUE", "FALSE", "NULL", "CURRENT_TIMESTAMP", "NOW()":
+		return upper
+	}
+	// Already single-quoted?
+	if strings.HasPrefix(val, "'") && strings.HasSuffix(val, "'") {
+		return val
+	}
+	// Quote as string literal, escaping internal single quotes.
+	escaped := strings.ReplaceAll(val, "'", "''")
+	return "'" + escaped + "'"
+}
+
+func (t *Table) buildColumnSQL(c columnDef) string {
+	resolved := t.resolveType(c.typ)
+	s := fmt.Sprintf("%q %s", c.name, resolved)
+	if !c.nullable && !isAutoIncrementPK(c.typ) {
+		s += " NOT NULL"
+	}
+	if c.unique {
+		s += " UNIQUE"
+	}
+	if c.default_ != "" {
+		s += " DEFAULT " + quoteDefault(c.default_)
+	}
+	return s
+}
+
 func (t *Table) execAlter() error {
 	for _, c := range t.columns {
-		s := fmt.Sprintf("%q %s", c.name, c.typ)
-		if !c.nullable && c.typ != "INTEGER PRIMARY KEY AUTOINCREMENT" {
-			s += " NOT NULL"
-		}
-		if c.unique {
-			s += " UNIQUE"
-		}
-		if c.default_ != "" {
-			s += " DEFAULT " + c.default_
-		}
-		sql := fmt.Sprintf("ALTER TABLE %q ADD COLUMN %s", t.name, s)
+		colSQL := t.buildColumnSQL(c)
+		sql := fmt.Sprintf("ALTER TABLE %q ADD COLUMN %s", t.name, colSQL)
 		if err := t.db.Exec(sql).Error; err != nil {
 			return err
 		}
@@ -404,17 +490,7 @@ func (t *Table) execAlter() error {
 func (t *Table) execCreate() error {
 	parts := make([]string, 0, len(t.columns))
 	for _, c := range t.columns {
-		s := fmt.Sprintf("%q %s", c.name, c.typ)
-		if !c.nullable && c.typ != "INTEGER PRIMARY KEY AUTOINCREMENT" {
-			s += " NOT NULL"
-		}
-		if c.unique {
-			s += " UNIQUE"
-		}
-		if c.default_ != "" {
-			s += " DEFAULT " + c.default_
-		}
-		parts = append(parts, s)
+		parts = append(parts, t.buildColumnSQL(c))
 	}
 	sql := fmt.Sprintf("CREATE TABLE IF NOT EXISTS %q (%s)", t.name, strings.Join(parts, ", "))
 	if err := t.db.Exec(sql).Error; err != nil {

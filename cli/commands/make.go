@@ -19,6 +19,14 @@ func init() {
 	cli.RegisterCommand(&MakeValidator{})
 	cli.RegisterCommand(&MakeCommand{})
 	cli.RegisterCommand(&MakePlugin{})
+	cli.RegisterCommand(&MakeEvent{})
+	cli.RegisterCommand(&MakeListener{})
+	cli.RegisterCommand(&MakeNotification{})
+	cli.RegisterCommand(&MakePolicy{})
+	cli.RegisterCommand(&MakeResource{})
+	cli.RegisterCommand(&MakeFactory{})
+	cli.RegisterCommand(&MakeObserver{})
+	cli.RegisterCommand(&MakeRule{})
 }
 
 type MakeModel struct{}
@@ -266,5 +274,189 @@ func (c *MakePlugin) Run(ctx *cli.Context) error {
 	ctx.UI.Infof("")
 	ctx.UI.Infof("Register it in bin/server.go:")
 	ctx.UI.Infof("  app.Use(%s.New())", snake)
+	return nil
+}
+
+// ── make:event ──────────────────────────────────────────────
+
+type MakeEvent struct{}
+
+func (c *MakeEvent) Name() string        { return "make:event" }
+func (c *MakeEvent) Description() string { return "Create a new event definition" }
+func (c *MakeEvent) Args() int           { return 1 }
+func (c *MakeEvent) Run(ctx *cli.Context) error {
+	name := ctx.Args[0]
+	snake := cli.ToSnake(name)
+	dir := "app/events"
+	_ = os.MkdirAll(dir, 0755)
+	path := filepath.Join(dir, snake+".go")
+
+	data := generators.Data{"EventName": name, "SnakeName": snake}.WithTimestamp()
+	if err := generators.RenderToFile("event.tmpl", path, data); err != nil {
+		ctx.UI.Errorf("Failed to create event: %v", err)
+		return err
+	}
+	ctx.UI.Successf("Created event %s at %s", name, path)
+	return nil
+}
+
+// ── make:listener ───────────────────────────────────────────
+
+type MakeListener struct{}
+
+func (c *MakeListener) Name() string        { return "make:listener" }
+func (c *MakeListener) Description() string { return "Create a new event listener" }
+func (c *MakeListener) Args() int           { return 1 }
+func (c *MakeListener) Run(ctx *cli.Context) error {
+	name := ctx.Args[0]
+	snake := cli.ToSnake(name)
+	dir := "app/listeners"
+	_ = os.MkdirAll(dir, 0755)
+	path := filepath.Join(dir, snake+".go")
+
+	data := generators.Data{"ListenerName": name, "SnakeName": snake}.WithTimestamp()
+	if err := generators.RenderToFile("listener.tmpl", path, data); err != nil {
+		ctx.UI.Errorf("Failed to create listener: %v", err)
+		return err
+	}
+	ctx.UI.Successf("Created listener %s at %s", name, path)
+	return nil
+}
+
+// ── make:notification ───────────────────────────────────────
+
+type MakeNotification struct{}
+
+func (c *MakeNotification) Name() string        { return "make:notification" }
+func (c *MakeNotification) Description() string { return "Create a new notification class" }
+func (c *MakeNotification) Args() int           { return 1 }
+func (c *MakeNotification) Run(ctx *cli.Context) error {
+	name := ctx.Args[0]
+	snake := cli.ToSnake(name)
+	dir := "app/notifications"
+	_ = os.MkdirAll(dir, 0755)
+	path := filepath.Join(dir, snake+".go")
+
+	data := generators.Data{"NotificationName": name, "SnakeName": snake}.WithTimestamp()
+	if err := generators.RenderToFile("notification.tmpl", path, data); err != nil {
+		ctx.UI.Errorf("Failed to create notification: %v", err)
+		return err
+	}
+	ctx.UI.Successf("Created notification %s at %s", name, path)
+	return nil
+}
+
+// ── make:policy ─────────────────────────────────────────────
+
+type MakePolicy struct{}
+
+func (c *MakePolicy) Name() string        { return "make:policy" }
+func (c *MakePolicy) Description() string { return "Create a new authorization policy" }
+func (c *MakePolicy) Args() int           { return 1 }
+func (c *MakePolicy) Run(ctx *cli.Context) error {
+	name := ctx.Args[0]
+	snake := cli.ToSnake(name)
+	dir := "app/policies"
+	_ = os.MkdirAll(dir, 0755)
+	path := filepath.Join(dir, snake+".go")
+
+	data := generators.Data{"PolicyName": name, "SnakeName": snake}.WithTimestamp()
+	if err := generators.RenderToFile("policy.tmpl", path, data); err != nil {
+		ctx.UI.Errorf("Failed to create policy: %v", err)
+		return err
+	}
+	ctx.UI.Successf("Created policy %s at %s", name, path)
+	return nil
+}
+
+// ── make:resource ───────────────────────────────────────────
+
+type MakeResource struct{}
+
+func (c *MakeResource) Name() string        { return "make:resource" }
+func (c *MakeResource) Description() string { return "Create a new API resource transformer" }
+func (c *MakeResource) Args() int           { return 1 }
+func (c *MakeResource) Run(ctx *cli.Context) error {
+	name := ctx.Args[0]
+	snake := cli.ToSnake(name)
+	dir := "app/resources"
+	_ = os.MkdirAll(dir, 0755)
+	path := filepath.Join(dir, snake+".go")
+
+	data := generators.Data{"ResourceName": name}.WithTimestamp()
+	if err := generators.RenderToFile("resource.tmpl", path, data); err != nil {
+		ctx.UI.Errorf("Failed to create resource: %v", err)
+		return err
+	}
+	ctx.UI.Successf("Created resource %s at %s", name, path)
+	return nil
+}
+
+// ── make:factory ────────────────────────────────────────────
+
+type MakeFactory struct{}
+
+func (c *MakeFactory) Name() string        { return "make:factory" }
+func (c *MakeFactory) Description() string { return "Create a new model factory for testing" }
+func (c *MakeFactory) Args() int           { return 1 }
+func (c *MakeFactory) Run(ctx *cli.Context) error {
+	name := ctx.Args[0]
+	snake := cli.ToSnake(name)
+	dir := "database/factories"
+	_ = os.MkdirAll(dir, 0755)
+	path := filepath.Join(dir, snake+"_factory.go")
+
+	data := generators.Data{"FactoryName": name}.WithTimestamp()
+	if err := generators.RenderToFile("factory.tmpl", path, data); err != nil {
+		ctx.UI.Errorf("Failed to create factory: %v", err)
+		return err
+	}
+	ctx.UI.Successf("Created factory %s at %s", name, path)
+	return nil
+}
+
+// ── make:observer ───────────────────────────────────────────
+
+type MakeObserver struct{}
+
+func (c *MakeObserver) Name() string        { return "make:observer" }
+func (c *MakeObserver) Description() string { return "Create a new model observer" }
+func (c *MakeObserver) Args() int           { return 1 }
+func (c *MakeObserver) Run(ctx *cli.Context) error {
+	name := ctx.Args[0]
+	snake := cli.ToSnake(name)
+	dir := "app/observers"
+	_ = os.MkdirAll(dir, 0755)
+	path := filepath.Join(dir, snake+".go")
+
+	data := generators.Data{"ObserverName": name, "SnakeName": snake}.WithTimestamp()
+	if err := generators.RenderToFile("observer.tmpl", path, data); err != nil {
+		ctx.UI.Errorf("Failed to create observer: %v", err)
+		return err
+	}
+	ctx.UI.Successf("Created observer %s at %s", name, path)
+	return nil
+}
+
+// ── make:rule ───────────────────────────────────────────────
+
+type MakeRule struct{}
+
+func (c *MakeRule) Name() string        { return "make:rule" }
+func (c *MakeRule) Description() string { return "Create a new custom validation rule" }
+func (c *MakeRule) Args() int           { return 1 }
+func (c *MakeRule) Run(ctx *cli.Context) error {
+	name := ctx.Args[0]
+	snake := cli.ToSnake(name)
+	dir := "app/rules"
+	_ = os.MkdirAll(dir, 0755)
+	path := filepath.Join(dir, snake+".go")
+
+	data := generators.Data{"RuleName": name, "SnakeName": snake}.WithTimestamp()
+	if err := generators.RenderToFile("rule.tmpl", path, data); err != nil {
+		ctx.UI.Errorf("Failed to create rule: %v", err)
+		return err
+	}
+	ctx.UI.Successf("Created rule %s at %s", name, path)
 	return nil
 }

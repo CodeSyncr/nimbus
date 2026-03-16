@@ -17,7 +17,7 @@ func Deploy(dir, target string, cfg *Config) error {
 		target = cfg.Target
 	}
 	if target == "" {
-		return fmt.Errorf("no deploy target specified. Use: nimbus deploy fly|railway|aws|docker")
+		return fmt.Errorf("no deploy target specified. Use: nimbus deploy fly|railway|render|aws|docker")
 	}
 	target = strings.ToLower(target)
 
@@ -42,6 +42,8 @@ func Deploy(dir, target string, cfg *Config) error {
 			return err
 		}
 		return deployRailway(dir, cfg)
+	case "render":
+		return deployRender(dir, cfg)
 	case "aws":
 		if err := requireCLI("docker"); err != nil {
 			return err

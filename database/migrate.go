@@ -200,3 +200,108 @@ func RunMigrationsFromDir(db *gorm.DB, dir string) error {
 	NewMigrator(db, list).Up()
 	return nil
 }
+
+// Fresh drops all tables and re-runs all migrations from scratch.
+// Equivalent to Laravel's migrate:fresh.
+func (m *Migrator) Fresh() error {
+	if err := m.ensureSchemaMigrations(); err != nil {
+		return fmt.Errorf("schema_migrations: %w", err)
+	}
+
+	// Get all table names.
+	var tables []string
+	switch m.db.Dialector.Name() {
+	case "postgres":
+		if err := m.db.Raw("SELECT tablename FROM pg_tables WHERE schemaname = 'public'").Scan(&tables).Error; err != nil {
+			return fmt.Errorf("list tables: %w", err)
+		}
+	case "mysql":
+		if err := m.db.Raw("SHOW TABLES").Scan(&tables).Error; err != nil {
+			return fmt.Errorf("list tables: %w", err)
+		}
+	default: // sqlite
+		if err := m.db.Raw("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").Scan(&tables).Error; err != nil {
+			return fmt.Errorf("list tables: %w", err)
+		}
+	}
+
+	// Drop all tables.
+	for _, table := range tables {
+		if err := m.db.Exec(fmt.Sprintf("DROP TABLE IF EXISTS %q CASCADE", table)).Error; err != nil {
+			fmt.Fprintf(os.Stdout, "  %sdrop %s failed%s\n", colorRed, table, colorReset)
+		} else {
+			fmt.Fprintf(os.Stdout, "  %s%s dropped %s%s\n", colorYellow, crossMark, table, colorReset)
+		}
+	}
+
+	fmt.Fprintf(os.Stdout, "\n  Re-running all migrations...\n\n")
+	return m.Up()
+}
+
+// MigrationStatus represents the status of a single migration.
+type MigrationStatus struct {
+	Name  string
+	Ran   bool
+	Batch int
+	RanAt string
+}
+
+// Status returns the status of all migrations (ran and pending).
+func (m *Migrator) Status() ([]MigrationStatus, error) {
+	if err := m.ensureSchemaMigrations(); err != nil {
+		return nil, fmt.Errorf("schema_migrations: %w", err)
+	}
+
+	// Load all applied migrations.
+	type record struct {
+		Name          string
+		Batch         int
+		MigrationTime time.Time
+	}
+	var records []record
+	if err := m.db.Raw("SELECT name, batch, migration_time FROM schema_migrations ORDER BY id").Scan(&records).Error; err != nil {
+		return nil, fmt.Errorf("load schema_migrations: %w", err)
+	}
+	applied := make(map[string]record, len(records))
+	for _, r := range records {
+		applied[r.Name] = r
+	}
+
+	var statuses []MigrationStatus
+	for _, mig := range m.sorted {
+		ms := MigrationStatus{Name: mig.Name}
+		if rec, ok := applied[mig.Name]; ok {
+			ms.Ran = true
+			ms.Batch = rec.Batch
+			ms.RanAt = rec.MigrationTime.Format("2006-01-02 15:04:05")
+		}
+		statuses = append(statuses, ms)
+	}
+	return statuses, nil
+}
+
+// PrintStatus prints a formatted migration status table to stdout.
+func (m *Migrator) PrintStatus() error {
+	statuses, err := m.Status()
+	if err != nil {
+		return err
+	}
+	if len(statuses) == 0 {
+		fmt.Fprintln(os.Stdout, "  No migrations found.")
+		return nil
+	}
+
+	// Table header.
+	fmt.Fprintf(os.Stdout, "\n  %-50s %-10s %-6s %s\n", "Migration", "Status", "Batch", "Ran At")
+	fmt.Fprintf(os.Stdout, "  %s\n", strings.Repeat("─", 90))
+
+	for _, s := range statuses {
+		if s.Ran {
+			fmt.Fprintf(os.Stdout, "  %-50s %s%-10s%s %-6d %s\n", s.Name, colorGreen, "Ran", colorReset, s.Batch, s.RanAt)
+		} else {
+			fmt.Fprintf(os.Stdout, "  %-50s %s%-10s%s\n", s.Name, colorYellow, "Pending", colorReset)
+		}
+	}
+	fmt.Fprintln(os.Stdout)
+	return nil
+}

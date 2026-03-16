@@ -1,0 +1,26 @@
+package notifications
+
+import "github.com/CodeSyncr/nimbus/mail"
+
+// {{.NotificationName}} implements notification.Notification.
+// Send with: notification.Send(&notifications.{{.NotificationName}}{...})
+type {{.NotificationName}} struct {
+	// TODO: add fields (e.g. recipient email, data)
+	To string
+}
+
+// ToMail returns the mail message for this notification.
+// Return nil to skip the mail channel.
+func (n *{{.NotificationName}}) ToMail() *mail.Message {
+	return &mail.Message{
+		To:      []string{n.To},
+		Subject: "{{.NotificationName}}",
+		Body:    "Hello — this is your notification.",
+	}
+}
+
+// ToBroadcast returns the SSE/WebSocket channel and payload.
+// Return empty channel to skip the broadcast channel.
+func (n *{{.NotificationName}}) ToBroadcast() (string, any) {
+	return "", nil // e.g. return "users/123/notifications", map[string]any{"type": "{{.SnakeName}}"}
+}

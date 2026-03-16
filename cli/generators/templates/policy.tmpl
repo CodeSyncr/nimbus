@@ -1,0 +1,37 @@
+package policies
+
+import (
+	"context"
+
+	"github.com/CodeSyncr/nimbus/auth"
+)
+
+// {{.PolicyName}}Policy defines authorization rules for {{.PolicyName}} resources.
+// Register with: auth.DefaultGate().RegisterPolicy("{{.SnakeName}}", &policies.{{.PolicyName}}Policy{})
+type {{.PolicyName}}Policy struct {
+	auth.BasePolicy
+}
+
+// ResourceName returns the policy key used in Gate lookups.
+func (p *{{.PolicyName}}Policy) ResourceName() string { return "{{.SnakeName}}" }
+
+// View checks if the user can view a {{.PolicyName}}.
+func (p *{{.PolicyName}}Policy) View(ctx context.Context, user auth.User, resource any) bool {
+	return true
+}
+
+// Create checks if the user can create a {{.PolicyName}}.
+func (p *{{.PolicyName}}Policy) Create(ctx context.Context, user auth.User) bool {
+	return true
+}
+
+// Update checks if the user can update a {{.PolicyName}}.
+func (p *{{.PolicyName}}Policy) Update(ctx context.Context, user auth.User, resource any) bool {
+	// Example: return user.GetID() == resource.(*models.{{.PolicyName}}).UserID
+	return true
+}
+
+// Delete checks if the user can delete a {{.PolicyName}}.
+func (p *{{.PolicyName}}Policy) Delete(ctx context.Context, user auth.User, resource any) bool {
+	return false
+}

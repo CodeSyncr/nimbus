@@ -1,6 +1,7 @@
 package http
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"html"
@@ -18,6 +19,46 @@ type Context struct {
 	Params   map[string]string
 	status   int
 	store    map[string]any
+}
+
+// Ctx returns the request's context.Context.
+// Use this to pass deadlines, cancellation signals, and request-scoped values
+// to downstream calls (database queries, HTTP clients, etc.).
+func (c *Context) Ctx() context.Context {
+	return c.Request.Context()
+}
+
+// WithContext returns a shallow copy of Context with the request's
+// context replaced by ctx. Use this to attach deadlines or values:
+//
+//	ctx, cancel := context.WithTimeout(c.Ctx(), 5*time.Second)
+//	defer cancel()
+//	c = c.WithContext(ctx)
+func (c *Context) WithContext(ctx context.Context) *Context {
+	c2 := new(Context)
+	*c2 = *c
+	c2.Request = c.Request.WithContext(ctx)
+	return c2
+}
+
+// Deadline returns the deadline from the request context, if any.
+func (c *Context) Deadline() (deadline interface{ IsZero() bool }, ok bool) {
+	d, o := c.Request.Context().Deadline()
+	return &deadlineWrapper{d}, o
+}
+
+type deadlineWrapper struct{ t interface{ IsZero() bool } }
+
+func (d *deadlineWrapper) IsZero() bool { return d.t.IsZero() }
+
+// Done returns the request context's Done channel.
+func (c *Context) Done() <-chan struct{} {
+	return c.Request.Context().Done()
+}
+
+// Err returns the request context's error (nil, context.Canceled, or context.DeadlineExceeded).
+func (c *Context) Err() error {
+	return c.Request.Context().Err()
 }
 
 // Set stores a key-value pair in the request-scoped store.

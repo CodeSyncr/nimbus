@@ -1,0 +1,27 @@
+package rules
+
+import "fmt"
+
+// {{.RuleName}} implements validation.Rule for custom validation logic.
+// Use in a validator schema:
+//
+//	validation.Schema{
+//	    "field": rules.{{.RuleName}}Rule(),
+//	}
+type {{.RuleName}} struct {
+	// TODO: add configuration fields
+}
+
+// {{.RuleName}}Rule creates a new {{.RuleName}} validation rule.
+func {{.RuleName}}Rule() *{{.RuleName}} {
+	return &{{.RuleName}}{}
+}
+
+// Validate checks the value and returns an error if invalid.
+func (r *{{.RuleName}}) Validate(field string, value any) error {
+	// TODO: implement validation logic
+	if value == nil {
+		return fmt.Errorf("%s failed {{.SnakeName}} validation", field)
+	}
+	return nil
+}

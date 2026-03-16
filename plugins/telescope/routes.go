@@ -87,38 +87,48 @@ func (p *Plugin) requestDetailHandler(c *http.Context) error {
 }
 
 func (p *Plugin) commandsHandler(c *http.Context) error {
+	entries := p.store.Entries(EntryCommand, 50)
 	data := p.viewData("commands")
+	data["entries"] = entries
+	data["empty"] = len(entries) == 0
 	data["title"] = "Commands"
-	data["message"] = "CLI command watcher. Records nimbus make:*, db:migrate, etc. Coming soon."
-	return c.View("telescope/placeholder", data)
+	return c.View("telescope/entries", data)
 }
 
 func (p *Plugin) scheduleHandler(c *http.Context) error {
+	entries := p.store.Entries(EntrySchedule, 50)
 	data := p.viewData("schedule")
+	data["entries"] = entries
+	data["empty"] = len(entries) == 0
 	data["title"] = "Schedule"
-	data["message"] = "Scheduled task watcher. Coming soon."
-	return c.View("telescope/placeholder", data)
+	return c.View("telescope/entries", data)
 }
 
 func (p *Plugin) jobsHandler(c *http.Context) error {
+	entries := p.store.Entries(EntryJob, 50)
 	data := p.viewData("jobs")
+	data["entries"] = entries
+	data["empty"] = len(entries) == 0
 	data["title"] = "Jobs"
-	data["message"] = "Queued job watcher. Coming soon."
-	return c.View("telescope/placeholder", data)
+	return c.View("telescope/entries", data)
 }
 
 func (p *Plugin) batchesHandler(c *http.Context) error {
+	entries := p.store.Entries(EntryBatch, 50)
 	data := p.viewData("batches")
+	data["entries"] = entries
+	data["empty"] = len(entries) == 0
 	data["title"] = "Batches"
-	data["message"] = "Job batch watcher. Coming soon."
-	return c.View("telescope/placeholder", data)
+	return c.View("telescope/entries", data)
 }
 
 func (p *Plugin) cacheHandler(c *http.Context) error {
+	entries := p.store.Entries(EntryCache, 50)
 	data := p.viewData("cache")
+	data["entries"] = entries
+	data["empty"] = len(entries) == 0
 	data["title"] = "Cache"
-	data["message"] = "Cache operation watcher (get, set, delete). Coming soon."
-	return c.View("telescope/placeholder", data)
+	return c.View("telescope/entries", data)
 }
 
 func (p *Plugin) dumpsHandler(c *http.Context) error {
@@ -131,10 +141,12 @@ func (p *Plugin) dumpsHandler(c *http.Context) error {
 }
 
 func (p *Plugin) eventsHandler(c *http.Context) error {
+	entries := p.store.Entries(EntryEvent, 50)
 	data := p.viewData("events")
+	data["entries"] = entries
+	data["empty"] = len(entries) == 0
 	data["title"] = "Events"
-	data["message"] = "Event dispatcher watcher. Coming soon."
-	return c.View("telescope/placeholder", data)
+	return c.View("telescope/entries", data)
 }
 
 func (p *Plugin) exceptionsHandler(c *http.Context) error {
@@ -146,17 +158,21 @@ func (p *Plugin) exceptionsHandler(c *http.Context) error {
 }
 
 func (p *Plugin) gatesHandler(c *http.Context) error {
+	entries := p.store.Entries(EntryGate, 50)
 	data := p.viewData("gates")
+	data["entries"] = entries
+	data["empty"] = len(entries) == 0
 	data["title"] = "Gates"
-	data["message"] = "Authorization gate watcher. Coming soon."
-	return c.View("telescope/placeholder", data)
+	return c.View("telescope/entries", data)
 }
 
 func (p *Plugin) httpClientHandler(c *http.Context) error {
+	entries := p.store.Entries(EntryHTTPClient, 50)
 	data := p.viewData("http_client")
+	data["entries"] = entries
+	data["empty"] = len(entries) == 0
 	data["title"] = "HTTP Client"
-	data["message"] = "Outgoing HTTP request watcher. Coming soon."
-	return c.View("telescope/placeholder", data)
+	return c.View("telescope/entries", data)
 }
 
 func (p *Plugin) logsHandler(c *http.Context) error {
@@ -168,10 +184,12 @@ func (p *Plugin) logsHandler(c *http.Context) error {
 }
 
 func (p *Plugin) mailHandler(c *http.Context) error {
+	entries := p.store.Entries(EntryMail, 50)
 	data := p.viewData("mail")
+	data["entries"] = entries
+	data["empty"] = len(entries) == 0
 	data["title"] = "Mail"
-	data["message"] = "Mail watcher. Coming soon."
-	return c.View("telescope/placeholder", data)
+	return c.View("telescope/entries", data)
 }
 
 func (p *Plugin) modelsHandler(c *http.Context) error {
@@ -184,10 +202,12 @@ func (p *Plugin) modelsHandler(c *http.Context) error {
 }
 
 func (p *Plugin) notificationsHandler(c *http.Context) error {
+	entries := p.store.Entries(EntryNotification, 50)
 	data := p.viewData("notifications")
+	data["entries"] = entries
+	data["empty"] = len(entries) == 0
 	data["title"] = "Notifications"
-	data["message"] = "Notification watcher. Coming soon."
-	return c.View("telescope/placeholder", data)
+	return c.View("telescope/entries", data)
 }
 
 func (p *Plugin) queriesHandler(c *http.Context) error {
@@ -199,10 +219,12 @@ func (p *Plugin) queriesHandler(c *http.Context) error {
 }
 
 func (p *Plugin) redisHandler(c *http.Context) error {
+	entries := p.store.Entries(EntryRedis, 50)
 	data := p.viewData("redis")
+	data["entries"] = entries
+	data["empty"] = len(entries) == 0
 	data["title"] = "Redis"
-	data["message"] = "Redis command watcher. Coming soon."
-	return c.View("telescope/placeholder", data)
+	return c.View("telescope/entries", data)
 }
 
 func (p *Plugin) viewsHandler(c *http.Context) error {

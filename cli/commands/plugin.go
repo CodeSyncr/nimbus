@@ -27,6 +27,19 @@ type PluginDef struct {
 	KernelImport string
 	KernelInsert string
 	EnvVars      []string
+	// ConfigFiles maps relative file path → content to scaffold on install.
+	ConfigFiles map[string]string
+	// ConfigLoaderInsert is the function call (e.g. "loadTelescope()") to
+	// append to config/config.go's Load() function when installing the plugin.
+	ConfigLoaderInsert string
+
+	// ServerBootInsert is a line (e.g. "bootNoSQL(app)") inserted after the
+	// "bootDatabase(app)" call in bin/server.go for boot-level integrations
+	// that are not standard app.Use() plugins.
+	ServerBootInsert string
+	// ServerFuncInsert is a full Go function body appended to the end of
+	// bin/server.go (e.g. the bootNoSQL function).
+	ServerFuncInsert string
 }
 
 var pluginRegistry = map[string]PluginDef{
@@ -44,6 +57,13 @@ var pluginRegistry = map[string]PluginDef{
 		}
 	}
 `,
+		ConfigFiles: map[string]string{
+			"config/telescope.go": telescopeConfigFile,
+		},
+		ConfigLoaderInsert: "loadTelescope()",
+		EnvVars: []string{
+			"TELESCOPE_ENABLED=true",
+		},
 	},
 	"horizon": {
 		Name:         "horizon",
@@ -51,6 +71,13 @@ var pluginRegistry = map[string]PluginDef{
 		PackageName:  "horizon",
 		Description:  "Queue dashboard",
 		ServerInsert: "\tapp.Use(horizon.New())\n",
+		ConfigFiles: map[string]string{
+			"config/horizon.go": horizonConfigFile,
+		},
+		ConfigLoaderInsert: "loadHorizon()",
+		EnvVars: []string{
+			"HORIZON_PATH=/horizon",
+		},
 	},
 	"inertia": {
 		Name:        "inertia",
@@ -109,6 +136,76 @@ var pluginRegistry = map[string]PluginDef{
 		PackageName:  "transmit",
 		Description:  "SSE (Server-Sent Events) for real-time streaming",
 		ServerInsert: "\tapp.Use(transmit.New(nil))\n",
+		ConfigFiles: map[string]string{
+			"config/transmit.go": transmitConfigFile,
+		},
+		ConfigLoaderInsert: "loadTransmit()",
+		EnvVars: []string{
+			"TRANSMIT_TRANSPORT=",
+		},
+	},
+	"scout": {
+		Name:         "scout",
+		ImportPath:   "github.com/CodeSyncr/nimbus/search",
+		PackageName:  "search",
+		ImportAlias:  "search",
+		Description:  "Full-text search (Postgres, Meilisearch, Typesense)",
+		ServerInsert: "\tapp.Use(search.NewPlugin(nil))\n",
+		EnvVars: []string{
+			"SEARCH_DRIVER=postgres",
+		},
+	},
+	"pulse": {
+		Name:         "pulse",
+		ImportPath:   "github.com/CodeSyncr/nimbus/plugins/pulse",
+		PackageName:  "pulse",
+		Description:  "Lightweight app monitoring & metrics",
+		ServerInsert: "\tapp.Use(pulse.NewPlugin())\n",
+		KernelImport: "\t\"github.com/CodeSyncr/nimbus/plugins/pulse\"\n",
+		KernelInsert: `
+	if pu := app.Plugin("pulse"); pu != nil {
+		if p, ok := pu.(*pulse.PulsePlugin); ok {
+			app.Router.Use(p.Pulse.Middleware())
+		}
+	}
+`,
+	},
+	"nosql": {
+		Name:             "nosql",
+		ImportPath:       "github.com/CodeSyncr/nimbus/database/nosql",
+		PackageName:      "nosql",
+		Description:      "NoSQL / MongoDB support with query builder",
+		ServerBootInsert: "\tbootNoSQL(app)\n",
+		ServerFuncInsert: nosqlBootFunc,
+		ConfigFiles: map[string]string{
+			"config/nosql.go": nosqlConfigFile,
+		},
+		ConfigLoaderInsert: "loadNoSQL()",
+		EnvVars: []string{
+			"MONGO_URI=mongodb://localhost:27017",
+			"MONGO_DATABASE=nimbus",
+		},
+	},
+	"socialite": {
+		Name:         "socialite",
+		ImportPath:   "github.com/CodeSyncr/nimbus/auth/socialite",
+		PackageName:  "socialite",
+		Description:  "OAuth social authentication (GitHub, Google, Discord, Apple)",
+		ServerInsert: socialiteServerInsert,
+		EnvVars: []string{
+			"GITHUB_CLIENT_ID=",
+			"GITHUB_CLIENT_SECRET=",
+			"GITHUB_REDIRECT_URL=http://localhost:3333/auth/github/callback",
+			"GOOGLE_CLIENT_ID=",
+			"GOOGLE_CLIENT_SECRET=",
+			"GOOGLE_REDIRECT_URL=http://localhost:3333/auth/google/callback",
+			"DISCORD_CLIENT_ID=",
+			"DISCORD_CLIENT_SECRET=",
+			"DISCORD_REDIRECT_URL=http://localhost:3333/auth/discord/callback",
+		},
+		ConfigFiles: map[string]string{
+			"config/socialite.go": socialiteConfigFile,
+		},
 	},
 }
 
@@ -171,6 +268,29 @@ func (c *PluginInstallCommand) Run(ctx *cli.Context) error {
 
 	ctx.UI.Successf("Plugin %q installed successfully.", def.Name)
 
+	// Scaffold config files
+	if len(def.ConfigFiles) > 0 {
+		for relPath, content := range def.ConfigFiles {
+			fullPath := filepath.Join(ctx.AppRoot, relPath)
+			_ = os.MkdirAll(filepath.Dir(fullPath), 0755)
+			if err := os.WriteFile(fullPath, []byte(content), 0644); err != nil {
+				ctx.UI.Warnf("failed to create %s: %v", relPath, err)
+			} else {
+				ctx.UI.Successf("%s created", relPath)
+			}
+		}
+	}
+
+	// Add loadXxx() call to config/config.go
+	if def.ConfigLoaderInsert != "" {
+		configPath := filepath.Join(ctx.AppRoot, "config", "config.go")
+		if err := patchConfigGo(configPath, def.ConfigLoaderInsert); err != nil {
+			ctx.UI.Warnf("failed to patch config/config.go: %v", err)
+		} else {
+			ctx.UI.Successf("config/config.go updated")
+		}
+	}
+
 	runCmd2 := exec.Command("go", "mod", "tidy")
 	runCmd2.Dir = ctx.AppRoot
 	_ = runCmd2.Run()
@@ -226,16 +346,44 @@ func patchServerGo(path string, def PluginDef, appName string) error {
 	}
 	s = strings.Replace(s, imports[0], "import (\n"+newImportContent+")", 1)
 
-	appNew := "app := nimbus.New()"
-	newApp := appNew + "\n\n" + def.ServerInsert
-	refName := def.PackageName
-	if def.ImportAlias != "" {
-		refName = def.ImportAlias
+	// Standard plugin: insert after app := nimbus.New()
+	if def.ServerInsert != "" {
+		appNew := "app := nimbus.New()"
+		newApp := appNew + "\n\n" + def.ServerInsert
+		refName := def.PackageName
+		if def.ImportAlias != "" {
+			refName = def.ImportAlias
+		}
+		if strings.Contains(s, refName+".") {
+			// Plugin already referenced in server.go
+			return os.WriteFile(path, []byte(s), 0644)
+		}
+		s = strings.Replace(s, appNew, newApp, 1)
 	}
-	if strings.Contains(s, refName+".New()") {
-		return nil
+
+	// Boot-level integration: insert call after bootDatabase(app)
+	if def.ServerBootInsert != "" && !strings.Contains(s, strings.TrimSpace(def.ServerBootInsert)) {
+		anchor := "bootDatabase(app)"
+		if idx := strings.Index(s, anchor); idx >= 0 {
+			// Find end of the line containing bootDatabase(app)
+			endOfLine := idx + len(anchor)
+			for endOfLine < len(s) && s[endOfLine] != '\n' {
+				endOfLine++
+			}
+			if endOfLine < len(s) {
+				endOfLine++ // include the newline
+			}
+			s = s[:endOfLine] + def.ServerBootInsert + s[endOfLine:]
+		}
 	}
-	s = strings.Replace(s, appNew, newApp, 1)
+
+	// Append a full function to end of file
+	if def.ServerFuncInsert != "" && !strings.Contains(s, strings.TrimSpace(def.ServerFuncInsert[:min(80, len(def.ServerFuncInsert))])) {
+		if !strings.HasSuffix(s, "\n") {
+			s += "\n"
+		}
+		s += "\n" + def.ServerFuncInsert
+	}
 
 	return os.WriteFile(path, []byte(s), 0644)
 }
@@ -265,18 +413,40 @@ func patchKernelGo(path string, def PluginDef) error {
 
 	if def.KernelInsert != "" {
 		if strings.Contains(def.KernelInsert, "app.Plugin") {
-			if strings.Contains(s, "telescope.Plugin") {
-				return nil
+			// Check if already present
+			refPkg := def.PackageName
+			if def.ImportAlias != "" {
+				refPkg = def.ImportAlias
 			}
-			target := "middleware.Recover(),\n\t)"
-			insert := "middleware.Recover(),\n\t)"
-			insert += def.KernelInsert
-			s = strings.Replace(s, target, insert, 1)
+			if strings.Contains(s, refPkg+".Plugin") || strings.Contains(s, refPkg+".PulsePlugin") {
+				return os.WriteFile(path, []byte(s), 0644)
+			}
+			// Find the closing of the app.Router.Use(...) block.
+			// We search for "app.Router.Use(" then find its matching ")".
+			useIdx := strings.Index(s, "app.Router.Use(")
+			if useIdx >= 0 {
+				depth := 0
+				insertAt := -1
+				for i := useIdx; i < len(s); i++ {
+					if s[i] == '(' {
+						depth++
+					} else if s[i] == ')' {
+						depth--
+						if depth == 0 {
+							insertAt = i + 1
+							break
+						}
+					}
+				}
+				if insertAt > 0 {
+					s = s[:insertAt] + "\n" + def.KernelInsert + s[insertAt:]
+				}
+			}
 		} else {
 			target := "middleware.Recover(),"
 			insert := target + "\n" + strings.TrimSpace(def.KernelInsert)
-			if strings.Contains(s, "unpoly.ServerProtocol") {
-				return nil
+			if strings.Contains(s, strings.TrimSpace(def.KernelInsert)) {
+				return os.WriteFile(path, []byte(s), 0644)
 			}
 			s = strings.Replace(s, target, insert, 1)
 		}
@@ -302,5 +472,31 @@ func appendEnvVars(path string, vars []string, appName string) error {
 		}
 		s += line + "\n"
 	}
+	return os.WriteFile(path, []byte(s), 0644)
+}
+
+// patchConfigGo adds a loader function call (e.g. "loadTelescope()") to
+// the Load() function inside config/config.go, right before the closing
+// brace. It is idempotent — a duplicate call is never inserted.
+func patchConfigGo(path, loaderCall string) error {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	s := string(content)
+
+	// Already present?
+	if strings.Contains(s, loaderCall) {
+		return nil
+	}
+
+	// Find the last "}" which closes func Load().
+	// We insert "\tloaderCall\n" just before it.
+	idx := strings.LastIndex(s, "}")
+	if idx < 0 {
+		return fmt.Errorf("could not find closing brace in config/config.go")
+	}
+	insert := "\t" + loaderCall + "\n"
+	s = s[:idx] + insert + s[idx:]
 	return os.WriteFile(path, []byte(s), 0644)
 }

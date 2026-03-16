@@ -14,6 +14,8 @@ type openAIProvider struct {
 	model  string
 }
 
+func (p *openAIProvider) Name() string { return "openai" }
+
 func newOpenAIProvider(cfg *Config) (*openAIProvider, error) {
 	if cfg.OpenAIKey == "" {
 		return nil, fmt.Errorf("ai: OPENAI_API_KEY is required for OpenAI provider")
@@ -64,12 +66,12 @@ func (p *openAIProvider) Generate(ctx context.Context, req *GenerateRequest) (*G
 	}, nil
 }
 
-func (p *openAIProvider) Stream(ctx context.Context, req *GenerateRequest) (<-chan string, <-chan error) {
-	textCh := make(chan string, 32)
+func (p *openAIProvider) Stream(ctx context.Context, req *GenerateRequest) (*StreamResponse, error) {
+	chunks := make(chan StreamChunk, 32)
 	errCh := make(chan error, 1)
 
 	go func() {
-		defer close(textCh)
+		defer close(chunks)
 		defer close(errCh)
 
 		messages := p.toOpenAIMessages(req)
@@ -105,12 +107,12 @@ func (p *openAIProvider) Stream(ctx context.Context, req *GenerateRequest) (<-ch
 				return
 			}
 			if len(response.Choices) > 0 && response.Choices[0].Delta.Content != "" {
-				textCh <- response.Choices[0].Delta.Content
+				chunks <- StreamChunk{Text: response.Choices[0].Delta.Content}
 			}
 		}
 	}()
 
-	return textCh, errCh
+	return &StreamResponse{Chunks: chunks, Err: errCh}, nil
 }
 
 func (p *openAIProvider) toOpenAIMessages(req *GenerateRequest) []openai.ChatCompletionMessage {

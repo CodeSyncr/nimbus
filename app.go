@@ -397,10 +397,19 @@ func (a *App) printStartup(scheme, port string) {
 	if name == "" {
 		name = "nimbus"
 	}
-	url := fmt.Sprintf("%s://localhost:%s", scheme, port)
 
-	fmt.Printf("  \033[32m➜\033[0m  \033[1m%s\033[0m running at \033[36m%s\033[0m\n", name, url)
-	fmt.Printf("  \033[2m   env: %s · %d plugin(s) loaded\033[0m\n\n", env, len(a.plugins))
+	// When running under `nimbus serve`, emit a machine-readable marker
+	// that the CLI's airFilter parses for beautiful display.
+	if os.Getenv("NIMBUS_SERVE") == "1" {
+		fmt.Fprintf(os.Stdout, "__NIMBUS_READY__|%s|%s|%s|%s|%d\n", scheme, port, name, env, len(a.plugins))
+		return
+	}
+
+	// Direct run — human-readable output.
+	url := fmt.Sprintf("%s://localhost:%s", scheme, port)
+	fmt.Printf("\n  \033[32m✓\033[0m  \033[1m%s\033[0m is ready\n\n", name)
+	fmt.Printf("  \033[32m➜\033[0m  Local: \033[1;36m%s\033[0m\n", url)
+	fmt.Printf("  \033[2m     env: %s · %d plugin(s)\033[0m\n\n", env, len(a.plugins))
 }
 
 // configureGOGCFromEnv reads NIMBUS_GOGC and applies it via debug.SetGCPercent.

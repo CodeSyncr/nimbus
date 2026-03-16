@@ -2,48 +2,14 @@ package commands
 
 import (
 	"os/exec"
-	"strings"
 
 	"github.com/CodeSyncr/nimbus/cli"
-	"github.com/CodeSyncr/nimbus/internal/deploy"
 )
 
 func init() {
-	cli.RegisterCommand(&DeployCommand{})
 	cli.RegisterCommand(&QueueWorkCommand{})
 	cli.RegisterCommand(&ScheduleRunCommand{})
 	cli.RegisterCommand(&ScheduleListCommand{})
-}
-
-type DeployCommand struct{}
-
-func (c *DeployCommand) Name() string        { return "deploy" }
-func (c *DeployCommand) Description() string { return "Deploy your Nimbus application" }
-func (c *DeployCommand) Args() int           { return -1 }
-func (c *DeployCommand) Run(ctx *cli.Context) error {
-	if !isNimbusApp(ctx.AppRoot) {
-		ctx.UI.Errorf("Not a Nimbus app. Run 'nimbus deploy' from your app root")
-		return nil
-	}
-	cfg, _ := deploy.LoadConfig(ctx.AppRoot)
-	target := ""
-	if len(ctx.Args) > 0 {
-		target = strings.TrimSpace(strings.ToLower(ctx.Args[0]))
-	}
-
-	if target == "" {
-		ans, err := ctx.UI.AskSelect("Select deployment target", []string{"fly", "cancel"}, "fly")
-		if err != nil || ans == "cancel" {
-			return err
-		}
-		target = "fly"
-	}
-
-	if cfg == nil {
-		cfg = &deploy.Config{}
-	}
-
-	return deploy.Deploy(ctx.AppRoot, target, cfg)
 }
 
 type QueueWorkCommand struct{}

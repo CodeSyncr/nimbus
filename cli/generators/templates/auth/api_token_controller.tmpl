@@ -1,0 +1,105 @@
+package controllers
+
+import (
+	"strconv"
+	"time"
+
+	"github.com/CodeSyncr/nimbus/auth"
+	"github.com/CodeSyncr/nimbus/http"
+)
+
+// APITokenController manages personal access tokens.
+type APITokenController struct {
+	Guard *auth.TokenGuard
+}
+
+// ListTokens returns all tokens for the authenticated user.
+// GET /api/tokens
+func (tc *APITokenController) ListTokens(c *http.Context) error {
+	user := auth.UserFromContext(c.Request.Context())
+	if user == nil {
+		return c.JSON(http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+	}
+	tokens, err := tc.Guard.ListTokens(c.Request.Context(), user.GetID())
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+	return c.JSON(http.StatusOK, map[string]any{"tokens": tokens})
+}
+
+// CreateToken creates a new personal access token.
+// POST /api/tokens
+// Body: { "name": "My Token", "abilities": ["read:projects"], "expires_in_days": 30 }
+func (tc *APITokenController) CreateToken(c *http.Context) error {
+	user := auth.UserFromContext(c.Request.Context())
+	if user == nil {
+		return c.JSON(http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+	}
+
+	name := c.Request.FormValue("name")
+	if name == "" {
+		return c.JSON(http.StatusUnprocessableEntity, map[string]string{"error": "name is required"})
+	}
+
+	abilities := c.Request.FormValue("abilities")
+	if abilities == "" {
+		abilities = `["*"]`
+	}
+
+	var expiresAt *time.Time
+	if days := c.Request.FormValue("expires_in_days"); days != "" {
+		d, err := strconv.Atoi(days)
+		if err != nil || d < 1 {
+			return c.JSON(http.StatusUnprocessableEntity, map[string]string{"error": "expires_in_days must be a positive integer"})
+		}
+		t := time.Now().Add(time.Duration(d) * 24 * time.Hour)
+		expiresAt = &t
+	}
+
+	result, err := tc.Guard.CreateToken(c.Request.Context(), user.GetID(), name, abilities, expiresAt)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+
+	return c.JSON(http.StatusCreated, map[string]any{
+		"token":        result.PlainText,
+		"access_token": result.Token,
+		"message":      "Store this token securely. It will not be shown again.",
+	})
+}
+
+// RevokeToken deletes a token by ID.
+// DELETE /api/tokens/:id
+func (tc *APITokenController) RevokeToken(c *http.Context) error {
+	user := auth.UserFromContext(c.Request.Context())
+	if user == nil {
+		return c.JSON(http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+	}
+
+	idStr := c.Param("id")
+	id, err := strconv.ParseUint(idStr, 10, 64)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid token ID"})
+	}
+
+	if err := tc.Guard.RevokeToken(c.Request.Context(), user.GetID(), uint(id)); err != nil {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
+	}
+
+	return c.JSON(http.StatusOK, map[string]string{"message": "Token revoked successfully"})
+}
+
+// RevokeAllTokens deletes all tokens for the user.
+// DELETE /api/tokens
+func (tc *APITokenController) RevokeAllTokens(c *http.Context) error {
+	user := auth.UserFromContext(c.Request.Context())
+	if user == nil {
+		return c.JSON(http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+	}
+
+	if err := tc.Guard.RevokeAllTokens(c.Request.Context(), user.GetID()); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+
+	return c.JSON(http.StatusOK, map[string]string{"message": "All tokens revoked"})
+}

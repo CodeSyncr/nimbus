@@ -12,8 +12,9 @@ import (
 // Handler is a global error handler. When a handler returns an error, this middleware catches it.
 // Behavior:
 //   - validation.ValidationErrors → 422 JSON
+//   - *AppError → tracked error with ID, reported to registered reporters
 //   - HTTPError → status from error
-//   - fallback → 500 JSON
+//   - fallback → 500 JSON with error ID for tracking
 func Handler() router.Middleware {
 	return func(next router.HandlerFunc) router.HandlerFunc {
 		return func(c *http.Context) (err error) {
@@ -27,6 +28,27 @@ func Handler() router.Middleware {
 				_ = c.JSON(http.StatusUnprocessableEntity, ve.ToMap())
 				return nil
 			}
+			// AppError with ID tracking
+			if ae, ok := err.(*AppError); ok {
+				log.Printf("error_id=%s status=%d %s", ae.ID, ae.Status, ae.Message)
+				reportCtx := map[string]any{
+					"error_id": ae.ID,
+					"status":   ae.Status,
+				}
+				if rid, ok := c.Get("request_id"); ok {
+					reportCtx["request_id"] = rid
+				}
+				go ReportError(ae, reportCtx)
+				status := ae.Status
+				if status == 0 {
+					status = http.StatusInternalServerError
+				}
+				_ = c.JSON(status, map[string]string{
+					"error":    http.StatusText(status),
+					"error_id": ae.ID,
+				})
+				return nil
+			}
 			// Explicit HTTP errors
 			if he, ok := err.(HTTPError); ok {
 				WriteHTTPError(c, he)
@@ -37,10 +59,20 @@ func Handler() router.Middleware {
 				return nil
 			}
 
-			// Fallback 500
-			log.Printf("handler error: %v", err)
+			// Fallback 500 with error ID for tracking
+			appErr := Wrap(http.StatusInternalServerError, err)
+			log.Printf("error_id=%s handler error: %v", appErr.ID, err)
+			reportCtx := map[string]any{
+				"error_id": appErr.ID,
+				"status":   500,
+			}
+			if rid, ok := c.Get("request_id"); ok {
+				reportCtx["request_id"] = rid
+			}
+			go ReportError(appErr, reportCtx)
 			_ = c.JSON(http.StatusInternalServerError, map[string]string{
-				"error": "Internal server error",
+				"error":    "Internal server error",
+				"error_id": appErr.ID,
 			})
 			return nil
 		}

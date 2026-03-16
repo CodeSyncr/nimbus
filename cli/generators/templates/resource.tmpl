@@ -1,0 +1,17 @@
+package resources
+
+// {{.ResourceName}}Resource transforms a {{.ResourceName}} model for API responses.
+// Use in controllers: return c.JSON(200, resource.Collection(items))
+type {{.ResourceName}}Resource struct {
+	// TODO: add model reference, e.g.:
+	// Model *models.{{.ResourceName}}
+}
+
+// ToJSON returns the API representation of this resource.
+// Control exactly which fields are exposed to clients.
+func (r *{{.ResourceName}}Resource) ToJSON() map[string]any {
+	return map[string]any{
+		// "id":         r.Model.ID,
+		// "created_at": r.Model.CreatedAt,
+	}
+}

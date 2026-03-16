@@ -155,8 +155,8 @@ Then add the new migration to `database/migrations/registry.go`. Each migration 
 import "github.com/CodeSyncr/nimbus/validation"
 
 type CreateUserRequest struct {
-	Name  string `json:"name" validate:"required,min=2"`
-	Email string `json:"email" validate:"required,email"`
+	Name  string `validate:"required,min=2"`
+	Email string `validate:"required,email"`
 }
 
 func createUser(c *http.Context) error {

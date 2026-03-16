@@ -2,10 +2,13 @@ package validation
 
 import (
 	"fmt"
+	"mime/multipart"
 	"net/url"
+	"path/filepath"
 	"reflect"
 	"regexp"
 	"strings"
+	"time"
 
 	reqctx "github.com/CodeSyncr/nimbus/http"
 )
@@ -361,6 +364,28 @@ func addRuleError(out ValidationErrors, field, rule string, msgs map[string]stri
 			msg = field + " must be a number"
 		case "positive":
 			msg = field + " must be positive"
+		case "date":
+			msg = field + " must be a valid date"
+		case "before":
+			msg = field + " must be a date before the given date"
+		case "after":
+			msg = field + " must be a date after the given date"
+		case "before_or_equal":
+			msg = field + " must be a date before or equal to the given date"
+		case "after_or_equal":
+			msg = field + " must be a date after or equal to the given date"
+		case "array":
+			msg = field + " must be an array"
+		case "max_size":
+			msg = field + " is too large"
+		case "mime_type":
+			msg = field + " has an invalid file type"
+		case "extension":
+			msg = field + " has an invalid file extension"
+		case "map":
+			msg = field + " must be a map"
+		case "bool":
+			msg = field + " must be a boolean"
 		default:
 			msg = field + " " + rule
 		}
@@ -507,4 +532,323 @@ func decodeBody(c *reqctx.Context, req any) error {
 	}
 	// For form data, we don't auto-bind — the user populates the struct manually.
 	return nil
+}
+
+// ── Date Rule ───────────────────────────────────────────────────
+
+// DateRule validates string or time.Time fields as dates.
+type DateRule struct {
+	required      bool
+	layout        string // Go time layout for parsing, default: time.RFC3339
+	before        *time.Time
+	after         *time.Time
+	beforeOrEqual *time.Time
+	afterOrEqual  *time.Time
+}
+
+// Date creates a new DateRule. Default layout is RFC3339.
+func Date() *DateRule {
+	return &DateRule{layout: time.RFC3339}
+}
+
+func (r *DateRule) Required() *DateRule {
+	r.required = true
+	return r
+}
+
+// Layout sets the expected date format (Go time layout string).
+func (r *DateRule) Layout(layout string) *DateRule {
+	r.layout = layout
+	return r
+}
+
+// DateOnly expects YYYY-MM-DD format.
+func (r *DateRule) DateOnly() *DateRule {
+	r.layout = "2006-01-02"
+	return r
+}
+
+// Before validates the date is before the given time.
+func (r *DateRule) Before(t time.Time) *DateRule {
+	r.before = &t
+	return r
+}
+
+// After validates the date is after the given time.
+func (r *DateRule) After(t time.Time) *DateRule {
+	r.after = &t
+	return r
+}
+
+// BeforeOrEqual validates the date is before or equal to the given time.
+func (r *DateRule) BeforeOrEqual(t time.Time) *DateRule {
+	r.beforeOrEqual = &t
+	return r
+}
+
+// AfterOrEqual validates the date is after or equal to the given time.
+func (r *DateRule) AfterOrEqual(t time.Time) *DateRule {
+	r.afterOrEqual = &t
+	return r
+}
+
+func (r *DateRule) validate(field string, v reflect.Value, allFields reflect.Value, msgs map[string]string, out ValidationErrors) {
+	var parsed time.Time
+	var empty bool
+
+	switch v.Kind() {
+	case reflect.String:
+		s := v.String()
+		if s == "" {
+			empty = true
+		} else {
+			var err error
+			parsed, err = time.Parse(r.layout, s)
+			if err != nil {
+				addRuleError(out, field, "date", msgs)
+				return
+			}
+		}
+	default:
+		// Check if it's a time.Time
+		if v.Type() == reflect.TypeOf(time.Time{}) {
+			parsed = v.Interface().(time.Time)
+			empty = parsed.IsZero()
+		} else if v.Type() == reflect.TypeOf(&time.Time{}) && !v.IsNil() {
+			parsed = v.Elem().Interface().(time.Time)
+		} else {
+			addRuleError(out, field, "date", msgs)
+			return
+		}
+	}
+
+	if r.required && empty {
+		addRuleError(out, field, "required", msgs)
+		return
+	}
+	if empty {
+		return
+	}
+
+	if r.before != nil && !parsed.Before(*r.before) {
+		addRuleError(out, field, "before", msgs)
+	}
+	if r.after != nil && !parsed.After(*r.after) {
+		addRuleError(out, field, "after", msgs)
+	}
+	if r.beforeOrEqual != nil && parsed.After(*r.beforeOrEqual) {
+		addRuleError(out, field, "before_or_equal", msgs)
+	}
+	if r.afterOrEqual != nil && parsed.Before(*r.afterOrEqual) {
+		addRuleError(out, field, "after_or_equal", msgs)
+	}
+}
+
+// ── Array Rule ──────────────────────────────────────────────────
+
+// ArrayRule validates slice/array fields.
+type ArrayRule struct {
+	required bool
+	min      *int
+	max      *int
+	each     Rule // optional: validate each element
+}
+
+// Array creates a new ArrayRule.
+func Array() *ArrayRule {
+	return &ArrayRule{}
+}
+
+func (r *ArrayRule) Required() *ArrayRule {
+	r.required = true
+	return r
+}
+
+// Min sets the minimum number of elements.
+func (r *ArrayRule) Min(n int) *ArrayRule {
+	r.min = &n
+	return r
+}
+
+// Max sets the maximum number of elements.
+func (r *ArrayRule) Max(n int) *ArrayRule {
+	r.max = &n
+	return r
+}
+
+// Each validates each element with the given rule (e.g., Array().Each(String().Email())).
+func (r *ArrayRule) Each(rule Rule) *ArrayRule {
+	r.each = rule
+	return r
+}
+
+func (r *ArrayRule) validate(field string, v reflect.Value, allFields reflect.Value, msgs map[string]string, out ValidationErrors) {
+	if v.Kind() != reflect.Slice && v.Kind() != reflect.Array {
+		addRuleError(out, field, "array", msgs)
+		return
+	}
+
+	length := v.Len()
+
+	if r.required && length == 0 {
+		addRuleError(out, field, "required", msgs)
+		return
+	}
+	if length == 0 {
+		return
+	}
+
+	if r.min != nil && length < *r.min {
+		addRuleError(out, field, "min", msgs)
+	}
+	if r.max != nil && length > *r.max {
+		addRuleError(out, field, "max", msgs)
+	}
+
+	// Validate each element
+	if r.each != nil {
+		for i := 0; i < length; i++ {
+			elemField := fmt.Sprintf("%s.%d", field, i)
+			r.each.validate(elemField, v.Index(i), allFields, msgs, out)
+		}
+	}
+}
+
+// ── File Rule ───────────────────────────────────────────────────
+
+// FileRule validates *multipart.FileHeader fields.
+type FileRule struct {
+	required   bool
+	maxSize    *int64 // bytes
+	mimeTypes  []string
+	extensions []string
+}
+
+// File creates a new FileRule.
+func File() *FileRule {
+	return &FileRule{}
+}
+
+func (r *FileRule) Required() *FileRule {
+	r.required = true
+	return r
+}
+
+// MaxSize sets the maximum file size in bytes.
+func (r *FileRule) MaxSize(bytes int64) *FileRule {
+	r.maxSize = &bytes
+	return r
+}
+
+// MaxSizeMB sets the maximum file size in megabytes.
+func (r *FileRule) MaxSizeMB(mb int) *FileRule {
+	bytes := int64(mb) * 1024 * 1024
+	r.maxSize = &bytes
+	return r
+}
+
+// MimeTypes restricts allowed MIME types.
+func (r *FileRule) MimeTypes(types ...string) *FileRule {
+	r.mimeTypes = types
+	return r
+}
+
+// Image restricts to common image MIME types.
+func (r *FileRule) Image() *FileRule {
+	r.mimeTypes = []string{"image/jpeg", "image/png", "image/gif", "image/webp", "image/svg+xml"}
+	return r
+}
+
+// Extensions restricts allowed file extensions (without dot).
+func (r *FileRule) Extensions(exts ...string) *FileRule {
+	r.extensions = exts
+	return r
+}
+
+func (r *FileRule) validate(field string, v reflect.Value, allFields reflect.Value, msgs map[string]string, out ValidationErrors) {
+	// Handle *multipart.FileHeader
+	fhType := reflect.TypeOf((*multipart.FileHeader)(nil))
+	if v.Type() != fhType {
+		if r.required {
+			addRuleError(out, field, "required", msgs)
+		}
+		return
+	}
+
+	if v.IsNil() {
+		if r.required {
+			addRuleError(out, field, "required", msgs)
+		}
+		return
+	}
+
+	fh := v.Interface().(*multipart.FileHeader)
+
+	if r.maxSize != nil && fh.Size > *r.maxSize {
+		addRuleError(out, field, "max_size", msgs)
+	}
+
+	if len(r.mimeTypes) > 0 {
+		ct := fh.Header.Get("Content-Type")
+		found := false
+		for _, mt := range r.mimeTypes {
+			if strings.EqualFold(ct, mt) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			addRuleError(out, field, "mime_type", msgs)
+		}
+	}
+
+	if len(r.extensions) > 0 {
+		ext := strings.TrimPrefix(filepath.Ext(fh.Filename), ".")
+		found := false
+		for _, allowed := range r.extensions {
+			if strings.EqualFold(ext, allowed) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			addRuleError(out, field, "extension", msgs)
+		}
+	}
+}
+
+// ── Map Rule ────────────────────────────────────────────────────
+
+// MapRule validates map[string]any fields.
+type MapRule struct {
+	required bool
+	keys     Schema // validate map keys against nested schema
+}
+
+// Map creates a new MapRule.
+func Map() *MapRule {
+	return &MapRule{}
+}
+
+func (r *MapRule) Required() *MapRule {
+	r.required = true
+	return r
+}
+
+// Keys sets nested validation rules for map values.
+func (r *MapRule) Keys(schema Schema) *MapRule {
+	r.keys = schema
+	return r
+}
+
+func (r *MapRule) validate(field string, v reflect.Value, allFields reflect.Value, msgs map[string]string, out ValidationErrors) {
+	if v.Kind() != reflect.Map {
+		addRuleError(out, field, "map", msgs)
+		return
+	}
+
+	if r.required && v.Len() == 0 {
+		addRuleError(out, field, "required", msgs)
+		return
+	}
 }

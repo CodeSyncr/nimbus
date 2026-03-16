@@ -1,0 +1,31 @@
+package migrations
+
+import (
+	"github.com/CodeSyncr/nimbus"
+	"github.com/CodeSyncr/nimbus/database/schema"
+)
+
+// CreatePersonalAccessTokens migration.
+type CreatePersonalAccessTokens struct {
+	schema.BaseSchema
+}
+
+func (m *CreatePersonalAccessTokens) TableName() string { return "{{.MigrationName}}" }
+
+func (m *CreatePersonalAccessTokens) Up(db *nimbus.DB) error {
+	return schema.New(db).CreateTable("personal_access_tokens", func(table *schema.Table) {
+		table.BigIncrements("id")
+		table.String("user_id", 255).Index("user_id")
+		table.String("name", 255)
+		table.String("token", 64).Unique()
+		table.Text("abilities").Default(`'["*"]'`)
+		table.Timestamp("last_used_at").Nullable()
+		table.Timestamp("expires_at").Nullable()
+		table.Timestamps()
+		table.SoftDeletes()
+	})
+}
+
+func (m *CreatePersonalAccessTokens) Down(db *nimbus.DB) error {
+	return schema.New(db).DropTable("personal_access_tokens")
+}

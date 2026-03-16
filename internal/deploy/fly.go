@@ -60,10 +60,10 @@ func deployFly(dir string, cfg *Config) error {
 		}
 		goVer := DetectGoVersion(dir)
 		_ = t.Execute(f, map[string]any{
-			"AppName":        appName,
-			"Region":         region,
-			"GoVersion":      goVer,
-			"RunMigrations":  runMigrations,
+			"AppName":       appName,
+			"Region":        region,
+			"GoVersion":     goVer,
+			"RunMigrations": runMigrations,
 		})
 		_ = f.Close()
 		fmt.Println("  Created fly.toml")

@@ -1,0 +1,45 @@
+package observers
+
+import (
+	"log"
+
+	"gorm.io/gorm"
+)
+
+// {{.ObserverName}}Observer watches {{.ObserverName}} model lifecycle events.
+// Register in boot: database.Observe(&models.{{.ObserverName}}{}, &observers.{{.ObserverName}}Observer{})
+//
+// Or use GORM hooks directly on the model if you prefer.
+type {{.ObserverName}}Observer struct{}
+
+// Creating is called before a new record is inserted.
+func (o *{{.ObserverName}}Observer) Creating(db *gorm.DB, model any) error {
+	log.Printf("[observer] creating {{.SnakeName}}: %+v", model)
+	return nil
+}
+
+// Created is called after a new record is inserted.
+func (o *{{.ObserverName}}Observer) Created(db *gorm.DB, model any) error {
+	log.Printf("[observer] created {{.SnakeName}}: %+v", model)
+	return nil
+}
+
+// Updating is called before a record is updated.
+func (o *{{.ObserverName}}Observer) Updating(db *gorm.DB, model any) error {
+	return nil
+}
+
+// Updated is called after a record is updated.
+func (o *{{.ObserverName}}Observer) Updated(db *gorm.DB, model any) error {
+	return nil
+}
+
+// Deleting is called before a record is deleted.
+func (o *{{.ObserverName}}Observer) Deleting(db *gorm.DB, model any) error {
+	return nil
+}
+
+// Deleted is called after a record is deleted.
+func (o *{{.ObserverName}}Observer) Deleted(db *gorm.DB, model any) error {
+	return nil
+}

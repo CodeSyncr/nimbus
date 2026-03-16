@@ -17,6 +17,8 @@ type ollamaProvider struct {
 	client  *http.Client
 }
 
+func (p *ollamaProvider) Name() string { return "ollama" }
+
 func newOllamaProvider(cfg *Config) (*ollamaProvider, error) {
 	model := cfg.Model
 	if model == "" {
@@ -91,12 +93,12 @@ func (p *ollamaProvider) Generate(ctx context.Context, req *GenerateRequest) (*G
 	}, nil
 }
 
-func (p *ollamaProvider) Stream(ctx context.Context, req *GenerateRequest) (<-chan string, <-chan error) {
-	textCh := make(chan string, 32)
+func (p *ollamaProvider) Stream(ctx context.Context, req *GenerateRequest) (*StreamResponse, error) {
+	chunks := make(chan StreamChunk, 32)
 	errCh := make(chan error, 1)
 
 	go func() {
-		defer close(textCh)
+		defer close(chunks)
 		defer close(errCh)
 
 		msgs := p.toOllamaMessages(req)
@@ -137,7 +139,7 @@ func (p *ollamaProvider) Stream(ctx context.Context, req *GenerateRequest) (<-ch
 				return
 			}
 			if chunk.Message.Content != "" {
-				textCh <- chunk.Message.Content
+				chunks <- StreamChunk{Text: chunk.Message.Content}
 			}
 			if chunk.Done {
 				return
@@ -145,7 +147,7 @@ func (p *ollamaProvider) Stream(ctx context.Context, req *GenerateRequest) (<-ch
 		}
 	}()
 
-	return textCh, errCh
+	return &StreamResponse{Chunks: chunks, Err: errCh}, nil
 }
 
 func (p *ollamaProvider) toOllamaMessages(req *GenerateRequest) []ollamaMsg {

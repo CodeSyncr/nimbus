@@ -17,15 +17,12 @@ type mistralProvider struct {
 	model  string
 }
 
+func (p *mistralProvider) Name() string { return "mistral" }
+
 func (p *mistralProvider) Generate(ctx context.Context, req *GenerateRequest) (*GenerateResponse, error) {
 	return nil, fmt.Errorf("ai: Mistral provider not yet implemented - use AI_PROVIDER=openai or ollama")
 }
 
-func (p *mistralProvider) Stream(ctx context.Context, req *GenerateRequest) (<-chan string, <-chan error) {
-	errCh := make(chan error, 1)
-	textCh := make(chan string)
-	errCh <- fmt.Errorf("ai: Mistral provider not yet implemented")
-	close(textCh)
-	close(errCh)
-	return textCh, errCh
+func (p *mistralProvider) Stream(ctx context.Context, req *GenerateRequest) (*StreamResponse, error) {
+	return nil, fmt.Errorf("ai: Mistral provider not yet implemented")
 }
