@@ -62,9 +62,9 @@ func NewRedisTransport(cfg RedisTransportConfig) (*RedisTransport, error) {
 }
 
 type transportMessage struct {
-	Channel      string   `json:"channel"`
-	Payload      any      `json:"payload"`
-	ExcludeUIDs  []string `json:"exclude_uids,omitempty"`
+	Channel     string   `json:"channel"`
+	Payload     any      `json:"payload"`
+	ExcludeUIDs []string `json:"exclude_uids,omitempty"`
 }
 
 // Publish publishes to Redis; all subscribers (including self) receive.

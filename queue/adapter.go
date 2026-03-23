@@ -35,13 +35,13 @@ type CompletableAdapter interface {
 
 // JobPayload is the serialized form of a job for storage.
 type JobPayload struct {
-	ID        string                 `json:"id"`
-	JobName   string                 `json:"job"`
-	Queue     string                 `json:"queue"`
-	Payload   []byte                 `json:"payload"`
-	Attempts  int                    `json:"attempts"`
-	MaxRetries int                   `json:"max_retries"`
-	Delay     time.Duration          `json:"delay"`
-	RunAt     time.Time              `json:"run_at"`
-	Meta      map[string]interface{} `json:"meta,omitempty"`
+	ID         string                 `json:"id"`
+	JobName    string                 `json:"job"`
+	Queue      string                 `json:"queue"`
+	Payload    []byte                 `json:"payload"`
+	Attempts   int                    `json:"attempts"`
+	MaxRetries int                    `json:"max_retries"`
+	Delay      time.Duration          `json:"delay"`
+	RunAt      time.Time              `json:"run_at"`
+	Meta       map[string]interface{} `json:"meta,omitempty"`
 }

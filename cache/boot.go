@@ -13,15 +13,15 @@ import (
 
 // BootConfig configures cache boot. Pass nil for env-based config.
 type BootConfig struct {
-	Driver        string        // memory, redis, memcached, dynamodb, cloudflare
-	RedisURL      string
-	MemcachedServers string    // comma-separated, e.g. "localhost:11211"
-	DynamoTable   string
-	DynamoRegion string
+	Driver                string // memory, redis, memcached, dynamodb, cloudflare
+	RedisURL              string
+	MemcachedServers      string // comma-separated, e.g. "localhost:11211"
+	DynamoTable           string
+	DynamoRegion          string
 	CloudflareAccountID   string
 	CloudflareNamespaceID string
 	CloudflareAPIToken    string
-	DefaultTTL   time.Duration
+	DefaultTTL            time.Duration
 }
 
 var (

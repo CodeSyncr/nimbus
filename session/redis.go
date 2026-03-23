@@ -88,4 +88,3 @@ func (s *RedisStore) Destroy(ctx context.Context, id string) error {
 }
 
 var _ Store = (*RedisStore)(nil)
-

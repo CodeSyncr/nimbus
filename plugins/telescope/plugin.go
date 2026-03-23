@@ -67,8 +67,8 @@ func (p *Plugin) Boot(app *nimbus.App) error {
 // DefaultConfig returns the default configuration.
 func (p *Plugin) DefaultConfig() map[string]any {
 	return map[string]any{
-		"enabled":  os.Getenv("APP_ENV") == "development" || os.Getenv("APP_ENV") == "",
-		"path":     "/telescope",
+		"enabled":     os.Getenv("APP_ENV") == "development" || os.Getenv("APP_ENV") == "",
+		"path":        "/telescope",
 		"max_entries": 100,
 	}
 }

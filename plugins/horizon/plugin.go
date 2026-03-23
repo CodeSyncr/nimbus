@@ -23,6 +23,7 @@ import (
 
 	"github.com/CodeSyncr/nimbus"
 	"github.com/CodeSyncr/nimbus/http"
+	"github.com/CodeSyncr/nimbus/metrics"
 	"github.com/CodeSyncr/nimbus/queue"
 	"github.com/CodeSyncr/nimbus/view"
 	"github.com/redis/go-redis/v9"
@@ -32,6 +33,28 @@ var (
 	_ nimbus.Plugin    = (*Plugin)(nil)
 	_ nimbus.HasRoutes = (*Plugin)(nil)
 	_ nimbus.HasViews  = (*Plugin)(nil)
+
+	queueDispatchedTotal = metrics.NewCounter(
+		"nimbus_queue_jobs_dispatched_total",
+		"Total number of queue jobs dispatched.",
+	)
+	queueProcessedTotal = metrics.NewCounter(
+		"nimbus_queue_jobs_processed_total",
+		"Total number of queue jobs processed successfully.",
+	)
+	queueFailedTotal = metrics.NewCounter(
+		"nimbus_queue_jobs_failed_total",
+		"Total number of queue jobs that failed permanently.",
+	)
+	queueRetriedTotal = metrics.NewCounter(
+		"nimbus_queue_jobs_retried_total",
+		"Total number of queue job retries scheduled.",
+	)
+	queueReclaimedTotal = metrics.NewCounter(
+		"nimbus_queue_jobs_reclaimed_total",
+		"Total number of queue jobs reclaimed from expired in-flight leases.",
+	)
+	horizonMetricsOnce sync.Once
 )
 
 // Options configures the Horizon plugin (Laravel-style).
@@ -125,6 +148,8 @@ type Stats struct {
 	TotalDispatched int64
 	TotalProcessed  int64
 	TotalFailed     int64
+	TotalRetried    int64
+	TotalReclaimed  int64
 
 	PerQueue map[string]*QueueStats
 }
@@ -135,12 +160,21 @@ type QueueStats struct {
 	Dispatched     int64
 	Processed      int64
 	Failed         int64
+	Retried        int64
+	Reclaimed      int64
 	LastDispatched *time.Time
 	LastProcessed  *time.Time
 }
 
 // NewStats creates a new Stats instance.
 func NewStats() *Stats {
+	horizonMetricsOnce.Do(func() {
+		metrics.DefaultRegistry.Register(queueDispatchedTotal)
+		metrics.DefaultRegistry.Register(queueProcessedTotal)
+		metrics.DefaultRegistry.Register(queueFailedTotal)
+		metrics.DefaultRegistry.Register(queueRetriedTotal)
+		metrics.DefaultRegistry.Register(queueReclaimedTotal)
+	})
 	return &Stats{
 		StartedAt: time.Now(),
 		PerQueue:  make(map[string]*QueueStats),
@@ -172,6 +206,7 @@ func (s *Stats) JobDispatched(payload *queue.JobPayload) {
 	qs := s.ensureQueue(payload.Queue)
 	qs.Dispatched++
 	qs.LastDispatched = &now
+	queueDispatchedTotal.Inc(metrics.Labels{"queue": qs.Name})
 }
 
 // JobProcessed implements queue.Observer.
@@ -187,10 +222,38 @@ func (s *Stats) JobProcessed(payload *queue.JobPayload, err error) {
 		qs := s.ensureQueue(payload.Queue)
 		qs.Failed++
 		qs.LastProcessed = &now
+		queueFailedTotal.Inc(metrics.Labels{"queue": qs.Name})
 		return
 	}
 	s.TotalProcessed++
 	qs := s.ensureQueue(payload.Queue)
 	qs.Processed++
 	qs.LastProcessed = &now
+	queueProcessedTotal.Inc(metrics.Labels{"queue": qs.Name})
+}
+
+// JobRetried implements queue.RetryObserver.
+func (s *Stats) JobRetried(payload *queue.JobPayload, nextDelay time.Duration) {
+	if payload == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.TotalRetried++
+	qs := s.ensureQueue(payload.Queue)
+	qs.Retried++
+	queueRetriedTotal.Inc(metrics.Labels{"queue": qs.Name})
+}
+
+// JobsReclaimed implements queue.ReclaimObserver.
+func (s *Stats) JobsReclaimed(queueName string, count int) {
+	if count <= 0 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.TotalReclaimed += int64(count)
+	qs := s.ensureQueue(queueName)
+	qs.Reclaimed += int64(count)
+	queueReclaimedTotal.Add(uint64(count), metrics.Labels{"queue": qs.Name})
 }

@@ -31,10 +31,10 @@ type PluginDef struct {
 
 var pluginRegistry = map[string]PluginDef{
 	"telescope": {
-		Name:        "telescope",
-		ImportPath:  "github.com/CodeSyncr/nimbus/plugins/telescope",
-		PackageName: "telescope",
-		Description: "Debugging and introspection tool for requests, queries, exceptions, and more",
+		Name:         "telescope",
+		ImportPath:   "github.com/CodeSyncr/nimbus/plugins/telescope",
+		PackageName:  "telescope",
+		Description:  "Debugging and introspection tool for requests, queries, exceptions, and more",
 		ServerInsert: "\tapp.Use(telescope.New())\n",
 		KernelImport: "\t\"github.com/CodeSyncr/nimbus/plugins/telescope\"\n",
 		KernelInsert: `
@@ -47,10 +47,10 @@ var pluginRegistry = map[string]PluginDef{
 `,
 	},
 	"horizon": {
-		Name:        "horizon",
-		ImportPath:  "github.com/CodeSyncr/nimbus/plugins/horizon",
-		PackageName: "horizon",
-		Description: "Queue dashboard similar to Laravel Horizon (basic stats and per-queue metrics)",
+		Name:         "horizon",
+		ImportPath:   "github.com/CodeSyncr/nimbus/plugins/horizon",
+		PackageName:  "horizon",
+		Description:  "Queue dashboard similar to Laravel Horizon (basic stats and per-queue metrics)",
 		ServerInsert: "\tapp.Use(horizon.New())\n",
 	},
 	"inertia": {
@@ -68,19 +68,19 @@ var pluginRegistry = map[string]PluginDef{
 		EnvVars: []string{"VITE_APP_NAME={{.AppName}}"},
 	},
 	"unpoly": {
-		Name:        "unpoly",
-		ImportPath:  "github.com/CodeSyncr/nimbus/plugins/unpoly",
-		PackageName: "unpoly",
-		Description: "Unpoly.js for progressive enhancement and partial page updates",
+		Name:         "unpoly",
+		ImportPath:   "github.com/CodeSyncr/nimbus/plugins/unpoly",
+		PackageName:  "unpoly",
+		Description:  "Unpoly.js for progressive enhancement and partial page updates",
 		ServerInsert: "\tapp.Use(unpoly.New())\n",
 		KernelImport: "\t\"github.com/CodeSyncr/nimbus/plugins/unpoly\"\n",
 		KernelInsert: "\t\tunpoly.ServerProtocol(),\n",
 	},
 	"ai": {
-		Name:        "ai",
-		ImportPath:  "github.com/CodeSyncr/nimbus/plugins/ai",
-		PackageName: "ai",
-		Description: "AI integration (OpenAI, Ollama) for chat and agents",
+		Name:         "ai",
+		ImportPath:   "github.com/CodeSyncr/nimbus/plugins/ai",
+		PackageName:  "ai",
+		Description:  "AI integration (OpenAI, Ollama) for chat and agents",
 		ServerInsert: "\tapp.Use(ai.New())\n",
 		EnvVars: []string{
 			"# AI provider: openai or ollama (default: auto-detect)",

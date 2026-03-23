@@ -43,4 +43,3 @@ func Broadcast(n Notification) {
 	}
 	transmit.Broadcast(channel, payload)
 }
-

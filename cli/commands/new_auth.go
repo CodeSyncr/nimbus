@@ -111,6 +111,61 @@ var AuthGuard = "basic"
 var BasicAuthRealm = "Restricted"
 `
 
+	case "stateless":
+		return `/*
+|--------------------------------------------------------------------------
+| Authentication Configuration
+|--------------------------------------------------------------------------
+|
+| Guard: Stateless (JWT/PASETO)
+|
+| Stateless authentication uses self-contained tokens (JWT or PASETO)
+| that carry user information. The server does not need to store
+| session state in a database or cache to verify the user.
+|
+| Drivers:
+|   - jwt:   HMAC with SHA-256 (HS256)
+|   - paseto: PASETO v4 Local tokens (more secure by default)
+|
+*/
+
+package config
+
+import (
+	"os"
+	"time"
+)
+
+// AuthGuard defines the authentication guard type.
+var AuthGuard = "stateless"
+
+type StatelessTokenConfig struct {
+	Driver    string
+	Secret    string
+	ExpiresIn time.Duration
+}
+
+var StatelessToken = StatelessTokenConfig{
+	Driver:    "jwt", // or "paseto"
+	Secret:    "please-change-this-secret",
+	ExpiresIn: 24 * time.Hour,
+}
+
+func init() {
+	if driver := os.Getenv("AUTH_TOKEN_DRIVER"); driver != "" {
+		StatelessToken.Driver = driver
+	}
+	if secret := os.Getenv("AUTH_TOKEN_SECRET"); secret != "" {
+		StatelessToken.Secret = secret
+	}
+	if exp := os.Getenv("AUTH_TOKEN_EXPIRES_IN"); exp != "" {
+		if d, err := time.ParseDuration(exp); err == nil {
+			StatelessToken.ExpiresIn = d
+		}
+	}
+}
+`
+
 	default:
 		return `package config
 
@@ -273,6 +328,39 @@ func Authenticate() router.Middleware {
 }
 `
 
+	case "stateless":
+		return `/*
+|--------------------------------------------------------------------------
+| Auth Middleware — Stateless Guard (JWT/PASETO)
+|--------------------------------------------------------------------------
+|
+| This middleware uses self-contained tokens. The client sends the
+| token in the Authorization header:
+|
+|   Authorization: Bearer <token>
+|
+| Ideal for mobile apps, SPAs on different domains, and distributed
+| microservices.
+|
+*/
+
+package middleware
+
+import (
+	"github.com/CodeSyncr/nimbus/auth"
+	"github.com/CodeSyncr/nimbus/router"
+)
+
+// StatelessGuard is the JWT/PASETO-based auth guard.
+// Set the Driver and UserLoader during boot.
+var StatelessGuard *auth.StatelessGuard
+
+// Authenticate returns middleware that requires a valid stateless token.
+func Authenticate() router.Middleware {
+	return auth.RequireStatelessToken(StatelessGuard)
+}
+`
+
 	default:
 		return `package middleware
 
@@ -299,6 +387,12 @@ func authEnvVars(guard string) []string {
 	case "basic":
 		return []string{
 			"BASIC_AUTH_REALM=Restricted",
+		}
+	case "stateless":
+		return []string{
+			"AUTH_TOKEN_DRIVER=jwt",
+			"AUTH_TOKEN_SECRET=please-change-this-secret-to-32-characters",
+			"AUTH_TOKEN_EXPIRES_IN=24h",
 		}
 	default:
 		return nil

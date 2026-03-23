@@ -10,45 +10,45 @@ import (
 type EntryType string
 
 const (
-	EntryRequest    EntryType = "request"
-	EntryCommand    EntryType = "command"
-	EntrySchedule   EntryType = "schedule"
-	EntryJob        EntryType = "job"
-	EntryBatch      EntryType = "batch"
-	EntryCache      EntryType = "cache"
-	EntryDump       EntryType = "dump"
-	EntryEvent      EntryType = "event"
-	EntryException  EntryType = "exception"
-	EntryGate       EntryType = "gate"
-	EntryHTTPClient EntryType = "http_client"
-	EntryLog        EntryType = "log"
-	EntryMail       EntryType = "mail"
-	EntryModel      EntryType = "model"
+	EntryRequest      EntryType = "request"
+	EntryCommand      EntryType = "command"
+	EntrySchedule     EntryType = "schedule"
+	EntryJob          EntryType = "job"
+	EntryBatch        EntryType = "batch"
+	EntryCache        EntryType = "cache"
+	EntryDump         EntryType = "dump"
+	EntryEvent        EntryType = "event"
+	EntryException    EntryType = "exception"
+	EntryGate         EntryType = "gate"
+	EntryHTTPClient   EntryType = "http_client"
+	EntryLog          EntryType = "log"
+	EntryMail         EntryType = "mail"
+	EntryModel        EntryType = "model"
 	EntryNotification EntryType = "notification"
-	EntryQuery      EntryType = "query"
-	EntryRedis      EntryType = "redis"
-	EntryView       EntryType = "view"
+	EntryQuery        EntryType = "query"
+	EntryRedis        EntryType = "redis"
+	EntryView         EntryType = "view"
 )
 
 // Entry represents a single telescope record.
 type Entry struct {
-	ID        string                 `json:"id"`
-	Type      EntryType              `json:"type"`
-	Content   map[string]any         `json:"content"`
-	Tags      []string               `json:"tags,omitempty"`
-	BatchID   string                 `json:"batch_id,omitempty"`
-	CreatedAt time.Time              `json:"created_at"`
+	ID        string         `json:"id"`
+	Type      EntryType      `json:"type"`
+	Content   map[string]any `json:"content"`
+	Tags      []string       `json:"tags,omitempty"`
+	BatchID   string         `json:"batch_id,omitempty"`
+	CreatedAt time.Time      `json:"created_at"`
 }
 
 // RequestContent holds request/response data.
 type RequestContent struct {
-	Method        string            `json:"method"`
-	Path          string            `json:"path"`
-	Query         string            `json:"query"`
-	Headers       map[string]string `json:"headers,omitempty"`
+	Method         string            `json:"method"`
+	Path           string            `json:"path"`
+	Query          string            `json:"query"`
+	Headers        map[string]string `json:"headers,omitempty"`
 	ResponseStatus int               `json:"response_status"`
-	Duration      time.Duration     `json:"duration_ms"`
-	Memory        int64             `json:"memory,omitempty"`
+	Duration       time.Duration     `json:"duration_ms"`
+	Memory         int64             `json:"memory,omitempty"`
 }
 
 // ExceptionContent holds exception/panic data.
@@ -62,16 +62,16 @@ type ExceptionContent struct {
 
 // QueryContent holds database query data.
 type QueryContent struct {
-	SQL      string        `json:"sql"`
-	Bindings []any         `json:"bindings,omitempty"`
-	Duration time.Duration `json:"duration_ms"`
-	Connection string      `json:"connection,omitempty"`
+	SQL        string        `json:"sql"`
+	Bindings   []any         `json:"bindings,omitempty"`
+	Duration   time.Duration `json:"duration_ms"`
+	Connection string        `json:"connection,omitempty"`
 }
 
 // LogContent holds log entry data.
 type LogContent struct {
-	Level   string `json:"level"`
-	Message string `json:"message"`
+	Level   string         `json:"level"`
+	Message string         `json:"message"`
 	Context map[string]any `json:"context,omitempty"`
 }
 

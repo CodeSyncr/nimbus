@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/CodeSyncr/nimbus/http"
+	"github.com/CodeSyncr/nimbus/metrics"
 	"github.com/CodeSyncr/nimbus/queue"
 	"github.com/CodeSyncr/nimbus/router"
 )
@@ -23,6 +24,7 @@ func (p *Plugin) RegisterRoutes(r *router.Router) {
 	grp.Get("/monitoring", p.monitoringHandler)
 	grp.Get("/metrics", p.metricsPageHandler)
 	grp.Get("/api/metrics", p.metricsHandler)
+	grp.Get("/api/metrics/prometheus", p.prometheusMetricsHandler)
 	grp.Get("/batches", p.batchesHandler)
 	grp.Get("/pending", p.pendingHandler)
 	grp.Get("/completed", p.completedHandler)
@@ -158,6 +160,16 @@ func (p *Plugin) metricsHandler(c *http.Context) error {
 	return c.JSON(http.StatusOK, p.snapshot())
 }
 
+func (p *Plugin) prometheusMetricsHandler(c *http.Context) error {
+	if !p.authorize(c) {
+		return c.JSON(http.StatusForbidden, map[string]string{"error": "unauthorized"})
+	}
+	c.Response.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+	c.Response.WriteHeader(http.StatusOK)
+	_, _ = c.Response.Write([]byte(metrics.DefaultRegistry.Expose()))
+	return nil
+}
+
 func (p *Plugin) failedListHandler(c *http.Context) error {
 	if !p.authorize(c) {
 		return c.JSON(http.StatusForbidden, map[string]string{"error": "unauthorized"})
@@ -236,6 +248,8 @@ func (p *Plugin) snapshot() map[string]any {
 		"total_dispatched": p.stats.TotalDispatched,
 		"total_processed":  p.stats.TotalProcessed,
 		"total_failed":     p.stats.TotalFailed,
+		"total_retried":    p.stats.TotalRetried,
+		"total_reclaimed":  p.stats.TotalReclaimed,
 	}
 	queues := make([]map[string]any, 0, len(p.stats.PerQueue))
 	for _, qs := range p.stats.PerQueue {
@@ -244,6 +258,8 @@ func (p *Plugin) snapshot() map[string]any {
 			"dispatched": qs.Dispatched,
 			"processed":  qs.Processed,
 			"failed":     qs.Failed,
+			"retried":    qs.Retried,
+			"reclaimed":  qs.Reclaimed,
 		}
 		if qs.LastDispatched != nil {
 			item["last_dispatched"] = qs.LastDispatched

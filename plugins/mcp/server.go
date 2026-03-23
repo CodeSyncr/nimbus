@@ -74,4 +74,3 @@ func (s *Server) AddPrompt(prompt mcp.Prompt, handler server.PromptHandlerFunc) 
 func (s *Server) Handler() http.Handler {
 	return s.httpHandler
 }
-

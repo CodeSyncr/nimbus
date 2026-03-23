@@ -49,4 +49,3 @@ func (ui *UI) AskMultiSelect(label string, options []string, defaults []string) 
 	err := survey.AskOne(p, &ans)
 	return ans, err
 }
-

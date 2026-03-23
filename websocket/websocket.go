@@ -2,6 +2,8 @@ package websocket
 
 import (
 	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 
 	"github.com/gorilla/websocket"
@@ -15,11 +17,12 @@ var upgrader = websocket.Upgrader{
 
 // Hub holds connected clients and broadcasts (plan: realtime chat, notifications).
 type Hub struct {
-	mu      sync.RWMutex
-	clients map[*Conn]struct{}
-	broadcast chan []byte
-	register  chan *Conn
+	mu         sync.RWMutex
+	clients    map[*Conn]struct{}
+	broadcast  chan []byte
+	register   chan *Conn
 	unregister chan *Conn
+	allowedOrigins map[string]struct{}
 }
 
 // Conn wraps a websocket connection.
@@ -31,11 +34,20 @@ type Conn struct {
 // NewHub returns a new hub. Call Run() to start.
 func NewHub() *Hub {
 	return &Hub{
-		clients:    make(map[*Conn]struct{}),
-		broadcast:  make(chan []byte, 256),
-		register:   make(chan *Conn),
-		unregister: make(chan *Conn),
+		clients:        make(map[*Conn]struct{}),
+		broadcast:      make(chan []byte, 256),
+		register:       make(chan *Conn),
+		unregister:     make(chan *Conn),
+		allowedOrigins: make(map[string]struct{}),
 	}
+}
+
+// SetAllowedOrigins configures allowed websocket origins.
+// When empty, same-origin requests are allowed by default.
+func (h *Hub) SetAllowedOrigins(origins []string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.allowedOrigins = normalizeOrigins(origins)
 }
 
 // Run runs the hub (blocks). Call in a goroutine.
@@ -72,7 +84,9 @@ func (h *Hub) Broadcast(msg []byte) {
 
 // Upgrade upgrades the HTTP request to WebSocket and registers the conn with the hub.
 func (h *Hub) Upgrade(w http.ResponseWriter, r *http.Request) (*Conn, error) {
-	raw, err := upgrader.Upgrade(w, r, nil)
+	u := upgrader
+	u.CheckOrigin = h.checkOrigin
+	raw, err := u.Upgrade(w, r, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -81,6 +95,42 @@ func (h *Hub) Upgrade(w http.ResponseWriter, r *http.Request) (*Conn, error) {
 	go c.writePump()
 	go c.readPump(h)
 	return c, nil
+}
+
+func (h *Hub) checkOrigin(r *http.Request) bool {
+	origin := strings.TrimSpace(r.Header.Get("Origin"))
+	if origin == "" {
+		return true
+	}
+	parsed, err := url.Parse(origin)
+	if err != nil || parsed.Host == "" {
+		return false
+	}
+	host := strings.ToLower(parsed.Host)
+
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	if len(h.allowedOrigins) == 0 {
+		return strings.EqualFold(host, r.Host)
+	}
+	_, ok := h.allowedOrigins[host]
+	return ok
+}
+
+func normalizeOrigins(origins []string) map[string]struct{} {
+	allowed := make(map[string]struct{}, len(origins))
+	for _, origin := range origins {
+		trimmed := strings.TrimSpace(origin)
+		if trimmed == "" {
+			continue
+		}
+		parsed, err := url.Parse(trimmed)
+		if err != nil || parsed.Host == "" {
+			continue
+		}
+		allowed[strings.ToLower(parsed.Host)] = struct{}{}
+	}
+	return allowed
 }
 
 func (c *Conn) readPump(h *Hub) {

@@ -56,4 +56,3 @@ func findAppRoot() string {
 		dir = parent
 	}
 }
-

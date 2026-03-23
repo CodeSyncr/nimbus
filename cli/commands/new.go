@@ -85,6 +85,7 @@ func (c *NewCommand) Run(ctx *cli.Context) error {
 			guardAns, err := ctx.UI.AskSelect("Select auth guard", []string{
 				"Session (cookie-based, ideal for web apps & SPAs on same domain)",
 				"Access Token (opaque tokens, ideal for APIs, mobile & 3rd-party)",
+				"Stateless (JWT/PASETO, ideal for mobile apps & distributed services)",
 				"Basic Auth (HTTP basic, ideal for internal tools & development)",
 			}, "Session (cookie-based, ideal for web apps & SPAs on same domain)")
 			if err != nil {
@@ -95,6 +96,8 @@ func (c *NewCommand) Run(ctx *cli.Context) error {
 				authGuard = "session"
 			case strings.Contains(guardAns, "Access Token"):
 				authGuard = "access_token"
+			case strings.Contains(guardAns, "Stateless"):
+				authGuard = "stateless"
 			case strings.Contains(guardAns, "Basic Auth"):
 				authGuard = "basic"
 			}
@@ -545,6 +548,7 @@ import (
 	"os"
 
 	"github.com/CodeSyncr/nimbus"
+	"github.com/CodeSyncr/nimbus/auth"
 	"github.com/CodeSyncr/nimbus/database"
 	"github.com/CodeSyncr/nimbus/queue"
 ` + importBlock + `
@@ -563,6 +567,8 @@ func Boot() *nimbus.App {
 
 	start.RegisterRoutes(app)
 
+	bootAuth(app)
+
 	db, err := database.Connect(config.Database.Driver, config.Database.DSN)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Database connection failed: %v\n", err)
@@ -573,6 +579,30 @@ func Boot() *nimbus.App {
 	queue.Boot(&queue.BootConfig{RegisterJobs: start.RegisterQueueJobs})
 
 	return app
+}
+
+func bootAuth(app *nimbus.App) {
+	if config.AuthGuard == "stateless" {
+		bootStatelessAuth(app)
+	}
+}
+
+func bootStatelessAuth(app *nimbus.App) {
+	var driver auth.TokenDriver
+	if config.StatelessToken.Driver == "paseto" {
+		driver = auth.NewPasetoDriver(config.StatelessToken.Secret)
+	} else {
+		driver = auth.NewJWTDriver(config.StatelessToken.Secret)
+	}
+
+	guard := auth.NewStatelessGuard(driver, auth.UserLoaderFunc(func(ctx context.Context, id string) (auth.User, error) {
+		// TODO: Implement user loading from database
+		return nil, nil
+	}))
+
+	app.Container.Singleton("auth.stateless", func() *auth.StatelessGuard {
+		return guard
+	})
 }
 
 func RunQueueWorker() {

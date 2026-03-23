@@ -110,4 +110,3 @@ func createMySQLDatabase(cfg CreateConfig) error {
 	stmt := fmt.Sprintf("CREATE DATABASE IF NOT EXISTS `%s` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci", name)
 	return db.Exec(stmt).Error
 }
-

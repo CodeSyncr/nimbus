@@ -13,6 +13,7 @@ package queue
 import (
 	"context"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,6 +24,10 @@ import (
 type BootConfig struct {
 	Driver          string // sync, redis, database, sqs, kafka
 	RedisURL        string
+	// RedisVisibilityTimeout controls Redis in-flight lease timeout.
+	RedisVisibilityTimeout time.Duration
+	// DatabaseLeaseDuration controls how long processing DB jobs are leased before reclaim.
+	DatabaseLeaseDuration time.Duration
 	SQSQueueURL     string
 	KafkaBrokers    string
 	KafkaTopic      string
@@ -44,6 +49,16 @@ func Boot(cfg *BootConfig) *Manager {
 	if url := os.Getenv("REDIS_URL"); url != "" {
 		config.RedisURL = url
 	}
+	if v := os.Getenv("QUEUE_REDIS_VISIBILITY_TIMEOUT_SECONDS"); v != "" {
+		if secs, err := strconv.Atoi(v); err == nil && secs > 0 {
+			config.RedisVisibilityTimeout = time.Duration(secs) * time.Second
+		}
+	}
+	if v := os.Getenv("QUEUE_DB_LEASE_SECONDS"); v != "" {
+		if secs, err := strconv.Atoi(v); err == nil && secs > 0 {
+			config.DatabaseLeaseDuration = time.Duration(secs) * time.Second
+		}
+	}
 
 	var adapter Adapter
 	switch config.Driver {
@@ -55,6 +70,9 @@ func Boot(cfg *BootConfig) *Manager {
 		if err != nil {
 			return nil
 		}
+		if config.RedisVisibilityTimeout > 0 {
+			a.SetVisibilityTimeout(config.RedisVisibilityTimeout)
+		}
 		adapter = a
 	case "database":
 		db := database.Get()
@@ -62,6 +80,9 @@ func Boot(cfg *BootConfig) *Manager {
 			return nil
 		}
 		da := NewDatabaseAdapter(db)
+		if config.DatabaseLeaseDuration > 0 {
+			da.SetLeaseDuration(config.DatabaseLeaseDuration)
+		}
 		_ = da.EnsureTable(context.Background())
 		adapter = da
 	case "sqs":

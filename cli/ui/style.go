@@ -66,4 +66,3 @@ func (ui *UI) Panel(title, body string) {
 	box := ui.style.Panel.Render(header + "\n\n" + body)
 	fmt.Fprintln(ui.out, box)
 }
-

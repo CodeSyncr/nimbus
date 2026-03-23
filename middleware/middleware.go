@@ -19,17 +19,13 @@ func Logger() router.Middleware {
 	return func(next router.HandlerFunc) router.HandlerFunc {
 		return func(c *http.Context) error {
 			start := time.Now()
-			path := c.Request.URL.Path
-			method := c.Request.Method
-			clientIP := c.Request.RemoteAddr
 			err := next(c)
 			duration := time.Since(start)
-			logger.Info("http_request",
-				"method", method,
-				"path", path,
-				"client_ip", clientIP,
-				"duration_ms", duration.Milliseconds(),
-				"error", err != nil,
+			logger.Infof("%s %s %d in %v",
+				c.Request.Method,
+				c.Request.URL.Path,
+				c.StatusCode(),
+				duration,
 			)
 			return err
 		}

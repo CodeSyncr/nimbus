@@ -21,7 +21,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
 )
 
-
 // SQSAdapter uses AWS SQS for job storage.
 type SQSAdapter struct {
 	client    *sqs.Client
@@ -57,8 +56,8 @@ func (s *SQSAdapter) Push(ctx context.Context, payload *JobPayload) error {
 		"Queue":   {DataType: aws.String("String"), StringValue: aws.String(payload.Queue)},
 	}
 	req := &sqs.SendMessageInput{
-		QueueUrl:       aws.String(s.queueURL),
-		MessageBody:    aws.String(string(data)),
+		QueueUrl:          aws.String(s.queueURL),
+		MessageBody:       aws.String(string(data)),
 		MessageAttributes: attrs,
 	}
 	if payload.Delay > 0 {
@@ -80,9 +79,9 @@ func (s *SQSAdapter) Pop(ctx context.Context, queue string) (*JobPayload, error)
 			return nil, ctx.Err()
 		default:
 			out, err := s.client.ReceiveMessage(ctx, &sqs.ReceiveMessageInput{
-				QueueUrl:            aws.String(s.queueURL),
-				MaxNumberOfMessages: 1,
-				WaitTimeSeconds:    20,
+				QueueUrl:              aws.String(s.queueURL),
+				MaxNumberOfMessages:   1,
+				WaitTimeSeconds:       20,
 				MessageAttributeNames: []string{"All"},
 			})
 			if err != nil {

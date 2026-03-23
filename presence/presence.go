@@ -39,6 +39,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -97,6 +98,10 @@ type Config struct {
 
 	// Path for the websocket endpoint (default: "/_presence").
 	Path string
+
+	// AllowedOrigins controls accepted websocket Origin hosts.
+	// When empty, same-origin requests are allowed by default.
+	AllowedOrigins []string
 }
 
 // ---------------------------------------------------------------------------
@@ -107,6 +112,7 @@ type Config struct {
 type Hub struct {
 	config   Config
 	channels sync.Map // channel name -> *Channel
+	allowedOrigins map[string]struct{}
 }
 
 // Channel represents a single presence channel.
@@ -131,7 +137,10 @@ func NewHub(cfg Config) *Hub {
 	if cfg.Path == "" {
 		cfg.Path = "/_presence"
 	}
-	return &Hub{config: cfg}
+	return &Hub{
+		config:         cfg,
+		allowedOrigins: normalizeOrigins(cfg.AllowedOrigins),
+	}
 }
 
 // getOrCreateChannel returns or creates a channel.
@@ -324,7 +333,7 @@ func (ch *Channel) Count() int {
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
-	CheckOrigin:     func(r *http.Request) bool { return true },
+	CheckOrigin:     func(r *http.Request) bool { return false },
 }
 
 // HandleWebSocket upgrades an HTTP connection and joins a presence channel.
@@ -358,7 +367,9 @@ func (h *Hub) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Upgrade connection
-	conn, err := upgrader.Upgrade(w, r, nil)
+	u := upgrader
+	u.CheckOrigin = h.checkOrigin
+	conn, err := u.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("[presence] upgrade failed: %v", err)
 		return
@@ -377,6 +388,39 @@ func (h *Hub) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	go client.writePump()
 	go client.readPump(ch)
+}
+
+func (h *Hub) checkOrigin(r *http.Request) bool {
+	origin := strings.TrimSpace(r.Header.Get("Origin"))
+	if origin == "" {
+		return true
+	}
+	parsed, err := url.Parse(origin)
+	if err != nil || parsed.Host == "" {
+		return false
+	}
+	host := strings.ToLower(parsed.Host)
+	if len(h.allowedOrigins) == 0 {
+		return strings.EqualFold(host, r.Host)
+	}
+	_, ok := h.allowedOrigins[host]
+	return ok
+}
+
+func normalizeOrigins(origins []string) map[string]struct{} {
+	allowed := make(map[string]struct{}, len(origins))
+	for _, origin := range origins {
+		trimmed := strings.TrimSpace(origin)
+		if trimmed == "" {
+			continue
+		}
+		parsed, err := url.Parse(trimmed)
+		if err != nil || parsed.Host == "" {
+			continue
+		}
+		allowed[strings.ToLower(parsed.Host)] = struct{}{}
+	}
+	return allowed
 }
 
 // ---------------------------------------------------------------------------

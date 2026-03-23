@@ -38,13 +38,13 @@ import (
 
 // SocialUser represents the authenticated user returned by an OAuth provider.
 type SocialUser struct {
-	Provider    string `json:"provider"`
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Email       string `json:"email"`
-	Avatar      string `json:"avatar"`
-	AccessToken string `json:"access_token"`
-	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
+	Provider    string         `json:"provider"`
+	ID          string         `json:"id"`
+	Name        string         `json:"name"`
+	Email       string         `json:"email"`
+	Avatar      string         `json:"avatar"`
+	AccessToken string         `json:"access_token"`
+	ExpiresAt   *time.Time     `json:"expires_at,omitempty"`
 	Raw         map[string]any `json:"raw,omitempty"`
 }
 

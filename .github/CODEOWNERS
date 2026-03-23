@@ -1,0 +1,17 @@
+# Default owners for all files.
+* @CodeSyncr
+
+# Core runtime areas that require maintainer review.
+/database/ @CodeSyncr
+/queue/ @CodeSyncr
+/websocket/ @CodeSyncr
+/presence/ @CodeSyncr
+/middleware/ @CodeSyncr
+/plugins/ @CodeSyncr
+/cmd/ @CodeSyncr
+/cli/ @CodeSyncr
+
+# CI and release process files.
+/.github/workflows/ @CodeSyncr
+/README.md @CodeSyncr
+/CHANGELOG.md @CodeSyncr

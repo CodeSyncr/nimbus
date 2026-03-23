@@ -10,7 +10,7 @@ import (
 )
 
 type User struct {
-	ID   uint   `gorm:"primaryKey"`
+	ID   uint `gorm:"primaryKey"`
 	Name string
 }
 
@@ -59,7 +59,7 @@ func TestTransaction(t *testing.T) {
 		if tx == nil {
 			t.Fatal("expected tx, got nil")
 		}
-		
+
 		tx.Create(&User{Name: "Charlie"})
 		tx.Commit()
 

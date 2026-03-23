@@ -15,20 +15,20 @@ import (
 )
 
 type (
-	ConnectHook    func(uid string)
-	DisconnectHook func(uid string)
-	SubscribeHook  func(uid, channel string)
+	ConnectHook     func(uid string)
+	DisconnectHook  func(uid string)
+	SubscribeHook   func(uid, channel string)
 	UnsubscribeHook func(uid, channel string)
-	BroadcastHook  func(channel string, payload any)
+	BroadcastHook   func(channel string, payload any)
 )
 
 var (
-	hooksMu     sync.RWMutex
-	onConnect   []ConnectHook
-	onDisconnect []DisconnectHook
-	onSubscribe []SubscribeHook
+	hooksMu       sync.RWMutex
+	onConnect     []ConnectHook
+	onDisconnect  []DisconnectHook
+	onSubscribe   []SubscribeHook
 	onUnsubscribe []UnsubscribeHook
-	onBroadcast []BroadcastHook
+	onBroadcast   []BroadcastHook
 )
 
 // OnConnect registers a callback for new SSE connections.

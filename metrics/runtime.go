@@ -46,4 +46,3 @@ func ReadRuntimeStats() RuntimeStats {
 		NextGC:       m.NextGC,
 	}
 }
-

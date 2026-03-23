@@ -74,7 +74,8 @@ func NewManager(adapter Adapter) *Manager {
 func (m *Manager) Adapter() Adapter { return m.adapter }
 
 // Register registers a job type for deserialization. Call with a zero-value instance.
-//   queue.Register(&jobs.SendEmail{})
+//
+//	queue.Register(&jobs.SendEmail{})
 func (m *Manager) Register(job Job) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -94,10 +95,10 @@ func (m *Manager) RegisterFunc(name string, fn func() Job) {
 // Dispatch enqueues a job. Returns a DispatchBuilder for options.
 func (m *Manager) Dispatch(job Job) *DispatchBuilder {
 	return &DispatchBuilder{
-		manager: m,
-		job:     job,
-		queue:   "default",
-		delay:   0,
+		manager:    m,
+		job:        job,
+		queue:      "default",
+		delay:      0,
 		maxRetries: 3,
 	}
 }
@@ -183,15 +184,28 @@ func (m *Manager) Process(ctx context.Context, queue string) error {
 	if err != nil || payload == nil {
 		return err
 	}
+	ack := func() {
+		if ca, ok := m.adapter.(CompletableAdapter); ok {
+			_ = ca.Complete(ctx, payload)
+		}
+	}
 	job, err := m.deserialize(payload)
 	if err != nil {
+		ack()
 		return err
 	}
 	err = job.Handle(ctx)
 	if err != nil {
 		payload.Attempts++
 		if payload.Attempts <= payload.MaxRetries {
-			_ = m.adapter.Push(ctx, payload) // re-queue for retry
+			retryDelay := nextRetryDelay(payload.Attempts, payload.Delay)
+			payload.Delay = retryDelay
+			payload.RunAt = time.Now().Add(retryDelay)
+			if pushErr := m.adapter.Push(ctx, payload); pushErr != nil {
+				return fmt.Errorf("queue: retry requeue failed: %w", pushErr)
+			}
+			notifyRetried(payload, retryDelay)
+			ack()
 			return nil
 		}
 		if fj, ok := job.(FailedJob); ok {
@@ -204,15 +218,38 @@ func (m *Manager) Process(ctx context.Context, queue string) error {
 		if o := getObserver(); o != nil {
 			o.JobProcessed(payload, err)
 		}
+		ack()
 		return err
 	}
-	if ca, ok := m.adapter.(CompletableAdapter); ok {
-		_ = ca.Complete(ctx, payload)
-	}
+	ack()
 	if o := getObserver(); o != nil {
 		o.JobProcessed(payload, err)
 	}
 	return nil
+}
+
+func nextRetryDelay(attempt int, base time.Duration) time.Duration {
+	if base <= 0 {
+		base = time.Second
+	}
+	if attempt < 1 {
+		attempt = 1
+	}
+	delay := base
+	for i := 1; i < attempt; i++ {
+		if delay >= time.Minute {
+			delay = time.Minute
+			break
+		}
+		delay *= 2
+		if delay > time.Minute {
+			delay = time.Minute
+			break
+		}
+	}
+	// Add small jitter so retries do not stampede at once.
+	jitter := time.Duration(time.Now().UnixNano()%int64(250*time.Millisecond) + 1)
+	return delay + jitter
 }
 
 func (m *Manager) deserialize(p *JobPayload) (Job, error) {

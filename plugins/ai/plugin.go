@@ -88,19 +88,19 @@ func (p *Plugin) Boot(app *nimbus.App) error {
 // DefaultConfig returns the default configuration for the AI plugin.
 func (p *Plugin) DefaultConfig() map[string]any {
 	return map[string]any{
-		"provider": "openai",
-		"model":    "gpt-4o",
-		"timeout":  60,
+		"provider":   "openai",
+		"model":      "gpt-4o",
+		"timeout":    60,
 		"max_tokens": 1024,
 	}
 }
 
 func (p *Plugin) loadConfig(app *nimbus.App) *Config {
 	cfg := &Config{
-		Provider:   "openai",
-		Model:      "gpt-4o",
-		Timeout:    60,
-		MaxTokens:  1024,
+		Provider:  "openai",
+		Model:     "gpt-4o",
+		Timeout:   60,
+		MaxTokens: 1024,
 	}
 
 	if pluginCfg := app.PluginConfig("ai"); pluginCfg != nil {

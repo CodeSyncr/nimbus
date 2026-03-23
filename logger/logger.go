@@ -21,7 +21,10 @@ func init() {
 	cfg := zap.NewProductionConfig()
 	cfg.Level = zap.NewAtomicLevelAt(zapcore.InfoLevel)
 	cfg.Encoding = "console"
-	cfg.EncoderConfig.TimeKey = "time"
+	cfg.DisableCaller = true
+	cfg.EncoderConfig.TimeKey = ""
+	cfg.EncoderConfig.LevelKey = ""
+	cfg.EncoderConfig.CallerKey = ""
 	cfg.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
 	l, _ := cfg.Build()
 	Log = l.Sugar()
@@ -70,6 +73,7 @@ func Configure(cfg Config) error {
 		Encoding:         encoding,
 		OutputPaths:      []string{"stdout"},
 		ErrorOutputPaths: []string{"stderr"},
+		DisableCaller:    true,
 		EncoderConfig:    encoderConfig(encoding),
 	}
 
@@ -129,6 +133,7 @@ func buildChannel(name string, ch ChannelConfig, global Config) (*zap.SugaredLog
 		Encoding:         encoding,
 		OutputPaths:      outputPaths,
 		ErrorOutputPaths: []string{"stderr"},
+		DisableCaller:    true,
 		EncoderConfig:    encoderConfig(encoding),
 	}
 
@@ -156,8 +161,8 @@ func encoderConfig(encoding string) zapcore.EncoderConfig {
 		}
 	}
 	return zapcore.EncoderConfig{
-		TimeKey:        "time",
-		LevelKey:       "level",
+		TimeKey:        "", // Minimalist
+		LevelKey:       "", // Minimalist
 		NameKey:        "channel",
 		CallerKey:      "",
 		MessageKey:     "msg",
@@ -201,7 +206,10 @@ func SetLevel(level string) {
 	cfg := zap.NewProductionConfig()
 	cfg.Level = zap.NewAtomicLevelAt(lvl)
 	cfg.Encoding = "console"
-	cfg.EncoderConfig.TimeKey = "time"
+	cfg.DisableCaller = true
+	cfg.EncoderConfig.TimeKey = ""
+	cfg.EncoderConfig.LevelKey = ""
+	cfg.EncoderConfig.CallerKey = ""
 	cfg.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
 	l, _ := cfg.Build()
 	Set(l)

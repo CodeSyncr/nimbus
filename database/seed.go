@@ -14,8 +14,8 @@ func (f SeedFunc) Run(db *gorm.DB) error { return f(db) }
 
 // SeedRunner runs multiple seeders in order.
 type SeedRunner struct {
-	db       *gorm.DB
-	seeders  []Seeder
+	db      *gorm.DB
+	seeders []Seeder
 }
 
 // NewSeedRunner creates a runner for the given seeders.

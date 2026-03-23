@@ -122,8 +122,14 @@ func (c *Context) Status(code int) *Context {
 	return c
 }
 
+// StatusCode returns the current HTTP status code.
+func (c *Context) StatusCode() int {
+	return c.status
+}
+
 // JSON sends a JSON response.
 func (c *Context) JSON(code int, body any) error {
+	c.status = code
 	c.Response.Header().Set("Content-Type", "application/json")
 	c.Response.WriteHeader(code)
 	return json.NewEncoder(c.Response).Encode(body)
@@ -131,6 +137,7 @@ func (c *Context) JSON(code int, body any) error {
 
 // String sends a plain text response.
 func (c *Context) String(code int, s string) {
+	c.status = code
 	c.Response.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	c.Response.WriteHeader(code)
 	c.Response.Write([]byte(s))

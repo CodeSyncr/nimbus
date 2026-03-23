@@ -11,15 +11,21 @@ import (
 
 const redisQueuePrefix = "nimbus:queue:"
 const redisDelayedPrefix = "nimbus:queue:delayed:"
+const redisProcessingPrefix = "nimbus:queue:processing:"
+const redisInFlightPrefix = "nimbus:queue:inflight:"
 
 // RedisAdapter uses Redis lists for job storage. Supports delayed jobs via sorted sets.
 type RedisAdapter struct {
-	client *redis.Client
+	client            *redis.Client
+	visibilityTimeout time.Duration
 }
 
 // NewRedisAdapter creates a Redis adapter. Pass a configured redis.Client.
 func NewRedisAdapter(client *redis.Client) *RedisAdapter {
-	return &RedisAdapter{client: client}
+	return &RedisAdapter{
+		client:            client,
+		visibilityTimeout: 60 * time.Second,
+	}
 }
 
 // NewRedisAdapterFromURL creates adapter from REDIS_URL (e.g. redis://localhost:6379).
@@ -28,7 +34,17 @@ func NewRedisAdapterFromURL(url string) (*RedisAdapter, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &RedisAdapter{client: redis.NewClient(opt)}, nil
+	return &RedisAdapter{
+		client:            redis.NewClient(opt),
+		visibilityTimeout: 60 * time.Second,
+	}, nil
+}
+
+// SetVisibilityTimeout sets the in-flight lease before jobs are reclaimed.
+func (r *RedisAdapter) SetVisibilityTimeout(v time.Duration) {
+	if v > 0 {
+		r.visibilityTimeout = v
+	}
 }
 
 // Push adds a job to the queue.
@@ -49,10 +65,29 @@ func (r *RedisAdapter) Push(ctx context.Context, payload *JobPayload) error {
 func (r *RedisAdapter) Pop(ctx context.Context, queue string) (*JobPayload, error) {
 	key := redisQueuePrefix + queue
 	delayedKey := redisDelayedPrefix + queue
+	processingKey := redisProcessingPrefix + queue
+	inFlightKey := redisInFlightPrefix + queue
 
 	for {
-		// Move ready delayed jobs to main queue
+		// Reclaim expired in-flight jobs back to the main queue.
 		now := time.Now().Unix()
+		expired, err := r.client.ZRangeByScore(ctx, inFlightKey, &redis.ZRangeBy{
+			Min: "-inf",
+			Max: fmt.Sprintf("%d", now),
+		}).Result()
+		if err != nil && err != redis.Nil {
+			return nil, err
+		}
+		for _, raw := range expired {
+			_ = r.client.LRem(ctx, processingKey, 1, raw).Err()
+			_ = r.client.RPush(ctx, key, raw).Err()
+			_ = r.client.ZRem(ctx, inFlightKey, raw).Err()
+		}
+		if len(expired) > 0 {
+			notifyReclaimed(queue, len(expired))
+		}
+
+		// Move ready delayed jobs to main queue
 		vals, err := r.client.ZRangeByScore(ctx, delayedKey, &redis.ZRangeBy{
 			Min: "-inf",
 			Max: fmt.Sprintf("%d", now+1),
@@ -66,22 +101,33 @@ func (r *RedisAdapter) Pop(ctx context.Context, queue string) (*JobPayload, erro
 		}
 
 		// Block until job available (2s timeout to recheck delayed)
-		result, err := r.client.BLPop(ctx, 2*time.Second, key).Result()
+		raw, err := r.client.BRPopLPush(ctx, key, processingKey, 2*time.Second).Result()
 		if err != nil {
+			if err == redis.Nil {
+				select {
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				default:
+					continue
+				}
+			}
 			return nil, err
 		}
-		if len(result) < 2 {
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			default:
-				continue
-			}
-		}
 		var p JobPayload
-		if err := json.Unmarshal([]byte(result[1]), &p); err != nil {
+		if err := json.Unmarshal([]byte(raw), &p); err != nil {
+			_ = r.client.LRem(ctx, processingKey, 1, raw).Err()
 			continue // skip malformed
 		}
+		if p.Meta == nil {
+			p.Meta = make(map[string]interface{})
+		}
+		p.Meta["redis_processing_key"] = processingKey
+		p.Meta["redis_inflight_key"] = inFlightKey
+		p.Meta["redis_raw_payload"] = raw
+		_ = r.client.ZAdd(ctx, inFlightKey, redis.Z{
+			Score:  float64(time.Now().Add(r.visibilityTimeout).Unix()),
+			Member: raw,
+		}).Err()
 		return &p, nil
 	}
 }
@@ -92,4 +138,22 @@ func (r *RedisAdapter) Len(ctx context.Context, queue string) (int, error) {
 	return int(n), err
 }
 
+// Complete acknowledges and removes a processed in-flight Redis message.
+func (r *RedisAdapter) Complete(ctx context.Context, payload *JobPayload) error {
+	if payload == nil || payload.Meta == nil {
+		return nil
+	}
+	processingKey, _ := payload.Meta["redis_processing_key"].(string)
+	inFlightKey, _ := payload.Meta["redis_inflight_key"].(string)
+	raw, _ := payload.Meta["redis_raw_payload"].(string)
+	if processingKey == "" || inFlightKey == "" || raw == "" {
+		return nil
+	}
+	if err := r.client.LRem(ctx, processingKey, 1, raw).Err(); err != nil {
+		return err
+	}
+	return r.client.ZRem(ctx, inFlightKey, raw).Err()
+}
+
 var _ Adapter = (*RedisAdapter)(nil)
+var _ CompletableAdapter = (*RedisAdapter)(nil)

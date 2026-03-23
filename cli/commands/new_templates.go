@@ -53,6 +53,7 @@ import (
 	"os"
 
 	"github.com/CodeSyncr/nimbus"
+	"github.com/CodeSyncr/nimbus/auth"
 	"github.com/CodeSyncr/nimbus/cache"
 	"github.com/CodeSyncr/nimbus/database"
 	"github.com/CodeSyncr/nimbus/queue"
@@ -75,11 +76,36 @@ func Boot() *nimbus.App {
 	bootCache()
 	bootDatabase(app)
 	bootQueue()
+	bootAuth(app)
 
 	start.RegisterMiddleware(app)
 	start.RegisterRoutes(app)
 
 	return app
+}
+
+func bootAuth(app *nimbus.App) {
+	if config.AuthGuard == "stateless" {
+		bootStatelessAuth(app)
+	}
+}
+
+func bootStatelessAuth(app *nimbus.App) {
+	var driver auth.TokenDriver
+	if config.StatelessToken.Driver == "paseto" {
+		driver = auth.NewPasetoDriver(config.StatelessToken.Secret)
+	} else {
+		driver = auth.NewJWTDriver(config.StatelessToken.Secret)
+	}
+
+	guard := auth.NewStatelessGuard(driver, auth.UserLoaderFunc(func(ctx context.Context, id string) (auth.User, error) {
+		// TODO: Implement user loading from database
+		return nil, nil
+	}))
+
+	app.Container.Singleton("auth.stateless", func() *auth.StatelessGuard {
+		return guard
+	})
 }
 
 func bootCache() {
@@ -160,6 +186,7 @@ const kernelStub = `package start
 
 import (
 	"github.com/CodeSyncr/nimbus"
+	"github.com/CodeSyncr/nimbus/auth"
 	"github.com/CodeSyncr/nimbus/middleware"
 	"github.com/CodeSyncr/nimbus/router"
 )
@@ -169,6 +196,12 @@ func RegisterMiddleware(app *nimbus.App) {
 		middleware.Logger(),
 		middleware.Recover(),
 	)
+
+	// ── Named Middleware ──────────────────────────────────
+	// Register stateless auth if available in container
+	if g, err := app.Container.Make("auth.stateless"); err == nil {
+		Middleware["auth:api"] = auth.RequireStatelessToken(g.(*auth.StatelessGuard))
+	}
 }
 
 var Middleware = map[string]router.Middleware{}

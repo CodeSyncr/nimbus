@@ -27,6 +27,9 @@ type Migration struct {
 	Name string
 	Up   func(*gorm.DB) error
 	Down func(*gorm.DB) error
+	// NonTransactional disables transaction wrapping for this migration.
+	// Useful for DDL operations that cannot run inside a transaction.
+	NonTransactional bool
 }
 
 // Migrator runs migrations from a directory or list (AdonisJS database/migrations).
@@ -82,12 +85,29 @@ func (m *Migrator) isMigrated(name string) (bool, error) {
 }
 
 func (m *Migrator) recordMigration(name string, batch int) error {
-	return m.db.Exec(
+	return m.recordMigrationWithDB(m.db, name, batch)
+}
+
+func (m *Migrator) recordMigrationWithDB(db *gorm.DB, name string, batch int) error {
+	return db.Exec(
 		"INSERT INTO schema_migrations (name, batch, migration_time) VALUES (?, ?, ?)",
 		name,
 		batch,
 		time.Now().UTC(),
 	).Error
+}
+
+func (m *Migrator) deleteMigrationRecordWithDB(db *gorm.DB, name string) error {
+	return db.Exec("DELETE FROM schema_migrations WHERE name = ?", name).Error
+}
+
+func supportsTransactionalDDL(dialect string) bool {
+	switch dialect {
+	case "postgres", "sqlite":
+		return true
+	default:
+		return false
+	}
 }
 
 // nextBatch returns the next batch number (max(batch)+1), starting from 1.
@@ -120,19 +140,33 @@ func (m *Migrator) Up() error {
 			fmt.Fprintf(os.Stdout, "  %s %sskipped%s\n", mig.Name, colorYellow, colorReset)
 			continue
 		}
-		if err := mig.Up(m.db); err != nil {
-			fmt.Fprintf(os.Stdout, "  %s %s%s failed%s\n", mig.Name, colorRed, crossMark, colorReset)
-			return fmt.Errorf("migration %s: %w", mig.Name, err)
-		}
-		if err := m.recordMigration(mig.Name, batch); err != nil {
-			return fmt.Errorf("record migration %s: %w", mig.Name, err)
+		useTx := supportsTransactionalDDL(m.db.Dialector.Name()) && !mig.NonTransactional
+		if useTx {
+			err = m.db.Transaction(func(tx *gorm.DB) error {
+				if err := mig.Up(tx); err != nil {
+					return err
+				}
+				return m.recordMigrationWithDB(tx, mig.Name, batch)
+			})
+			if err != nil {
+				fmt.Fprintf(os.Stdout, "  %s %s%s failed%s\n", mig.Name, colorRed, crossMark, colorReset)
+				return fmt.Errorf("migration %s: %w", mig.Name, err)
+			}
+		} else {
+			if err := mig.Up(m.db); err != nil {
+				fmt.Fprintf(os.Stdout, "  %s %s%s failed%s\n", mig.Name, colorRed, crossMark, colorReset)
+				return fmt.Errorf("migration %s: %w", mig.Name, err)
+			}
+			if err := m.recordMigration(mig.Name, batch); err != nil {
+				return fmt.Errorf("record migration %s: %w", mig.Name, err)
+			}
 		}
 		fmt.Fprintf(os.Stdout, "  %s %s%s completed%s\n", mig.Name, colorGreen, checkMark, colorReset)
 	}
 	return nil
 }
 
-// Down rolls back the last batch of migrations (Laravel/Adonis-style).
+// Down rolls back the last batch of migrations (Laravel tyle).
 func (m *Migrator) Down() error {
 	if err := m.ensureSchemaMigrations(); err != nil {
 		return fmt.Errorf("schema_migrations: %w", err)
@@ -169,11 +203,24 @@ func (m *Migrator) Down() error {
 			// No matching migration in code; skip but keep row so we don't lose history.
 			continue
 		}
-		if err := mig.Down(m.db); err != nil {
-			return fmt.Errorf("rollback %s: %w", name, err)
-		}
-		if err := m.db.Exec("DELETE FROM schema_migrations WHERE name = ?", name).Error; err != nil {
-			return fmt.Errorf("delete schema_migration %s: %w", name, err)
+		useTx := supportsTransactionalDDL(m.db.Dialector.Name()) && !mig.NonTransactional
+		if useTx {
+			err := m.db.Transaction(func(tx *gorm.DB) error {
+				if err := mig.Down(tx); err != nil {
+					return err
+				}
+				return m.deleteMigrationRecordWithDB(tx, name)
+			})
+			if err != nil {
+				return fmt.Errorf("rollback %s: %w", name, err)
+			}
+		} else {
+			if err := mig.Down(m.db); err != nil {
+				return fmt.Errorf("rollback %s: %w", name, err)
+			}
+			if err := m.deleteMigrationRecordWithDB(m.db, name); err != nil {
+				return fmt.Errorf("delete schema_migration %s: %w", name, err)
+			}
 		}
 		fmt.Fprintf(os.Stdout, "  %s %srolled back%s\n", name, colorYellow, colorReset)
 	}

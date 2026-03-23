@@ -38,4 +38,3 @@ func RenderToFile(tmplPath, destPath string, data Data) error {
 	}
 	return os.WriteFile(destPath, buf.Bytes(), 0644)
 }
-
