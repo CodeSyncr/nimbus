@@ -1,9 +1,9 @@
 package websocket
 
 import (
+	"bytes"
 	"net/http"
 	"net/url"
-	"strings"
 	"sync"
 
 	"github.com/gorilla/websocket"
@@ -98,7 +98,7 @@ func (h *Hub) Upgrade(w http.ResponseWriter, r *http.Request) (*Conn, error) {
 }
 
 func (h *Hub) checkOrigin(r *http.Request) bool {
-	origin := strings.TrimSpace(r.Header.Get("Origin"))
+	origin := trimASCIIWhitespace(r.Header.Get("Origin"))
 	if origin == "" {
 		return true
 	}
@@ -106,12 +106,12 @@ func (h *Hub) checkOrigin(r *http.Request) bool {
 	if err != nil || parsed.Host == "" {
 		return false
 	}
-	host := strings.ToLower(parsed.Host)
+	host := lowerASCII(parsed.Host)
 
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	if len(h.allowedOrigins) == 0 {
-		return strings.EqualFold(host, r.Host)
+		return bytes.EqualFold([]byte(host), []byte(r.Host))
 	}
 	_, ok := h.allowedOrigins[host]
 	return ok
@@ -120,7 +120,7 @@ func (h *Hub) checkOrigin(r *http.Request) bool {
 func normalizeOrigins(origins []string) map[string]struct{} {
 	allowed := make(map[string]struct{}, len(origins))
 	for _, origin := range origins {
-		trimmed := strings.TrimSpace(origin)
+		trimmed := trimASCIIWhitespace(origin)
 		if trimmed == "" {
 			continue
 		}
@@ -128,9 +128,39 @@ func normalizeOrigins(origins []string) map[string]struct{} {
 		if err != nil || parsed.Host == "" {
 			continue
 		}
-		allowed[strings.ToLower(parsed.Host)] = struct{}{}
+		allowed[lowerASCII(parsed.Host)] = struct{}{}
 	}
 	return allowed
+}
+
+func lowerASCII(s string) string {
+	b := []byte(s)
+	for i := range b {
+		if b[i] >= 'A' && b[i] <= 'Z' {
+			b[i] += 'a' - 'A'
+		}
+	}
+	return string(b)
+}
+
+func trimASCIIWhitespace(s string) string {
+	start := 0
+	end := len(s)
+	for start < end {
+		c := s[start]
+		if c != ' ' && c != '\t' && c != '\n' && c != '\r' {
+			break
+		}
+		start++
+	}
+	for end > start {
+		c := s[end-1]
+		if c != ' ' && c != '\t' && c != '\n' && c != '\r' {
+			break
+		}
+		end--
+	}
+	return s[start:end]
 }
 
 func (c *Conn) readPump(h *Hub) {
