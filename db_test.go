@@ -6,7 +6,7 @@ import (
 
 	"github.com/CodeSyncr/nimbus"
 	"github.com/CodeSyncr/nimbus/database"
-	"gorm.io/gorm"
+	"github.com/CodeSyncr/nimbus/lucid"
 )
 
 type User struct {
@@ -42,7 +42,7 @@ func TestTransaction(t *testing.T) {
 	t.Run("Rollback on Error", func(t *testing.T) {
 		err := nimbus.Transaction(func(tx *nimbus.DB) error {
 			tx.Create(&User{Name: "Bob"})
-			return gorm.ErrInvalidData // force rollback
+			return lucid.ErrInvalidData // force rollback
 		})
 		if err == nil {
 			t.Error("expected error, got nil")

@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/jinzhu/inflection"
-	"gorm.io/gorm"
+	"github.com/CodeSyncr/nimbus/lucid"
 )
 
 // RelationProvider can be implemented by models that want to declare
@@ -32,7 +32,7 @@ type RelationProvider interface {
 //
 //	db := AutoPreload(database.Get(), &models.Blog{})
 //	if err := db.Find(&blogs).Error; err != nil { ... }
-func AutoPreload(db *gorm.DB, model any) *gorm.DB {
+func AutoPreload(db *lucid.DB, model any) *lucid.DB {
 	if db == nil || model == nil {
 		return db
 	}

@@ -1,12 +1,16 @@
 package commands
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/CodeSyncr/nimbus/cli"
 	"github.com/CodeSyncr/nimbus/cli/generators"
+	"github.com/CodeSyncr/nimbus/config"
+	"github.com/CodeSyncr/nimbus/database"
+	"github.com/spf13/cobra"
 )
 
 func init() {
@@ -71,11 +75,16 @@ func (c *MakeController) Run(ctx *cli.Context) error {
 	return nil
 }
 
-type MakeMigration struct{}
+type MakeMigration struct {
+	autoDetect bool
+}
 
 func (c *MakeMigration) Name() string        { return "make:migration" }
 func (c *MakeMigration) Description() string { return "Create a new database migration file" }
 func (c *MakeMigration) Args() int           { return 1 }
+func (c *MakeMigration) Flags(cmd *cobra.Command) {
+	cmd.Flags().BoolVar(&c.autoDetect, "auto-detect", false, "When name is fix_y2038, auto-detect MySQL TIMESTAMP columns and generate a fix migration")
+}
 func (c *MakeMigration) Run(ctx *cli.Context) error {
 	name := ctx.Args[0]
 	snake := cli.ToSnake(name)
@@ -95,6 +104,31 @@ func (c *MakeMigration) Run(ctx *cli.Context) error {
 	}
 
 	migName := ts + "_" + snake
+
+	// Special generator: fix_y2038 --auto-detect
+	if snake == "fix_y2038" && c.autoDetect {
+		stmts, warn, err := detectMySQLTimestampFixStatements(ctx.AppRoot)
+		if err != nil {
+			ctx.UI.Errorf("Auto-detect failed: %v", err)
+			return err
+		}
+		if warn != "" {
+			ctx.UI.Warnf(warn)
+		}
+		data := generators.Data{
+			"SchemaName":    pascal,
+			"MigrationName": migName,
+			"Statements":    stmts,
+		}.WithTimestamp()
+		if err := generators.RenderToFile("migration_fix_y2038.tmpl", path, data); err != nil {
+			ctx.UI.Errorf("Failed to create migration: %v", err)
+			return err
+		}
+		ctx.UI.Successf("Created migration %s at %s", name, path)
+		ctx.UI.Infof("Don't forget to add &%s{} to database/migrations/registry.go", pascal)
+		return nil
+	}
+
 	data := generators.Data{
 		"SchemaName":    pascal,
 		"TableName":     tableName,
@@ -107,6 +141,95 @@ func (c *MakeMigration) Run(ctx *cli.Context) error {
 	ctx.UI.Successf("Created migration %s at %s", name, path)
 	ctx.UI.Infof("Don't forget to add &%s{} to database/migrations/registry.go", pascal)
 	return nil
+}
+
+func detectMySQLTimestampFixStatements(appRoot string) (goStringLiterals []string, warning string, err error) {
+	// Load config from app root (config.yaml / config.toml / .env).
+	if appRoot != "" {
+		_ = os.Chdir(appRoot)
+	}
+	_ = config.LoadAuto()
+
+	driver := config.GetOrDefault("database.driver", "sqlite")
+	if driver != "mysql" {
+		return []string{}, fmt.Sprintf("auto-detect only supports MySQL (database.driver=%q)", driver), nil
+	}
+
+	dsn := config.GetOrDefault("database.dsn", "")
+	if dsn == "" {
+		user := config.GetOrDefault("database.user", "root")
+		pass := config.GetOrDefault("database.password", "")
+		host := config.GetOrDefault("database.host", "localhost")
+		port := config.GetOrDefault("database.port", "3306")
+		dbname := config.GetOrDefault("database.database", "nimbus")
+		dsn = user + ":" + pass + "@tcp(" + host + ":" + port + ")/" + dbname + "?charset=utf8mb4&parseTime=True"
+	}
+
+	db, err := database.ConnectWithConfig(database.ConnectConfig{Driver: "mysql", DSN: dsn})
+	if err != nil {
+		return nil, "", err
+	}
+	type row struct {
+		TableName     string
+		ColumnName    string
+		IsNullable    string
+		ColumnDefault *string
+		Extra         string
+	}
+	var rows []row
+	if err := db.Raw(`
+SELECT table_name, column_name, is_nullable, column_default, extra
+FROM information_schema.columns
+WHERE table_schema = DATABASE()
+  AND data_type = 'timestamp'
+ORDER BY table_name, ordinal_position
+`).Scan(&rows).Error; err != nil {
+		return nil, "", err
+	}
+
+	for _, r := range rows {
+		stmt := buildMySQLTimestampToDatetime6Alter(r.TableName, r.ColumnName, strings.EqualFold(r.IsNullable, "YES"), r.ColumnDefault, r.Extra)
+		goStringLiterals = append(goStringLiterals, fmt.Sprintf("%q", stmt))
+	}
+
+	if len(goStringLiterals) == 0 {
+		warning = "No MySQL TIMESTAMP columns detected. Migration will be a no-op."
+	}
+	return goStringLiterals, warning, nil
+}
+
+func quoteMySQLIdent(s string) string {
+	return "`" + strings.ReplaceAll(s, "`", "``") + "`"
+}
+
+func buildMySQLTimestampToDatetime6Alter(table, column string, nullable bool, def *string, extra string) string {
+	t := quoteMySQLIdent(table)
+	c := quoteMySQLIdent(column)
+
+	nullSQL := "NOT NULL"
+	if nullable {
+		nullSQL = "NULL"
+	}
+
+	// Preserve common TIMESTAMP semantics when migrating to DATETIME(6).
+	// For MySQL, CURRENT_TIMESTAMP can be expressed as CURRENT_TIMESTAMP(6).
+	defaultSQL := ""
+	if def != nil {
+		if strings.EqualFold(*def, "CURRENT_TIMESTAMP") || strings.HasPrefix(strings.ToUpper(*def), "CURRENT_TIMESTAMP") {
+			defaultSQL = " DEFAULT CURRENT_TIMESTAMP(6)"
+		} else {
+			// Best-effort: quote as SQL string literal.
+			escaped := strings.ReplaceAll(*def, "'", "''")
+			defaultSQL = " DEFAULT '" + escaped + "'"
+		}
+	}
+
+	onUpdateSQL := ""
+	if strings.Contains(strings.ToLower(extra), "on update current_timestamp") {
+		onUpdateSQL = " ON UPDATE CURRENT_TIMESTAMP(6)"
+	}
+
+	return "ALTER TABLE " + t + " MODIFY COLUMN " + c + " DATETIME(6) " + nullSQL + defaultSQL + onUpdateSQL
 }
 
 type MakeMiddleware struct{}

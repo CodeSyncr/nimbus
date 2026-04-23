@@ -5,14 +5,14 @@ import (
 	"reflect"
 
 	"github.com/jinzhu/inflection"
-	"gorm.io/gorm"
+	"github.com/CodeSyncr/nimbus/lucid"
 )
 
 // Attach adds related models to a manyToMany relation via the pivot table.
 // AdonisJS equivalent: await user.related('teams').attach([teamId1, teamId2])
 //
 //	database.Attach(db, &user, "Teams", &team1, &team2)
-func Attach(db *gorm.DB, model any, relationName string, related ...any) error {
+func Attach(db *lucid.DB, model any, relationName string, related ...any) error {
 	rel := findRelationByName(model, relationName)
 	if rel == nil {
 		return fmt.Errorf("database: relation %q not found on %T", relationName, model)
@@ -53,7 +53,7 @@ func Attach(db *gorm.DB, model any, relationName string, related ...any) error {
 // AdonisJS equivalent: await user.related('teams').detach([teamId1])
 //
 //	database.Detach(db, &user, "Teams", &team1)
-func Detach(db *gorm.DB, model any, relationName string, related ...any) error {
+func Detach(db *lucid.DB, model any, relationName string, related ...any) error {
 	rel := findRelationByName(model, relationName)
 	if rel == nil {
 		return fmt.Errorf("database: relation %q not found on %T", relationName, model)
@@ -83,7 +83,7 @@ func Detach(db *gorm.DB, model any, relationName string, related ...any) error {
 // DetachAll removes all related models from a manyToMany pivot table.
 //
 //	database.DetachAll(db, &user, "Teams")
-func DetachAll(db *gorm.DB, model any, relationName string) error {
+func DetachAll(db *lucid.DB, model any, relationName string) error {
 	rel := findRelationByName(model, relationName)
 	if rel == nil {
 		return fmt.Errorf("database: relation %q not found on %T", relationName, model)
@@ -104,7 +104,7 @@ func DetachAll(db *gorm.DB, model any, relationName string) error {
 // AdonisJS equivalent: await user.related('teams').sync([teamId1, teamId3])
 //
 //	database.Sync(db, &user, "Teams", &team1, &team3)
-func Sync(db *gorm.DB, model any, relationName string, related ...any) error {
+func Sync(db *lucid.DB, model any, relationName string, related ...any) error {
 	if err := DetachAll(db, model, relationName); err != nil {
 		return err
 	}
@@ -118,7 +118,7 @@ func Sync(db *gorm.DB, model any, relationName string, related ...any) error {
 // missing manyToMany pivot tables. Call after database.Boot().
 //
 //	database.MigratePivots(db, &User{}, &Post{}, &Tag{})
-func MigratePivots(db *gorm.DB, models ...any) error {
+func MigratePivots(db *lucid.DB, models ...any) error {
 	seen := make(map[string]bool)
 	for _, model := range models {
 		for _, rel := range ParseRelations(model) {
@@ -150,7 +150,7 @@ func MigratePivots(db *gorm.DB, models ...any) error {
 // HasRelated checks if a manyToMany relation has a specific related model attached.
 //
 //	attached, err := database.HasRelated(db, &user, "Teams", &team)
-func HasRelated(db *gorm.DB, model any, relationName string, related any) (bool, error) {
+func HasRelated(db *lucid.DB, model any, relationName string, related any) (bool, error) {
 	rel := findRelationByName(model, relationName)
 	if rel == nil {
 		return false, fmt.Errorf("database: relation %q not found on %T", relationName, model)

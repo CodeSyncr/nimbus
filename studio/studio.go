@@ -22,7 +22,7 @@ import (
 
 	nhttp "github.com/CodeSyncr/nimbus/http"
 	"github.com/CodeSyncr/nimbus/router"
-	"gorm.io/gorm"
+	"github.com/CodeSyncr/nimbus/lucid"
 )
 
 // query is a helper to get a query parameter from the context.
@@ -48,7 +48,7 @@ type Config struct {
 	Models []any
 
 	// DB is the GORM database connection.
-	DB *gorm.DB
+	DB *lucid.DB
 
 	// Title of the admin panel (default: "Nimbus Studio").
 	Title string
@@ -77,7 +77,7 @@ type ModelAction struct {
 	Name        string
 	Label       string
 	Icon        string
-	Handler     func(db *gorm.DB, ids []uint) error
+	Handler     func(db *lucid.DB, ids []uint) error
 	Bulk        bool // can be applied to multiple records
 	Destructive bool
 }
@@ -87,7 +87,7 @@ type Widget struct {
 	Title string
 	Type  string // "count", "chart", "list", "custom"
 	Model string
-	Query func(db *gorm.DB) (any, error)
+	Query func(db *lucid.DB) (any, error)
 	Width int // 1-4 (grid columns)
 }
 

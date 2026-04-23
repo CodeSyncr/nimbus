@@ -3,7 +3,7 @@ package database
 import (
 	"math/rand"
 
-	"gorm.io/gorm"
+	"github.com/CodeSyncr/nimbus/lucid"
 )
 
 // Factory generates fake data for models (Lucid-style factories).
@@ -69,7 +69,7 @@ func Define(tableName string, fn func(f *Faker) map[string]any) *Factory {
 }
 
 // Create inserts one record with fake data. Override specific fields with attrs.
-func (fac *Factory) Create(db *gorm.DB, attrs ...map[string]any) error {
+func (fac *Factory) Create(db *lucid.DB, attrs ...map[string]any) error {
 	data := fac.define(&Faker{})
 	for _, a := range attrs {
 		for k, v := range a {
@@ -80,7 +80,7 @@ func (fac *Factory) Create(db *gorm.DB, attrs ...map[string]any) error {
 }
 
 // CreateMany inserts n records with fake data.
-func (fac *Factory) CreateMany(db *gorm.DB, n int) error {
+func (fac *Factory) CreateMany(db *lucid.DB, n int) error {
 	for i := 0; i < n; i++ {
 		data := fac.define(&Faker{})
 		if err := db.Table(fac.tableName).Create(data).Error; err != nil {
@@ -102,6 +102,6 @@ type FactoryWithAttrs struct {
 }
 
 // Create creates one record with merged attributes.
-func (f *FactoryWithAttrs) Create(db *gorm.DB) error {
+func (f *FactoryWithAttrs) Create(db *lucid.DB) error {
 	return f.factory.Create(db, f.attrs)
 }

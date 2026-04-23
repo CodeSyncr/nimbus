@@ -158,7 +158,7 @@ The plugin uses **Streamable HTTP** transport (MCP spec). AI clients connect via
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `MCP_PREFIX` | Base path prefix (optional) | — |
+| `MCP_PREFIX` | Base path prefix prepended to all `mcp.Web(...)` routes | — |
 
 ## References
 

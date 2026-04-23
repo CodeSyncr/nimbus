@@ -389,7 +389,17 @@ func Boot() *nimbus.App {
 
 	start.RegisterRoutes(app)
 
-	db, err := database.Connect(config.Database.Driver, config.Database.DSN)
+	db, err := database.ConnectWithConfig(database.ConnectConfig{
+		Driver: config.Database.Driver,
+		DSN:    config.Database.DSN,
+		Debug:  config.App.Env == "development",
+		PoolConfig: database.PoolConfigFromFields(
+			config.Database.MaxOpenConns,
+			config.Database.MaxIdleConns,
+			config.Database.ConnMaxLifetime,
+			config.Database.ConnMaxIdleTime,
+		),
+	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Database connection failed: %v\n", err)
 		os.Exit(1)
@@ -426,7 +436,17 @@ func RunMigrations() {
 		fmt.Fprintf(os.Stderr, "Database create failed: %v\n", err)
 		os.Exit(1)
 	}
-	db, err := database.Connect(config.Database.Driver, config.Database.DSN)
+	db, err := database.ConnectWithConfig(database.ConnectConfig{
+		Driver: config.Database.Driver,
+		DSN:    config.Database.DSN,
+		Debug:  config.App.Env == "development",
+		PoolConfig: database.PoolConfigFromFields(
+			config.Database.MaxOpenConns,
+			config.Database.MaxIdleConns,
+			config.Database.ConnMaxLifetime,
+			config.Database.ConnMaxIdleTime,
+		),
+	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Database connection failed: %v\n", err)
 		os.Exit(1)

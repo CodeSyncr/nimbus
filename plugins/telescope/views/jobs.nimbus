@@ -1,0 +1,71 @@
+@layout('telescope/layout')
+<div>
+  <h1 class="text-2xl font-bold t-text mb-2">Jobs</h1>
+  <div class="t-card rounded-xl overflow-hidden">
+    <div class="px-5 py-4 border-b t-border t-bg-sidebar flex items-center justify-between">
+      <h2 class="font-semibold t-text">Queue jobs</h2>
+      <div class="flex items-center gap-3">
+        <form method="GET" class="flex items-center gap-2">
+          <input name="q" value="{{ .q }}" placeholder="Search…" class="text-sm px-3 py-1.5 rounded-lg t-code-block t-text w-56 focus:outline-none" />
+          <input name="tag" value="{{ .tag }}" placeholder="Tag" class="text-sm px-3 py-1.5 rounded-lg t-code-block t-text w-28 focus:outline-none font-mono" />
+          <button type="submit" class="text-sm px-3 py-1.5 rounded-lg t-accent-bg t-accent hover:opacity-90 transition">Go</button>
+        </form>
+        <a href="{{ .basePath }}" class="text-sm t-accent hover:opacity-80 transition">← Dashboard</a>
+      </div>
+    </div>
+    <div class="px-5 py-3 border-b t-border flex flex-wrap gap-2 text-xs">
+      <a href="?q={{ .q }}&tag=failed" class="px-2.5 py-1 rounded-full t-accent-bg t-accent font-mono">failed ({{ index .tagCounts "failed" }})</a>
+      <a href="?q={{ .q }}&tag=retried" class="px-2.5 py-1 rounded-full t-accent-bg t-accent font-mono">retried ({{ index .tagCounts "retried" }})</a>
+      <a href="?q={{ .q }}&tag=reclaimed" class="px-2.5 py-1 rounded-full t-accent-bg t-accent font-mono">reclaimed ({{ index .tagCounts "reclaimed" }})</a>
+      <a href="?q={{ .q }}&tag=processed" class="px-2.5 py-1 rounded-full t-accent-bg t-accent font-mono">processed ({{ index .tagCounts "processed" }})</a>
+      <a href="?q={{ .q }}&tag=dispatched" class="px-2.5 py-1 rounded-full t-accent-bg t-accent font-mono">dispatched ({{ index .tagCounts "dispatched" }})</a>
+      <a href="?q={{ .q }}&tag=" class="px-2.5 py-1 rounded-full t-code-block t-text-muted font-mono">clear</a>
+    </div>
+    <div class="t-divide">
+      @if(.empty)
+      <div class="px-5 py-12 text-center t-text-subtle">No jobs recorded yet.</div>
+      @else
+      @each(.entries)
+      <a href="{{ $.basePath }}/entry/{{ .ID }}" class="block px-5 py-4 t-hover transition">
+        <div class="flex items-start justify-between gap-4">
+          <div class="min-w-0">
+            <div class="flex items-center gap-2 mb-1">
+              {{ $st := index .Content "status" }}
+              <span class="text-xs font-medium px-2.5 py-1 rounded-full
+                {{ if eq $st "processed" }}t-status-2xx{{ else }}
+                {{ if eq $st "dispatched" }}t-accent-bg t-accent{{ else }}
+                {{ if eq $st "retried" }}t-status-4xx{{ else }}
+                {{ if eq $st "failed" }}t-status-5xx{{ else }}
+                t-accent-bg t-accent
+                {{ end }}{{ end }}{{ end }}{{ end }}
+              shrink-0">{{ $st }}</span>
+              <span class="t-text-subtle text-xs font-mono shrink-0">{{ .CreatedAt.Format "Jan 02 15:04:05" }}</span>
+              @if(index .Content "queue")
+              <span class="t-text-subtle text-xs font-mono">queue {{ index .Content "queue" }}</span>
+              @endif
+              @if(index .Content "attempt")
+              <span class="t-text-subtle text-xs font-mono">attempt {{ index .Content "attempt" }}</span>
+              @endif
+              @if(index .Content "duration_ms")
+              <span class="t-text-subtle text-xs font-mono">dur {{ index .Content "duration_ms" }}ms</span>
+              @endif
+            </div>
+            <div class="t-text font-mono text-sm break-all">{{ index .Content "name" }}</div>
+            @if(index .Content "id")
+            <div class="t-text-subtle text-xs font-mono break-all">id {{ index .Content "id" }}</div>
+            @endif
+            @if(index .Content "error")
+            <div class="mt-2 text-xs t-error font-mono whitespace-pre-wrap break-words">{{ index .Content "error" }}</div>
+            @endif
+            @if(index .Content "payload")
+            <div class="mt-2 text-xs t-text-muted whitespace-pre-wrap break-words rounded-lg t-code-block px-4 py-3">{{ index .Content "payload" }}</div>
+            @endif
+          </div>
+        </div>
+      </a>
+      @endeach
+      @endif
+    </div>
+  </div>
+</div>
+

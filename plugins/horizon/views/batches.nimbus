@@ -1,11 +1,55 @@
 @layout('horizon/layout')
 <div class="space-y-8">
   <p class="t-text-muted text-sm max-w-2xl">
-    Batch job monitoring. Track batch progress and completion.
+    Batch operations overview. Nimbus queue batches run concurrently with completion hooks; this panel summarizes queue-level progress signals.
   </p>
-  <div class="t-card rounded-xl p-12 text-center t-text-subtle">
-    <svg class="w-12 h-12 mx-auto mb-4 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012 2h6a2 2 0 012 2v2M7 7h10"/></svg>
-    <p class="font-medium t-text mb-1">Batches</p>
-    <p class="text-sm">Batch monitoring will be available in a future release.</p>
+
+  <div class="grid gap-4 sm:grid-cols-4">
+    <div class="t-card rounded-xl p-6">
+      <div class="text-xs font-semibold uppercase t-text-subtle mb-1">Dispatched</div>
+      <div class="text-2xl font-bold t-text">{{ index .stats "total_dispatched" }}</div>
+    </div>
+    <div class="t-card rounded-xl p-6">
+      <div class="text-xs font-semibold uppercase t-text-subtle mb-1">Processed</div>
+      <div class="text-2xl font-bold t-text">{{ index .stats "total_processed" }}</div>
+    </div>
+    <div class="t-card rounded-xl p-6">
+      <div class="text-xs font-semibold uppercase t-text-subtle mb-1">Retried</div>
+      <div class="text-2xl font-bold t-text">{{ index .stats "total_retried" }}</div>
+    </div>
+    <div class="t-card rounded-xl p-6">
+      <div class="text-xs font-semibold uppercase t-text-subtle mb-1">Failed</div>
+      <div class="text-2xl font-bold {{ if index .stats "total_failed" }}text-red-600 dark:text-red-400{{ else }}t-text{{ end }}">{{ index .stats "total_failed" }}</div>
+    </div>
+  </div>
+
+  <div class="t-card rounded-xl overflow-hidden">
+    <div class="px-5 py-4 border-b t-border t-bg-sidebar">
+      <span class="font-medium t-text">Batch-capable queue summary</span>
+    </div>
+    <div class="divide-y t-divide">
+      @if(.hasQueues)
+      <div class="px-5 py-3 text-xs font-semibold t-text-subtle grid grid-cols-6 gap-4">
+        <div>Queue</div>
+        <div class="text-right">Dispatched</div>
+        <div class="text-right">Processed</div>
+        <div class="text-right">Retried</div>
+        <div class="text-right">Failed</div>
+        <div class="text-right">Reclaimed</div>
+      </div>
+      @each(.queues)
+      <div class="px-5 py-3 grid grid-cols-6 gap-4 items-center text-sm">
+        <div class="font-mono t-text">{{ index . "name" }}</div>
+        <div class="text-right t-text">{{ index . "dispatched" }}</div>
+        <div class="text-right t-text">{{ index . "processed" }}</div>
+        <div class="text-right t-text">{{ index . "retried" }}</div>
+        <div class="text-right {{ if index . "failed" }}text-red-600 dark:text-red-400{{ else }}t-text{{ end }}">{{ index . "failed" }}</div>
+        <div class="text-right t-text-subtle">{{ index . "reclaimed" }}</div>
+      </div>
+      @endeach
+      @else
+      <div class="px-5 py-12 text-center t-text-subtle text-sm">No queue activity yet. Dispatch jobs or batches to populate this view.</div>
+      @endif
+    </div>
   </div>
 </div>

@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"gorm.io/gorm"
+	"github.com/CodeSyncr/nimbus/lucid"
 )
 
 // BaseSchema is the base for AdonisJS Lucid-style migrations.
@@ -17,25 +17,25 @@ import (
 //
 //	func (m *CreateUsers) TableName() string { return "users" }
 //
-//	func (m *CreateUsers) Up(db *gorm.DB) error {
+//	func (m *CreateUsers) Up(db *lucid.DB) error {
 //	    return schema.New(db).CreateTable("users", func(t *schema.Table) {
 //	        t.Increments("id")
 //	        t.Timestamps()
 //	    })
 //	}
 //
-//	func (m *CreateUsers) Down(db *gorm.DB) error {
+//	func (m *CreateUsers) Down(db *lucid.DB) error {
 //	    return schema.New(db).DropTable("users")
 //	}
 type BaseSchema struct{}
 
 // Schema holds the database connection for migrations.
 type Schema struct {
-	db *gorm.DB
+	db *lucid.DB
 }
 
 // New creates a Schema for the given DB.
-func New(db *gorm.DB) *Schema {
+func New(db *lucid.DB) *Schema {
 	return &Schema{db: db}
 }
 
@@ -60,7 +60,7 @@ func (s *Schema) DropTable(name string) error {
 // Table builds column definitions for CreateTable.
 type Table struct {
 	name    string
-	db      *gorm.DB
+	db      *lucid.DB
 	columns []columnDef
 	indexes []indexDef
 }
@@ -178,6 +178,13 @@ func (t *Table) Time(name string) *Table {
 // Timestamp adds a timestamp column (created_at, updated_at).
 func (t *Table) Timestamp(name string) *Table {
 	t.columns = append(t.columns, columnDef{name: name, typ: "__TIMESTAMP__"})
+	return t
+}
+
+// LegacyTimestamp adds a legacy TIMESTAMP column.
+// Use this only when you explicitly need the database's TIMESTAMP semantics.
+func (t *Table) LegacyTimestamp(name string) *Table {
+	t.columns = append(t.columns, columnDef{name: name, typ: "__LEGACY_TIMESTAMP__"})
 	return t
 }
 
@@ -415,10 +422,21 @@ func (t *Table) resolveType(typ string) string {
 			return "INTEGER PRIMARY KEY AUTOINCREMENT"
 		}
 	case "__TIMESTAMP__":
+		// Nimbus default: Y2038-safe timestamps.
+		switch driver {
+		case "postgres":
+			return "TIMESTAMPTZ"
+		case "mysql":
+			return "DATETIME(6)"
+		default:
+			return "DATETIME"
+		}
+	case "__LEGACY_TIMESTAMP__":
+		// Escape hatch for explicit TIMESTAMP usage.
 		if driver == "postgres" {
 			return "TIMESTAMP"
 		}
-		return "DATETIME"
+		return "TIMESTAMP"
 	case "__BINARY__":
 		if driver == "postgres" {
 			return "BYTEA"

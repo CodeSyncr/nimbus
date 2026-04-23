@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"gorm.io/gorm"
+	"github.com/CodeSyncr/nimbus/lucid"
 )
 
 // ── Database Channel ────────────────────────────────────────────
@@ -35,11 +35,11 @@ func (DBNotification) TableName() string { return "notifications" }
 
 // DatabaseChannel stores notifications in the database.
 type DatabaseChannel struct {
-	db *gorm.DB
+	db *lucid.DB
 }
 
 // NewDatabaseChannel creates a database notification channel.
-func NewDatabaseChannel(db *gorm.DB) *DatabaseChannel {
+func NewDatabaseChannel(db *lucid.DB) *DatabaseChannel {
 	return &DatabaseChannel{db: db}
 }
 

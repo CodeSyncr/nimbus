@@ -1,7 +1,7 @@
 package database
 
 import (
-	"gorm.io/gorm"
+	"github.com/CodeSyncr/nimbus/lucid"
 )
 
 // ── Query Scopes ────────────────────────────────────────────────
@@ -9,26 +9,26 @@ import (
 // Scope is a reusable query modifier (like Laravel/Lucid scopes).
 // Example:
 //
-//	var Published Scope = func(db *gorm.DB) *gorm.DB {
+//	var Published Scope = func(db *lucid.DB) *lucid.DB {
 //	    return db.Where("published_at IS NOT NULL")
 //	}
 //
 //	db.Scopes(Published).Find(&posts)
-type Scope = func(db *gorm.DB) *gorm.DB
+type Scope = func(db *lucid.DB) *lucid.DB
 
 // WhereScope creates a simple WHERE scope.
 //
 //	active := database.WhereScope("active = ?", true)
 //	db.Scopes(active).Find(&users)
 func WhereScope(query string, args ...any) Scope {
-	return func(db *gorm.DB) *gorm.DB {
+	return func(db *lucid.DB) *lucid.DB {
 		return db.Where(query, args...)
 	}
 }
 
 // OrderScope creates an ORDER BY scope.
 func OrderScope(column string) Scope {
-	return func(db *gorm.DB) *gorm.DB {
+	return func(db *lucid.DB) *lucid.DB {
 		return db.Order(column)
 	}
 }
@@ -45,18 +45,18 @@ func OldestScope() Scope {
 
 // LimitScope limits the number of results.
 func LimitScope(n int) Scope {
-	return func(db *gorm.DB) *gorm.DB {
+	return func(db *lucid.DB) *lucid.DB {
 		return db.Limit(n)
 	}
 }
 
 // WhenScope conditionally applies a scope.
 //
-//	db.Scopes(database.WhenScope(isAdmin, func(db *gorm.DB) *gorm.DB {
+//	db.Scopes(database.WhenScope(isAdmin, func(db *lucid.DB) *lucid.DB {
 //	    return db.Where("role = ?", "admin")
 //	})).Find(&users)
 func WhenScope(condition bool, scope Scope) Scope {
-	return func(db *gorm.DB) *gorm.DB {
+	return func(db *lucid.DB) *lucid.DB {
 		if condition {
 			return scope(db)
 		}
@@ -65,25 +65,25 @@ func WhenScope(condition bool, scope Scope) Scope {
 }
 
 // ── Soft Delete Helpers ─────────────────────────────────────────
-// These helpers work with GORM's built-in soft delete (gorm.DeletedAt).
+// These helpers work with GORM's built-in soft delete (lucid.DeletedAt).
 
 // WithTrashed returns all records including soft-deleted ones.
-func WithTrashed(db *gorm.DB) *gorm.DB {
+func WithTrashed(db *lucid.DB) *lucid.DB {
 	return db.Unscoped()
 }
 
 // OnlyTrashed returns only soft-deleted records.
-func OnlyTrashed(db *gorm.DB) *gorm.DB {
+func OnlyTrashed(db *lucid.DB) *lucid.DB {
 	return db.Unscoped().Where("deleted_at IS NOT NULL")
 }
 
 // Restore un-deletes a soft-deleted record by setting deleted_at to NULL.
-func Restore(db *gorm.DB, model any) error {
+func Restore(db *lucid.DB, model any) error {
 	return db.Unscoped().Model(model).Update("deleted_at", nil).Error
 }
 
 // ForceDelete permanently deletes a record (bypasses soft delete).
-func ForceDelete(db *gorm.DB, model any) error {
+func ForceDelete(db *lucid.DB, model any) error {
 	return db.Unscoped().Delete(model).Error
 }
 
@@ -102,7 +102,7 @@ func IsTrashed(m *Model) bool {
 //	    }
 //	    return nil
 //	})
-func Chunk[T any](db *gorm.DB, size int, fn func(batch []T) error) error {
+func Chunk[T any](db *lucid.DB, size int, fn func(batch []T) error) error {
 	offset := 0
 	for {
 		var batch []T
@@ -125,35 +125,35 @@ func Chunk[T any](db *gorm.DB, size int, fn func(batch []T) error) error {
 }
 
 // Exists returns true if any record matches the query.
-func Exists(db *gorm.DB) (bool, error) {
+func Exists(db *lucid.DB) (bool, error) {
 	var count int64
 	err := db.Count(&count).Error
 	return count > 0, err
 }
 
 // FirstOrCreate finds the first matching record or creates it.
-func FirstOrCreate[T any](db *gorm.DB, where T, attrs T) (*T, error) {
+func FirstOrCreate[T any](db *lucid.DB, where T, attrs T) (*T, error) {
 	var result T
 	err := db.Where(where).Attrs(attrs).FirstOrCreate(&result).Error
 	return &result, err
 }
 
 // UpdateOrCreate finds a record by where conditions and updates it, or creates a new one.
-func UpdateOrCreate[T any](db *gorm.DB, where T, update T) (*T, error) {
+func UpdateOrCreate[T any](db *lucid.DB, where T, update T) (*T, error) {
 	var result T
 	err := db.Where(where).Assign(update).FirstOrCreate(&result).Error
 	return &result, err
 }
 
 // Pluck retrieves a single column from a query as a slice.
-func Pluck[T any](db *gorm.DB, column string) ([]T, error) {
+func Pluck[T any](db *lucid.DB, column string) ([]T, error) {
 	var results []T
 	err := db.Pluck(column, &results).Error
 	return results, err
 }
 
 // CountBy counts records matching the conditions.
-func CountBy(db *gorm.DB) (int64, error) {
+func CountBy(db *lucid.DB) (int64, error) {
 	var count int64
 	err := db.Count(&count).Error
 	return count, err

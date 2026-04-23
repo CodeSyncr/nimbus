@@ -7,13 +7,13 @@ import (
 	"encoding/json"
 	"time"
 
-	"gorm.io/gorm"
+	"github.com/CodeSyncr/nimbus/lucid"
 )
 
 // DatabaseStore stores sessions in a database table.
 // Create the table with: CREATE TABLE sessions (id VARCHAR(64) PRIMARY KEY, payload TEXT, expires_at DATETIME);
 type DatabaseStore struct {
-	db    *gorm.DB
+	db    *lucid.DB
 	table string
 }
 
@@ -25,7 +25,7 @@ type SessionRecord struct {
 }
 
 // NewDatabaseStore creates a database-backed session store.
-func NewDatabaseStore(db *gorm.DB, table string) *DatabaseStore {
+func NewDatabaseStore(db *lucid.DB, table string) *DatabaseStore {
 	if table == "" {
 		table = "sessions"
 	}

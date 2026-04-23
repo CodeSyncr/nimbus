@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"gorm.io/gorm"
+	"github.com/CodeSyncr/nimbus/lucid"
 )
 
 // ── Database Notifications ──────────────────────────────────────
@@ -28,7 +28,7 @@ func (DatabaseNotification) TableName() string {
 }
 
 // AutoMigrateNotifications creates the notifications table.
-func AutoMigrateNotifications(db *gorm.DB) error {
+func AutoMigrateNotifications(db *lucid.DB) error {
 	return db.AutoMigrate(&DatabaseNotification{})
 }
 
@@ -40,11 +40,11 @@ type Notifiable interface {
 
 // NotificationStore provides methods for working with database notifications.
 type NotificationStore struct {
-	DB *gorm.DB
+	DB *lucid.DB
 }
 
 // NewNotificationStore creates a new notification store.
-func NewNotificationStore(db *gorm.DB) *NotificationStore {
+func NewNotificationStore(db *lucid.DB) *NotificationStore {
 	return &NotificationStore{DB: db}
 }
 

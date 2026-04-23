@@ -1,9 +1,14 @@
 package telescope
 
 import (
-	"fmt"
+	"encoding/json"
+	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // EntryType identifies the kind of telescope entry.
@@ -81,7 +86,18 @@ type Store struct {
 	entries []*Entry
 	max     int
 	next    int
-	idSeq   int
+	persist persistBackend
+	enabled map[EntryType]bool // nil means all enabled
+}
+
+type persistBackend interface {
+	Latest(limit int) ([]*Entry, error)
+	Insert(entry *Entry) error
+	Clear() error
+}
+
+type persistPruner interface {
+	PruneBefore(t time.Time) error
 }
 
 // NewStore creates a store with max entries (ring buffer).
@@ -95,15 +111,91 @@ func NewStore(max int) *Store {
 	}
 }
 
+func (s *Store) SetPersistBackend(p persistBackend) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.persist = p
+}
+
+// EnableOnly enables recording only for the given entry types.
+// If no types are provided, all entry types are enabled.
+func (s *Store) EnableOnly(types ...EntryType) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(types) == 0 {
+		s.enabled = nil
+		return
+	}
+	m := make(map[EntryType]bool, len(types))
+	for _, t := range types {
+		if t != "" {
+			m[t] = true
+		}
+	}
+	s.enabled = m
+}
+
+func (s *Store) isEnabled(t EntryType) bool {
+	if t == "" {
+		return true
+	}
+	if s.enabled == nil {
+		return true
+	}
+	return s.enabled[t]
+}
+
+func (s *Store) LoadLatestFromBackend(limit int) {
+	s.mu.RLock()
+	p := s.persist
+	s.mu.RUnlock()
+	if p == nil {
+		return
+	}
+	if limit <= 0 {
+		limit = s.max
+	}
+	entries, err := p.Latest(limit)
+	if err != nil {
+		return
+	}
+	// entries should already be newest-first. Convert to oldest-first for ring buffer.
+	for i, j := 0, len(entries)-1; i < j; i, j = i+1, j-1 {
+		entries[i], entries[j] = entries[j], entries[i]
+	}
+	s.mu.Lock()
+	s.entries = append(s.entries[:0], entries...)
+	s.next = 0
+	s.mu.Unlock()
+}
+
 // Record adds an entry to the store.
 func (s *Store) Record(entry *Entry) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.idSeq++
-	entry.ID = fmt.Sprintf("t%d", s.idSeq)
+	p := s.persist
+	enabled := true
+	if entry != nil {
+		enabled = s.isEnabled(entry.Type)
+	}
+	s.mu.Unlock()
+	if !enabled {
+		return
+	}
+
+	if entry.ID == "" {
+		entry.ID = "t" + uuid.New().String()
+	}
 	if entry.CreatedAt.IsZero() {
 		entry.CreatedAt = time.Now()
 	}
+
+	// Persist first so we don't lose entries on crash (best-effort).
+	if p != nil {
+		_ = p.Insert(entry)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if len(s.entries) < s.max {
 		s.entries = append(s.entries, entry)
 	} else {
@@ -153,7 +245,46 @@ func (s *Store) Get(id string) *Entry {
 // Clear removes all entries.
 func (s *Store) Clear() {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	p := s.persist
 	s.entries = s.entries[:0]
 	s.next = 0
+	s.mu.Unlock()
+	if p != nil {
+		_ = p.Clear()
+	}
+}
+
+func (s *Store) PruneBefore(t time.Time) {
+	s.mu.RLock()
+	p := s.persist
+	s.mu.RUnlock()
+	if p == nil {
+		return
+	}
+	if pr, ok := p.(persistPruner); ok {
+		_ = pr.PruneBefore(t)
+	}
+}
+
+func intEnv(key string, def int) int {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return def
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return def
+	}
+	return n
+}
+
+func jsonString(v any) string {
+	if v == nil {
+		return ""
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return ""
+	}
+	return string(b)
 }

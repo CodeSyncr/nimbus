@@ -4,19 +4,22 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
+	"runtime/debug"
 	"sync"
 	"time"
 
+	"github.com/CodeSyncr/nimbus/errors"
 	"github.com/CodeSyncr/nimbus/http"
 	"github.com/CodeSyncr/nimbus/logger"
 	"github.com/CodeSyncr/nimbus/router"
 )
 
-// Logger logs each request (AdonisJS middleware style) using the Nimbus
+// Logger logs each request using the Nimbus
 // structured logger package. Applications can override the underlying logger
 // via logger.Set for custom formatting or destinations.
 func Logger() router.Middleware {
-	return func(next router.HandlerFunc) router.HandlerFunc {
+	return router.NameMiddleware("logger", func(next router.HandlerFunc) router.HandlerFunc {
 		return func(c *http.Context) error {
 			start := time.Now()
 			err := next(c)
@@ -29,22 +32,24 @@ func Logger() router.Middleware {
 			)
 			return err
 		}
-	}
+	})
 }
 
-// Recover recovers from panics and returns 500.
+// Recover recovers from panics and returns a wrapped error so errors.Handler
+// can render JSON or HTML consistently (and optional Telescope hooks).
 func Recover() router.Middleware {
-	return func(next router.HandlerFunc) router.HandlerFunc {
+	return router.NameMiddleware("recover", func(next router.HandlerFunc) router.HandlerFunc {
 		return func(c *http.Context) (err error) {
 			defer func() {
 				if r := recover(); r != nil {
-					err = nil
-					c.JSON(http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+					ae := errors.Wrap(http.StatusInternalServerError, fmt.Errorf("panic: %v", r))
+					ae.StackTrace = string(debug.Stack())
+					err = ae
 				}
 			}()
 			return next(c)
 		}
-	}
+	})
 }
 
 // CORS sets basic CORS headers (configurable in real apps via config).

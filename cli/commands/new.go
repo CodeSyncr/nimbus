@@ -19,6 +19,8 @@ func init() {
 type NewCommand struct {
 	noDefaults bool
 	kit        string
+	starter    string
+	teams      bool
 }
 
 func (c *NewCommand) Name() string        { return "new" }
@@ -28,6 +30,8 @@ func (c *NewCommand) Args() int           { return -1 }
 
 func (c *NewCommand) Flags(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&c.kit, "kit", "", "Frontend kit: react, vue, svelte")
+	cmd.Flags().StringVar(&c.starter, "starter", "none", "Starter kit for Basic apps: none, breeze, livewire, jetstream")
+	cmd.Flags().BoolVar(&c.teams, "teams", false, "Jetstream option: scaffold team features (only with --starter=jetstream)")
 	cmd.Flags().BoolVar(&c.noDefaults, "no-default-plugins", false, "Skip auto-registering default plugins")
 }
 
@@ -45,11 +49,13 @@ func (c *NewCommand) Run(ctx *cli.Context) error {
 		name = strings.TrimSpace(ans)
 	}
 
-	interactive := c.kit == ""
+	interactive := c.kit == "" && (c.starter == "" || c.starter == "none")
 
 	dbDriver := "sqlite"
 	var selectedPlugins []string
 	authGuard := "none"
+	starter := "none"
+	teams := false
 
 	if interactive {
 		pt, err := ctx.UI.AskSelect("Select project type", []string{"Basic (server-rendered views)", "Inertia (Inertia.js SPA)"}, "Basic (server-rendered views)")
@@ -57,10 +63,37 @@ func (c *NewCommand) Run(ctx *cli.Context) error {
 			return err
 		}
 		if pt == "Inertia (Inertia.js SPA)" {
-			c.kit = "react"
-			ctx.UI.Infof("Using React Inertia kit (Vue and Svelte coming soon).")
+			kitAns, err := ctx.UI.AskSelect("Choose Inertia frontend", []string{"React", "Vue", "Svelte"}, "React")
+			if err != nil {
+				return err
+			}
+			switch kitAns {
+			case "Vue":
+				c.kit = "vue"
+			case "Svelte":
+				c.kit = "svelte"
+			default:
+				c.kit = "react"
+			}
 		} else {
 			c.kit = ""
+		}
+
+		// ── Starter kit (Basic only) ────────────────────────────────
+		if c.kit == "" {
+			st, err := ctx.UI.AskSelect("Select starter kit", []string{
+				"None",
+				"Livewire",
+			}, "None")
+			if err != nil {
+				return err
+			}
+			switch st {
+			case "Livewire":
+				starter = "livewire"
+			default:
+				starter = "none"
+			}
 		}
 
 		dbAns, err := ctx.UI.AskSelect("Select database", []string{"SQLite (default)", "Postgres", "MySQL"}, "SQLite (default)")
@@ -77,29 +110,34 @@ func (c *NewCommand) Run(ctx *cli.Context) error {
 		}
 
 		// ── Authentication Guard ────────────────────────────────
-		wantAuth, err := ctx.UI.AskConfirm("Would you like to add authentication?", true)
-		if err != nil {
-			return err
-		}
-		if wantAuth {
-			guardAns, err := ctx.UI.AskSelect("Select auth guard", []string{
-				"Session (cookie-based, ideal for web apps & SPAs on same domain)",
-				"Access Token (opaque tokens, ideal for APIs, mobile & 3rd-party)",
-				"Stateless (JWT/PASETO, ideal for mobile apps & distributed services)",
-				"Basic Auth (HTTP basic, ideal for internal tools & development)",
-			}, "Session (cookie-based, ideal for web apps & SPAs on same domain)")
+		// Starter kits include session-based auth by default.
+		if starter != "none" {
+			authGuard = "session"
+		} else {
+			wantAuth, err := ctx.UI.AskConfirm("Would you like to add authentication?", true)
 			if err != nil {
 				return err
 			}
-			switch {
-			case strings.Contains(guardAns, "Session"):
-				authGuard = "session"
-			case strings.Contains(guardAns, "Access Token"):
-				authGuard = "access_token"
-			case strings.Contains(guardAns, "Stateless"):
-				authGuard = "stateless"
-			case strings.Contains(guardAns, "Basic Auth"):
-				authGuard = "basic"
+			if wantAuth {
+				guardAns, err := ctx.UI.AskSelect("Select auth guard", []string{
+					"Session (cookie-based, ideal for web apps & SPAs on same domain)",
+					"Access Token (opaque tokens, ideal for APIs, mobile & 3rd-party)",
+					"Stateless (JWT/PASETO, ideal for mobile apps & distributed services)",
+					"Basic Auth (HTTP basic, ideal for internal tools & development)",
+				}, "Session (cookie-based, ideal for web apps & SPAs on same domain)")
+				if err != nil {
+					return err
+				}
+				switch {
+				case strings.Contains(guardAns, "Session"):
+					authGuard = "session"
+				case strings.Contains(guardAns, "Access Token"):
+					authGuard = "access_token"
+				case strings.Contains(guardAns, "Stateless"):
+					authGuard = "stateless"
+				case strings.Contains(guardAns, "Basic Auth"):
+					authGuard = "basic"
+				}
 			}
 		}
 
@@ -140,6 +178,25 @@ func (c *NewCommand) Run(ctx *cli.Context) error {
 		if c.kit != "" && c.kit != "react" && c.kit != "vue" && c.kit != "svelte" {
 			return fmt.Errorf("invalid --kit=%q: must be react, vue, svelte, or empty", c.kit)
 		}
+		if c.starter == "" {
+			c.starter = "none"
+		}
+		switch c.starter {
+		case "none", "breeze", "livewire", "jetstream":
+		default:
+			return fmt.Errorf("invalid --starter=%q: must be none, breeze, livewire, or jetstream", c.starter)
+		}
+		if c.kit != "" && c.starter != "none" {
+			return fmt.Errorf("--starter is only supported for Basic (server-rendered) apps (omit --kit)")
+		}
+		if c.noDefaults && c.starter != "none" {
+			return fmt.Errorf("--starter requires default plugins (omit --no-default-plugins)")
+		}
+		if c.teams && c.starter != "jetstream" {
+			return fmt.Errorf("--teams is only supported with --starter=jetstream")
+		}
+		starter = c.starter
+		teams = c.teams
 	}
 
 	dir := name
@@ -162,12 +219,14 @@ func (c *NewCommand) Run(ctx *cli.Context) error {
 	if c.kit == "" {
 		baseDirs = append(baseDirs,
 			filepath.Join(dir, "resources", "views"),
+			filepath.Join(dir, "resources", "lang"),
 			filepath.Join(dir, "resources", "css"),
 			filepath.Join(dir, "resources", "js"),
 		)
 	} else {
 		baseDirs = append(baseDirs,
 			filepath.Join(dir, "resources", "views"),
+			filepath.Join(dir, "resources", "lang"),
 			filepath.Join(dir, "resources", "css"),
 			filepath.Join(dir, "resources", "js"),
 			filepath.Join(dir, "inertia", "pages", "home"),
@@ -205,7 +264,7 @@ func (c *NewCommand) Run(ctx *cli.Context) error {
 
 		tr := template.Must(template.New("routes").Parse(routesStub))
 		rf, _ := os.Create(filepath.Join(dir, "start", "routes.go"))
-		_ = tr.Execute(rf, map[string]string{"AppName": name})
+		_ = tr.Execute(rf, map[string]string{"AppName": name, "NimbusVersion": strings.TrimPrefix(version.Nimbus, "v")})
 		_ = rf.Close()
 
 		// we simulate view template copying from old system
@@ -220,13 +279,15 @@ func (c *NewCommand) Run(ctx *cli.Context) error {
 
 		tr := template.Must(template.New("routes").Parse(routesInertiaStub))
 		rf, _ := os.Create(filepath.Join(dir, "start", "routes.go"))
-		_ = tr.Execute(rf, map[string]string{"AppName": name})
+		_ = tr.Execute(rf, map[string]string{"AppName": name, "NimbusVersion": strings.TrimPrefix(version.Nimbus, "v")})
 		_ = rf.Close()
 
 		if err := createInertiaKit(dir, name, c.kit); err != nil {
 			return err
 		}
 	}
+
+	_ = os.WriteFile(filepath.Join(dir, "resources", "lang", "en.json"), []byte(scaffoldLangENJSON), 0644)
 
 	_ = os.WriteFile(filepath.Join(dir, "start", "kernel.go"), []byte(kernelStub), 0644)
 
@@ -291,6 +352,13 @@ func (c *NewCommand) Run(ctx *cli.Context) error {
 		}
 	}
 
+	// ── Starter kit overlays (Breeze/Jetstream) ─────────────
+	if starter != "none" {
+		if err := applyStarterKit(dir, name, starter, teams); err != nil {
+			ctx.UI.Warnf("failed to apply starter kit: %v", err)
+		}
+	}
+
 	if interactive {
 		if err := updateEnvDB(dir, name, dbDriver); err != nil {
 			ctx.UI.Warnf("failed to update DB settings in env files: %v", err)
@@ -327,9 +395,9 @@ func (c *NewCommand) Run(ctx *cli.Context) error {
 
 	ctx.UI.Infof("Next steps:")
 	ctx.UI.Infof("  cd %s", name)
-	ctx.UI.Infof("  go mod tidy")
-	if c.kit != "" {
-		ctx.UI.Infof("  npm install")
+	ctx.UI.Infof("  nimbus install")
+	if starter != "none" {
+		ctx.UI.Infof("  nimbus migrate   # required before auth tables exist (users, etc.)")
 	}
 	ctx.UI.Infof("  nimbus serve")
 
@@ -342,7 +410,7 @@ func goModContent(name, kit string) string {
 go 1.21
 
 require (
-	github.com/CodeSyncr/nimbus v` + version.Nimbus + `
+	github.com/CodeSyncr/nimbus ` + version.Nimbus + `
 	github.com/joho/godotenv v1.5.1
 	github.com/air-verse/air v1.52.3
 )
@@ -355,7 +423,7 @@ replace github.com/CodeSyncr/nimbus => ../nimbus
 go 1.21
 
 require (
-	github.com/CodeSyncr/nimbus v` + version.Nimbus + `
+	github.com/CodeSyncr/nimbus ` + version.Nimbus + `
 	github.com/joho/godotenv v1.5.1
 	github.com/air-verse/air v1.52.3
 	github.com/petaki/inertia-go v1.6.0
@@ -369,7 +437,21 @@ replace github.com/CodeSyncr/nimbus => ../nimbus
 
 func createInertiaKit(dir, name, kit string) error {
 	scriptPath := "/build/assets/app.js"
+	devScripts := `<script type="module" src="http://localhost:5173/@vite/client"></script>
+    <script type="module" src="http://localhost:5173/inertia/app.ts"></script>`
+	if kit == "react" {
+		devScripts = `<script type="module">
+      import RefreshRuntime from 'http://localhost:5173/@react-refresh'
+      RefreshRuntime.injectIntoGlobalHook(window)
+      window.$RefreshReg$ = () => {}
+      window.$RefreshSig$ = () => (type) => type
+      window.__vite_plugin_react_preamble_installed__ = true
+    </script>
+    <script type="module" src="http://localhost:5173/@vite/client"></script>
+    <script type="module" src="http://localhost:5173/inertia/app.tsx"></script>`
+	}
 	layoutContent := strings.Replace(inertiaLayoutNimbus, "{{SCRIPT_SRC}}", scriptPath, 1)
+	layoutContent = strings.Replace(layoutContent, "{{DEV_SCRIPTS}}", devScripts, 1)
 	_ = os.WriteFile(filepath.Join(dir, "resources", "views", "inertia_layout.nimbus"), []byte(layoutContent), 0644)
 
 	switch kit {
@@ -378,21 +460,24 @@ func createInertiaKit(dir, name, kit string) error {
 		_ = os.WriteFile(filepath.Join(dir, "inertia", "layouts", "default.tsx"), []byte(inertiaLayoutDefault), 0644)
 		_ = os.WriteFile(filepath.Join(dir, "inertia", "pages", "home", "index.tsx"), []byte(inertiaPageHomeReact), 0644)
 	case "vue":
-		_ = os.WriteFile(filepath.Join(dir, "inertia", "app.js"), []byte(inertiaAppVue), 0644)
+		_ = os.WriteFile(filepath.Join(dir, "inertia", "app.ts"), []byte(inertiaAppVue), 0644)
 		_ = os.WriteFile(filepath.Join(dir, "inertia", "pages", "home", "index.vue"), []byte(inertiaPageHomeVue), 0644)
 	case "svelte":
-		_ = os.WriteFile(filepath.Join(dir, "inertia", "app.js"), []byte(inertiaAppSvelte), 0644)
+		_ = os.WriteFile(filepath.Join(dir, "inertia", "app.ts"), []byte(inertiaAppSvelte), 0644)
 		_ = os.WriteFile(filepath.Join(dir, "inertia", "pages", "home", "index.svelte"), []byte(inertiaPageHomeSvelte), 0644)
 	}
 
 	_ = os.WriteFile(filepath.Join(dir, "package.json"), []byte(inertiaPackageJSON(kit)), 0644)
 	_ = os.WriteFile(filepath.Join(dir, "vite.config.js"), []byte(inertiaViteConfig(kit)), 0644)
 	_ = os.WriteFile(filepath.Join(dir, "index.html"), []byte(inertiaIndexHTML(kit)), 0644)
+	_ = os.WriteFile(filepath.Join(dir, "tsconfig.node.json"), []byte(inertiaTsconfigNode), 0644)
 	if kit == "react" {
 		_ = os.WriteFile(filepath.Join(dir, "tsconfig.json"), []byte(inertiaTsconfig), 0644)
-		_ = os.WriteFile(filepath.Join(dir, "tsconfig.node.json"), []byte(inertiaTsconfigNode), 0644)
 		_ = os.WriteFile(filepath.Join(dir, "inertia", "tsconfig.json"), []byte(inertiaTsconfigInertia), 0644)
 		_ = os.WriteFile(filepath.Join(dir, "inertia", "types.ts"), []byte(inertiaTypesTS), 0644)
+	} else {
+		_ = os.WriteFile(filepath.Join(dir, "tsconfig.json"), []byte(inertiaTsconfigVueSvelte), 0644)
+		_ = os.WriteFile(filepath.Join(dir, "inertia", "types.ts"), []byte(inertiaTypesVueSvelte), 0644)
 	}
 	return nil
 }
@@ -563,18 +648,49 @@ func Boot() *nimbus.App {
 	app := nimbus.New()
 
 ` + useBlock + `
-	start.RegisterMiddleware(app)
-
-	start.RegisterRoutes(app)
-
-	bootAuth(app)
-
-	db, err := database.Connect(config.Database.Driver, config.Database.DSN)
+	db, err := database.ConnectWithConfig(database.ConnectConfig{
+		Driver: config.Database.Driver,
+		DSN:    config.Database.DSN,
+		Debug:  config.App.Env == "development",
+		PoolConfig: database.PoolConfigFromFields(
+			config.Database.MaxOpenConns,
+			config.Database.MaxIdleConns,
+			config.Database.ConnMaxLifetime,
+			config.Database.ConnMaxIdleTime,
+		),
+	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Database connection failed: %v\n", err)
 		os.Exit(1)
 	}
-	_ = db
+	// Make DB available via nimbus.GetDB() and the IoC container.
+	nimbus.SetDB(db)
+	app.Container.Singleton("db", func() *nimbus.DB { return nimbus.GetDB() })
+
+	// In development, apply pending migrations so "nimbus serve" works without a manual migrate step.
+	if config.App.Env == "development" {
+		if err := database.CreateDatabaseIfNotExists(database.CreateConfig{
+			Driver:   config.Database.Driver,
+			Host:     config.Database.Host,
+			Port:     config.Database.Port,
+			User:     config.Database.User,
+			Password: config.Database.Password,
+			Database: config.Database.Database,
+		}); err != nil {
+			fmt.Fprintf(os.Stderr, "Database create failed: %v\n", err)
+			os.Exit(1)
+		}
+		migrator := database.NewMigrator(db, migrations.All())
+		if err := migrator.Up(); err != nil {
+			fmt.Fprintf(os.Stderr, "Migration failed (run: nimbus db:migrate): %v\n", err)
+			os.Exit(1)
+		}
+	}
+
+	bootAuth(app)
+
+	start.RegisterMiddleware(app)
+	start.RegisterRoutes(app)
 
 	queue.Boot(&queue.BootConfig{RegisterJobs: start.RegisterQueueJobs})
 
@@ -596,8 +712,15 @@ func bootStatelessAuth(app *nimbus.App) {
 	}
 
 	guard := auth.NewStatelessGuard(driver, auth.UserLoaderFunc(func(ctx context.Context, id string) (auth.User, error) {
-		// TODO: Implement user loading from database
-		return nil, nil
+		// Load the user for the token subject (e.g. after make:auth):
+		//   var u models.User
+		//   if err := database.Get().First(&u, "id = ?", id).Error; err != nil {
+		//     return nil, err
+		//   }
+		//   return &u, nil
+		_ = ctx
+		_ = id
+		return nil, fmt.Errorf("stateless auth: implement UserLoader in bootStatelessAuth (see comment above)")
 	}))
 
 	app.Container.Singleton("auth.stateless", func() *auth.StatelessGuard {
@@ -627,7 +750,17 @@ func RunMigrations() {
 		fmt.Fprintf(os.Stderr, "Database create failed: %v\n", err)
 		os.Exit(1)
 	}
-	db, err := database.Connect(config.Database.Driver, config.Database.DSN)
+	db, err := database.ConnectWithConfig(database.ConnectConfig{
+		Driver: config.Database.Driver,
+		DSN:    config.Database.DSN,
+		Debug:  config.App.Env == "development",
+		PoolConfig: database.PoolConfigFromFields(
+			config.Database.MaxOpenConns,
+			config.Database.MaxIdleConns,
+			config.Database.ConnMaxLifetime,
+			config.Database.ConnMaxIdleTime,
+		),
+	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Database connection failed: %v\n", err)
 		os.Exit(1)

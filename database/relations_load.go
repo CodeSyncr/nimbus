@@ -6,7 +6,7 @@ import (
 	"reflect"
 
 	"github.com/jinzhu/inflection"
-	"gorm.io/gorm"
+	"github.com/CodeSyncr/nimbus/lucid"
 )
 
 // Load eagerly loads one or more relations onto an already-fetched model.
@@ -22,7 +22,7 @@ import (
 // pivot table (auto-generated or specified via pivotTable tag option).
 //
 // The model must be a pointer to a struct.
-func Load(db *gorm.DB, model any, relations ...string) error {
+func Load(db *lucid.DB, model any, relations ...string) error {
 	if db == nil {
 		return fmt.Errorf("database: db is nil")
 	}
@@ -71,7 +71,7 @@ func Load(db *gorm.DB, model any, relations ...string) error {
 //
 //	var publishedPosts []Post
 //	database.Related(db, &user, "Posts").Where("published = ?", true).Find(&publishedPosts)
-func Related(db *gorm.DB, model any, relationName string) *gorm.DB {
+func Related(db *lucid.DB, model any, relationName string) *lucid.DB {
 	rel := findRelationByName(model, relationName)
 	if rel == nil {
 		return db.Where("1 = 0") // no-op query
@@ -127,7 +127,7 @@ func Related(db *gorm.DB, model any, relationName string) *gorm.DB {
 
 // loadBelongsTo loads a belongs-to relation.
 // Convention: Post.UserID → User (FK on this model, points to related PK).
-func loadBelongsTo(db *gorm.DB, model any, rel Relation) error {
+func loadBelongsTo(db *lucid.DB, model any, rel Relation) error {
 	fk := rel.ForeignKey
 	if fk == "" {
 		fk = rel.FieldName + "ID" // User → UserID
@@ -145,7 +145,7 @@ func loadBelongsTo(db *gorm.DB, model any, rel Relation) error {
 
 	target := reflect.New(rel.TargetType).Interface()
 	if err := db.Where(toSnake(ownerKey)+" = ?", fkVal).First(target).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, lucid.ErrRecordNotFound) {
 			return nil
 		}
 		return err
@@ -156,7 +156,7 @@ func loadBelongsTo(db *gorm.DB, model any, rel Relation) error {
 
 // loadHasOne loads a has-one relation.
 // Convention: User → Profile where Profile.UserID = User.ID (FK on related model).
-func loadHasOne(db *gorm.DB, model any, rel Relation) error {
+func loadHasOne(db *lucid.DB, model any, rel Relation) error {
 	ownerTypeName := modelTypeName(model)
 
 	fk := rel.ForeignKey
@@ -176,7 +176,7 @@ func loadHasOne(db *gorm.DB, model any, rel Relation) error {
 
 	target := reflect.New(rel.TargetType).Interface()
 	if err := db.Where(toSnake(fk)+" = ?", localVal).First(target).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, lucid.ErrRecordNotFound) {
 			return nil
 		}
 		return err
@@ -187,7 +187,7 @@ func loadHasOne(db *gorm.DB, model any, rel Relation) error {
 
 // loadHasMany loads a has-many relation.
 // Convention: User → Posts where Post.UserID = User.ID (FK on related model).
-func loadHasMany(db *gorm.DB, model any, rel Relation) error {
+func loadHasMany(db *lucid.DB, model any, rel Relation) error {
 	ownerTypeName := modelTypeName(model)
 
 	fk := rel.ForeignKey
@@ -216,7 +216,7 @@ func loadHasMany(db *gorm.DB, model any, rel Relation) error {
 // loadManyToMany loads a many-to-many relation via a pivot table.
 // Convention: User.Teams → pivot table "team_users",
 // FKs: user_id + team_id (derived from model names, alphabetically sorted).
-func loadManyToMany(db *gorm.DB, model any, rel Relation) error {
+func loadManyToMany(db *lucid.DB, model any, rel Relation) error {
 	localKey := rel.LocalKey
 	if localKey == "" {
 		localKey = "ID"

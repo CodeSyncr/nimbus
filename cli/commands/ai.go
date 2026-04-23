@@ -678,7 +678,7 @@ func (ch *%sChannel) OnMessage(client *websocket.Client, event string, data map[
 func generateModelCode(pascal, snake string, fields []Field) ([]GeneratedFile, error) {
 	var b strings.Builder
 	b.WriteString("package models\n\n")
-	b.WriteString("import (\n\t\"time\"\n\n\t\"gorm.io/gorm\"\n)\n\n")
+	b.WriteString("import (\n\t\"time\"\n\n\t\"github.com/CodeSyncr/nimbus/lucid\"\n)\n\n")
 	b.WriteString(fmt.Sprintf("// %s represents a %s in the database.\n", pascal, snake))
 	b.WriteString(fmt.Sprintf("type %s struct {\n", pascal))
 	b.WriteString("\tID        uint           `json:\"id\" gorm:\"primaryKey\"`\n")
@@ -699,7 +699,7 @@ func generateModelCode(pascal, snake string, fields []Field) ([]GeneratedFile, e
 
 	b.WriteString("\tCreatedAt time.Time      `json:\"created_at\"`\n")
 	b.WriteString("\tUpdatedAt time.Time      `json:\"updated_at\"`\n")
-	b.WriteString("\tDeletedAt gorm.DeletedAt  `json:\"-\" gorm:\"index\"`\n")
+	b.WriteString("\tDeletedAt lucid.DeletedAt  `json:\"-\" gorm:\"index\"`\n")
 	b.WriteString("}\n\n")
 	b.WriteString(fmt.Sprintf("// TableName returns the database table name.\n"))
 	b.WriteString(fmt.Sprintf("func (%s) TableName() string { return \"%s\" }\n", pascal, pluralize(snake)))
@@ -715,7 +715,7 @@ func generateControllerCode(pascal, snake, plural string, fields []Field) ([]Gen
 	b.WriteString("import (\n")
 	b.WriteString("\t\"strconv\"\n\n")
 	b.WriteString("\t\"github.com/CodeSyncr/nimbus/http\"\n")
-	b.WriteString("\t\"gorm.io/gorm\"\n")
+	b.WriteString("\t\"github.com/CodeSyncr/nimbus/lucid\"\n")
 	b.WriteString(")\n\n")
 
 	// Generate request/response types if fields are available.
@@ -745,7 +745,7 @@ func generateControllerCode(pascal, snake, plural string, fields []Field) ([]Gen
 
 	// Controller struct.
 	b.WriteString(fmt.Sprintf("// %sController handles %s CRUD operations.\n", pascal, snake))
-	b.WriteString(fmt.Sprintf("type %sController struct {\n\tDB *gorm.DB\n}\n\n", pascal))
+	b.WriteString(fmt.Sprintf("type %sController struct {\n\tDB *lucid.DB\n}\n\n", pascal))
 
 	// Index.
 	b.WriteString(fmt.Sprintf("// Index lists all %s.\n", plural))
@@ -827,10 +827,10 @@ func generateMigrationCode(pascal, snake, plural string, fields []Field) ([]Gene
 	var b strings.Builder
 
 	b.WriteString("package migrations\n\n")
-	b.WriteString("import (\n\t\"gorm.io/gorm\"\n)\n\n")
+	b.WriteString("import (\n\t\"github.com/CodeSyncr/nimbus/lucid\"\n)\n\n")
 	b.WriteString(fmt.Sprintf("// Migrate%s%s creates the %s table.\n", ts, pascal, plural))
 	b.WriteString(fmt.Sprintf("type Migrate%s%s struct{}\n\n", ts, pascal))
-	b.WriteString(fmt.Sprintf("func (m *Migrate%s%s) Up(db *gorm.DB) error {\n", ts, pascal))
+	b.WriteString(fmt.Sprintf("func (m *Migrate%s%s) Up(db *lucid.DB) error {\n", ts, pascal))
 	b.WriteString(fmt.Sprintf("\ttype %s struct {\n", pascal))
 	b.WriteString("\t\tID        uint   `gorm:\"primaryKey\"`\n")
 	for _, f := range fields {
@@ -851,7 +851,7 @@ func generateMigrationCode(pascal, snake, plural string, fields []Field) ([]Gene
 	b.WriteString("\t}\n")
 	b.WriteString(fmt.Sprintf("\treturn db.Table(\"%s\").AutoMigrate(&%s{})\n", plural, pascal))
 	b.WriteString("}\n\n")
-	b.WriteString(fmt.Sprintf("func (m *Migrate%s%s) Down(db *gorm.DB) error {\n", ts, pascal))
+	b.WriteString(fmt.Sprintf("func (m *Migrate%s%s) Down(db *lucid.DB) error {\n", ts, pascal))
 	b.WriteString(fmt.Sprintf("\treturn db.Migrator().DropTable(\"%s\")\n", plural))
 	b.WriteString("}\n")
 

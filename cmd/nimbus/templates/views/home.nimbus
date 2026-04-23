@@ -54,7 +54,7 @@
         <div class="stat-label">Powered by Go runtime</div>
       </div>
       <div class="stat">
-        <div class="stat-val">AdonisJS</div>
+        <div class="stat-val">Laravel</div>
         <div class="stat-label">Inspired by</div>
       </div>
     </div>

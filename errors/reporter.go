@@ -25,6 +25,8 @@ type AppError struct {
 	Message   string    `json:"message"`
 	Internal  error     `json:"-"` // original error, not exposed to client
 	Timestamp time.Time `json:"timestamp"`
+	// StackTrace is set for panics (middleware.Recover) for Telescope / logs.
+	StackTrace string `json:"-"`
 }
 
 // New creates an AppError with a unique ID.

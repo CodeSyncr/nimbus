@@ -8,7 +8,7 @@ import (
 	"time"
 
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
-	"github.com/redis/go-redis/v9"
+	"github.com/CodeSyncr/nimbus/redis"
 )
 
 // BootConfig configures cache boot. Pass nil for env-based config.

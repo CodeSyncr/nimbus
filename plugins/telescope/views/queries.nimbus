@@ -4,20 +4,41 @@
   <div class="t-card rounded-xl overflow-hidden">
     <div class="px-5 py-4 border-b t-border t-bg-sidebar flex items-center justify-between">
       <h2 class="font-semibold t-text">SQL Queries</h2>
-      <a href="/telescope" class="text-sm t-accent hover:opacity-80 transition">← Dashboard</a>
+      <div class="flex items-center gap-3">
+        <form method="GET" class="flex items-center gap-2">
+          <input name="q" value="{{ .q }}" placeholder="Search…" class="text-sm px-3 py-1.5 rounded-lg t-code-block t-text w-56 focus:outline-none" />
+          <input name="tag" value="{{ .tag }}" placeholder="Tag" class="text-sm px-3 py-1.5 rounded-lg t-code-block t-text w-28 focus:outline-none font-mono" />
+          <button type="submit" class="text-sm px-3 py-1.5 rounded-lg t-accent-bg t-accent hover:opacity-90 transition">Go</button>
+        </form>
+        <a href="{{ .basePath }}" class="text-sm t-accent hover:opacity-80 transition">← Dashboard</a>
+      </div>
+    </div>
+    <div class="px-5 py-3 border-b t-border flex flex-wrap gap-2 text-xs">
+      <a href="?q={{ .q }}&tag=slow" class="px-2.5 py-1 rounded-full t-accent-bg t-accent font-mono">slow ({{ index .tagCounts "slow" }})</a>
+      <a href="?q={{ .q }}&tag=error" class="px-2.5 py-1 rounded-full t-accent-bg t-accent font-mono">error ({{ index .tagCounts "error" }})</a>
+      <a href="?q={{ .q }}&tag=" class="px-2.5 py-1 rounded-full t-code-block t-text-muted font-mono">clear</a>
     </div>
     <div class="t-divide">
       @if(.empty)
       <div class="px-5 py-12 text-center t-text-subtle">No queries recorded. Make some database requests (e.g. visit the Todo demo) to see them here.</div>
       @else
       @each(.entries)
-      <div class="px-5 py-4 t-hover transition">
+      <a href="{{ $.basePath }}/entry/{{ .ID }}" class="block px-5 py-4 t-hover transition">
         <div class="flex items-center gap-2 mb-2">
-          <span class="text-xs font-medium px-2.5 py-1 rounded-full t-accent-bg t-accent">{{ index .Content "duration_ms" }}ms</span>
+          {{ $d := index .Content "duration_ms" }}
+          <span class="text-xs font-medium px-2.5 py-1 rounded-full {{ if and $d (ge $d 100) }}t-status-4xx{{ else }}t-accent-bg t-accent{{ end }}">{{ $d }}ms</span>
           {{ if index .Content "rows" }}<span class="text-xs t-text-subtle">{{ index .Content "rows" }} rows</span>{{ end }}
+          {{ if index .Content "connection" }}<span class="text-xs t-text-subtle font-mono">conn {{ index .Content "connection" }}</span>{{ end }}
+          {{ if index .Content "error" }}<span class="text-xs font-medium px-2.5 py-1 rounded-full t-status-5xx">error</span>{{ end }}
         </div>
         <div class="text-sm t-text-muted font-mono overflow-x-auto whitespace-pre-wrap break-words rounded-lg t-code-block px-4 py-3">{{ index .Content "sql" }}</div>
-      </div>
+        {{ if index .Content "bindings" }}
+        <div class="mt-2 text-xs t-text-subtle font-mono whitespace-pre-wrap break-words">bindings {{ index .Content "bindings" }}</div>
+        {{ end }}
+        {{ if index .Content "error" }}
+        <div class="mt-2 text-xs t-error font-mono whitespace-pre-wrap break-words">{{ index .Content "error" }}</div>
+        {{ end }}
+      </a>
       @endeach
       @endif
     </div>

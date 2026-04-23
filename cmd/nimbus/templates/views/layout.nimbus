@@ -445,7 +445,7 @@
       <div class="footer-inner">
         <p class="footer-text">
           Built with <a href="https://github.com/CodeSyncr/nimbus" target="_blank" rel="noopener">Nimbus</a>
-          · AdonisJS-style framework for Go
+          · Laravel-inspired framework for Go
         </p>
         <div class="footer-links">
           <a href="https://github.com/CodeSyncr/nimbus" target="_blank" rel="noopener">GitHub</a>

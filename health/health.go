@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/CodeSyncr/nimbus/http"
-	"github.com/redis/go-redis/v9"
-	"gorm.io/gorm"
+	"github.com/CodeSyncr/nimbus/redis"
+	"github.com/CodeSyncr/nimbus/lucid"
 )
 
 // Check runs all registered checks and returns status.
@@ -42,7 +42,7 @@ func (c *Checker) Add(name string, fn Check) {
 }
 
 // DB adds a database ping check.
-func (c *Checker) DB(db *gorm.DB) {
+func (c *Checker) DB(db *lucid.DB) {
 	c.Add("database", func(ctx context.Context) error {
 		sqlDB, err := db.DB()
 		if err != nil {

@@ -13,22 +13,29 @@ type ReclaimObserver interface {
 }
 
 func notifyRetried(payload *JobPayload, nextDelay time.Duration) {
-	o := getObserver()
-	ro, ok := o.(RetryObserver)
-	if !ok || payload == nil {
+	if payload == nil {
 		return
 	}
-	ro.JobRetried(payload, nextDelay)
+	observerMu.RLock()
+	list := append([]Observer(nil), observers...)
+	observerMu.RUnlock()
+	for _, o := range list {
+		if ro, ok := o.(RetryObserver); ok {
+			ro.JobRetried(payload, nextDelay)
+		}
+	}
 }
 
 func notifyReclaimed(queue string, count int) {
 	if count <= 0 {
 		return
 	}
-	o := getObserver()
-	ro, ok := o.(ReclaimObserver)
-	if !ok {
-		return
+	observerMu.RLock()
+	list := append([]Observer(nil), observers...)
+	observerMu.RUnlock()
+	for _, o := range list {
+		if ro, ok := o.(ReclaimObserver); ok {
+			ro.JobsReclaimed(queue, count)
+		}
 	}
-	ro.JobsReclaimed(queue, count)
 }

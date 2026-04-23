@@ -1,0 +1,49 @@
+@layout('telescope/layout')
+<div>
+  <h1 class="text-2xl font-bold t-text mb-2">Commands</h1>
+  <div class="t-card rounded-xl overflow-hidden">
+    <div class="px-5 py-4 border-b t-border t-bg-sidebar flex items-center justify-between">
+      <h2 class="font-semibold t-text">CLI commands</h2>
+      <div class="flex items-center gap-3">
+        <form method="GET" class="flex items-center gap-2">
+          <input name="q" value="{{ .q }}" placeholder="Search…" class="text-sm px-3 py-1.5 rounded-lg t-code-block t-text w-56 focus:outline-none" />
+          <input name="tag" value="{{ .tag }}" placeholder="Tag" class="text-sm px-3 py-1.5 rounded-lg t-code-block t-text w-28 focus:outline-none font-mono" />
+          <button type="submit" class="text-sm px-3 py-1.5 rounded-lg t-accent-bg t-accent hover:opacity-90 transition">Go</button>
+        </form>
+        <a href="{{ .basePath }}" class="text-sm t-accent hover:opacity-80 transition">← Dashboard</a>
+      </div>
+    </div>
+    <div class="px-5 py-3 border-b t-border flex flex-wrap gap-2 text-xs">
+      <a href="?q={{ .q }}&tag=error" class="px-2.5 py-1 rounded-full t-accent-bg t-accent font-mono">error ({{ index .tagCounts "error" }})</a>
+      <a href="?q={{ .q }}&tag=" class="px-2.5 py-1 rounded-full t-code-block t-text-muted font-mono">clear</a>
+    </div>
+    <div class="t-divide">
+      @if(.empty)
+      <div class="px-5 py-12 text-center t-text-subtle">No commands recorded yet.</div>
+      @else
+      @each(.entries)
+      <a href="{{ $.basePath }}/entry/{{ .ID }}" class="block px-5 py-4 t-hover transition">
+        <div class="flex items-center justify-between gap-4">
+          <div class="min-w-0">
+            <div class="flex items-center gap-2 mb-1">
+              {{ $ec := index .Content "exit_code" }}
+              <span class="text-xs font-medium px-2.5 py-1 rounded-full {{ if eq $ec 0 }}t-status-2xx{{ else }}t-status-5xx{{ end }} shrink-0">exit {{ $ec }}</span>
+              <span class="t-text-subtle text-xs font-mono shrink-0">{{ .CreatedAt.Format "Jan 02 15:04:05" }}</span>
+              <span class="t-text-subtle text-xs font-mono">dur {{ index .Content "duration_ms" }}ms</span>
+            </div>
+            <div class="t-text font-mono text-sm break-all">{{ index .Content "command" }}</div>
+            @if(index .Content "args")
+            <div class="t-text-subtle text-xs font-mono whitespace-pre-wrap break-words mt-1">args {{ index .Content "args" }}</div>
+            @endif
+            @if(index .Content "error")
+            <div class="mt-2 text-xs t-error font-mono whitespace-pre-wrap break-words">{{ index .Content "error" }}</div>
+            @endif
+          </div>
+        </div>
+      </a>
+      @endeach
+      @endif
+    </div>
+  </div>
+</div>
+

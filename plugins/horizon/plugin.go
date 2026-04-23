@@ -26,7 +26,7 @@ import (
 	"github.com/CodeSyncr/nimbus/metrics"
 	"github.com/CodeSyncr/nimbus/queue"
 	"github.com/CodeSyncr/nimbus/view"
-	"github.com/redis/go-redis/v9"
+	"github.com/CodeSyncr/nimbus/redis"
 )
 
 var (
@@ -107,7 +107,7 @@ func NewWithOptions(opts Options) *Plugin {
 // Register registers the plugin views, queue observer, and optional failed job store.
 func (p *Plugin) Register(app *nimbus.App) error {
 	view.RegisterPluginViews("horizon", p.ViewsFS())
-	queue.SetObserver(p.stats)
+	queue.AddObserver(p.stats)
 	if p.failed != nil {
 		queue.SetFailedJobStore(p.failed)
 	}

@@ -7,7 +7,7 @@ import (
 
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
-	"gorm.io/gorm"
+	"github.com/CodeSyncr/nimbus/lucid"
 )
 
 // CreateConfig holds the minimal information needed to create a database
@@ -56,7 +56,7 @@ func createPostgresDatabase(cfg CreateConfig) error {
 		dsn += fmt.Sprintf(" password=%s", cfg.Password)
 	}
 
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	db, err := lucid.Open(postgres.Open(dsn), &lucid.Config{})
 	if err != nil {
 		return err
 	}
@@ -96,7 +96,7 @@ func createMySQLDatabase(cfg CreateConfig) error {
 	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/?charset=utf8mb4&parseTime=True&multiStatements=true",
 		cfg.User, cfg.Password, host, port)
 
-	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
+	db, err := lucid.Open(mysql.Open(dsn), &lucid.Config{})
 	if err != nil {
 		return err
 	}

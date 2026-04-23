@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"reflect"
+	"runtime"
 	"strings"
 
 	"github.com/CodeSyncr/nimbus/http"
@@ -38,6 +40,7 @@ func New() *Router {
 // Use adds global middleware (like AdonisJS start/kernel).
 func (r *Router) Use(m ...Middleware) {
 	r.middlewares = append(r.middlewares, m...)
+	r.remountFallback()
 }
 
 // Group returns a group that shares a path prefix and optional middleware.
@@ -114,12 +117,20 @@ func (r *Router) Mount(path string, handler http.Handler) {
 //	})
 func (r *Router) Fallback(handler HandlerFunc) {
 	r.fallbackHandler = handler
-	r.chi.NotFound(func(w http.ResponseWriter, req *http.Request) {
-		ctx := http.New(w, req, nil)
-		if err := handler(ctx); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-		}
-	})
+	r.remountFallback()
+}
+
+// remountFallback wires the NotFound handler through the same global middleware
+// stack as normal routes so errors.Handler, Recover, etc. apply to 404s.
+func (r *Router) remountFallback() {
+	if r.fallbackHandler == nil {
+		return
+	}
+	chain := r.fallbackHandler
+	for i := len(r.middlewares) - 1; i >= 0; i-- {
+		chain = r.middlewares[i](chain)
+	}
+	r.chi.NotFound(toHandler(chain))
 }
 
 // URL generates a URL for a named route, substituting params.
@@ -157,7 +168,27 @@ func pathToChi(path string) string {
 
 func (r *Router) addRoute(method, path string, handler HandlerFunc, groupMiddleware []Middleware) *Route {
 	chiPath := pathToChi(path)
+
+	// Capture metadata for Telescope / debugging.
+	handlerName := funcName(handler)
+	mwNames := make([]string, 0, len(r.middlewares)+len(groupMiddleware))
+	for _, mw := range r.middlewares {
+		if n := middlewareName(mw); n != "" {
+			mwNames = append(mwNames, n)
+		} else {
+			mwNames = append(mwNames, funcName(mw))
+		}
+	}
+	for _, mw := range groupMiddleware {
+		if n := middlewareName(mw); n != "" {
+			mwNames = append(mwNames, n)
+		} else {
+			mwNames = append(mwNames, funcName(mw))
+		}
+	}
+
 	chain := handler
+	chain = withRouteMeta(method, path, handlerName, mwNames, chain)
 	for i := len(groupMiddleware) - 1; i >= 0; i-- {
 		chain = groupMiddleware[i](chain)
 	}
@@ -184,6 +215,32 @@ func (r *Router) addRoute(method, path string, handler HandlerFunc, groupMiddlew
 	rt := &Route{router: r, method: method, path: path}
 	r.allRoutes = append(r.allRoutes, rt)
 	return rt
+}
+
+func withRouteMeta(method, path, handlerName string, middleware []string, next HandlerFunc) HandlerFunc {
+	return func(c *http.Context) error {
+		if c != nil {
+			c.Set("route_method", method)
+			c.Set("route_path", path)
+			c.Set("route_handler", handlerName)
+			c.Set("route_middleware", middleware)
+		}
+		return next(c)
+	}
+}
+
+func funcName(v any) string {
+	if v == nil {
+		return ""
+	}
+	p := reflect.ValueOf(v).Pointer()
+	if p == 0 {
+		return ""
+	}
+	if fn := runtime.FuncForPC(p); fn != nil {
+		return fn.Name()
+	}
+	return ""
 }
 
 // Routes returns all registered routes.

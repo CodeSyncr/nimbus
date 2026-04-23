@@ -1,11 +1,40 @@
 @layout('horizon/layout')
 <div class="space-y-8">
   <p class="t-text-muted text-sm max-w-2xl">
-    Jobs marked as silenced are hidden from the main completed list. Configure silenced job classes in Horizon config.
+    Silenced jobs are an operational policy layer. This page shows current queue activity so you can decide which job classes to silence in your Horizon config.
   </p>
-  <div class="t-card rounded-xl p-12 text-center t-text-subtle">
-    <svg class="w-12 h-12 mx-auto mb-4 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/><path stroke-linecap="round" stroke-linejoin="round" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2"/></svg>
-    <p class="font-medium t-text mb-1">Silenced jobs</p>
-    <p class="text-sm">Silenced jobs list will be available in a future release.</p>
+
+  <div class="t-card rounded-xl p-6">
+    <h3 class="font-medium t-text mb-2">How to silence jobs</h3>
+    <p class="t-text-subtle text-sm">Add job class names under your Horizon configuration and keep high-volume low-signal jobs out of your primary completed stream.</p>
+  </div>
+
+  <div class="t-card rounded-xl overflow-hidden">
+    <div class="px-5 py-4 border-b t-border t-bg-sidebar">
+      <span class="font-medium t-text">Current queue candidates</span>
+      <span class="text-xs t-text-subtle ml-2">Queues with high dispatch and low failure are common silencing candidates.</span>
+    </div>
+    <div class="divide-y t-divide">
+      @if(.hasQueues)
+      <div class="px-5 py-3 text-xs font-semibold t-text-subtle grid grid-cols-5 gap-4">
+        <div>Queue</div>
+        <div class="text-right">Dispatched</div>
+        <div class="text-right">Processed</div>
+        <div class="text-right">Failed</div>
+        <div class="text-right">Retry + Reclaim</div>
+      </div>
+      @each(.queues)
+      <div class="px-5 py-3 grid grid-cols-5 gap-4 items-center text-sm">
+        <div class="font-mono t-text">{{ index . "name" }}</div>
+        <div class="text-right t-text">{{ index . "dispatched" }}</div>
+        <div class="text-right t-text">{{ index . "processed" }}</div>
+        <div class="text-right {{ if index . "failed" }}text-red-600 dark:text-red-400{{ else }}t-text{{ end }}">{{ index . "failed" }}</div>
+        <div class="text-right t-text-subtle">{{ index . "retried" }} / {{ index . "reclaimed" }}</div>
+      </div>
+      @endeach
+      @else
+      <div class="px-5 py-12 text-center t-text-subtle text-sm">No queue activity yet.</div>
+      @endif
+    </div>
   </div>
 </div>

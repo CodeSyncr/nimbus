@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
+	"github.com/CodeSyncr/nimbus/lucid"
+	lucidlog "github.com/CodeSyncr/nimbus/lucid/logger"
 )
 
 const (
@@ -25,8 +25,8 @@ const (
 // Migration runs a single migration (Up/Down).
 type Migration struct {
 	Name string
-	Up   func(*gorm.DB) error
-	Down func(*gorm.DB) error
+	Up   func(*lucid.DB) error
+	Down func(*lucid.DB) error
 	// NonTransactional disables transaction wrapping for this migration.
 	// Useful for DDL operations that cannot run inside a transaction.
 	NonTransactional bool
@@ -34,22 +34,35 @@ type Migration struct {
 
 // Migrator runs migrations from a directory or list (AdonisJS database/migrations).
 type Migrator struct {
-	db     *gorm.DB
+	db     *lucid.DB
 	run    []Migration
 	sorted []Migration
 }
 
 // NewMigrator creates a migrator with the given migrations.
-func NewMigrator(db *gorm.DB, migrations []Migration) *Migrator {
+func NewMigrator(db *lucid.DB, migrations []Migration) *Migrator {
 	// Use a quiet logger so nimbus db:migrate does not spam low-level SQL logs.
-	quietDB := db.Session(&gorm.Session{
-		Logger: logger.Default.LogMode(logger.Error),
+	quietDB := db.Session(&lucid.Session{
+		Logger: lucidlog.Default.LogMode(lucidlog.Error),
 	})
 	m := &Migrator{db: quietDB, run: migrations}
 	m.sorted = make([]Migration, len(migrations))
 	copy(m.sorted, migrations)
 	sort.Slice(m.sorted, func(i, j int) bool { return m.sorted[i].Name < m.sorted[j].Name })
 	return m
+}
+
+// dropTableSQL returns a DROP TABLE statement safe for the given dialect.
+func dropTableSQL(dialect, table string) string {
+	switch dialect {
+	case "postgres":
+		// Quote identifiers for safety; CASCADE for dependent objects.
+		return fmt.Sprintf(`DROP TABLE IF EXISTS "%s" CASCADE`, strings.ReplaceAll(table, `"`, `""`))
+	case "mysql":
+		return fmt.Sprintf("DROP TABLE IF EXISTS `%s`", strings.ReplaceAll(table, "`", "``"))
+	default: // sqlite and others
+		return fmt.Sprintf("DROP TABLE IF EXISTS `%s`", strings.ReplaceAll(table, "`", "``"))
+	}
 }
 
 func (m *Migrator) ensureSchemaMigrations() error {
@@ -59,14 +72,14 @@ func (m *Migrator) ensureSchemaMigrations() error {
 			id BIGSERIAL PRIMARY KEY,
 			name TEXT UNIQUE,
 			batch INT NOT NULL,
-			migration_time TIMESTAMP NOT NULL
+			migration_time TIMESTAMPTZ NOT NULL
 		)`).Error
 	case "mysql":
 		return m.db.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
 			id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
 			name VARCHAR(255) UNIQUE,
 			batch INT NOT NULL,
-			migration_time TIMESTAMP NOT NULL
+			migration_time DATETIME(6) NOT NULL
 		)`).Error
 	default: // sqlite and others
 		return m.db.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -88,7 +101,7 @@ func (m *Migrator) recordMigration(name string, batch int) error {
 	return m.recordMigrationWithDB(m.db, name, batch)
 }
 
-func (m *Migrator) recordMigrationWithDB(db *gorm.DB, name string, batch int) error {
+func (m *Migrator) recordMigrationWithDB(db *lucid.DB, name string, batch int) error {
 	return db.Exec(
 		"INSERT INTO schema_migrations (name, batch, migration_time) VALUES (?, ?, ?)",
 		name,
@@ -97,7 +110,7 @@ func (m *Migrator) recordMigrationWithDB(db *gorm.DB, name string, batch int) er
 	).Error
 }
 
-func (m *Migrator) deleteMigrationRecordWithDB(db *gorm.DB, name string) error {
+func (m *Migrator) deleteMigrationRecordWithDB(db *lucid.DB, name string) error {
 	return db.Exec("DELETE FROM schema_migrations WHERE name = ?", name).Error
 }
 
@@ -142,7 +155,7 @@ func (m *Migrator) Up() error {
 		}
 		useTx := supportsTransactionalDDL(m.db.Dialector.Name()) && !mig.NonTransactional
 		if useTx {
-			err = m.db.Transaction(func(tx *gorm.DB) error {
+			err = m.db.Transaction(func(tx *lucid.DB) error {
 				if err := mig.Up(tx); err != nil {
 					return err
 				}
@@ -205,7 +218,7 @@ func (m *Migrator) Down() error {
 		}
 		useTx := supportsTransactionalDDL(m.db.Dialector.Name()) && !mig.NonTransactional
 		if useTx {
-			err := m.db.Transaction(func(tx *gorm.DB) error {
+			err := m.db.Transaction(func(tx *lucid.DB) error {
 				if err := mig.Down(tx); err != nil {
 					return err
 				}
@@ -230,7 +243,7 @@ func (m *Migrator) Down() error {
 // RunMigrationsFromDir discovers Go files in dir and runs Up on a migrator.
 // Convention: each file defines a Migration and registers via RegisterMigration.
 // This is a placeholder; real usage would use go:generate or a separate migration runner.
-func RunMigrationsFromDir(db *gorm.DB, dir string) error {
+func RunMigrationsFromDir(db *lucid.DB, dir string) error {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return err
@@ -242,7 +255,7 @@ func RunMigrationsFromDir(db *gorm.DB, dir string) error {
 		}
 		// In practice, load migrations from build tags or a registry.
 		_ = filepath.Join(dir, e.Name())
-		list = append(list, Migration{Name: e.Name(), Up: func(*gorm.DB) error { return nil }, Down: func(*gorm.DB) error { return nil }})
+		list = append(list, Migration{Name: e.Name(), Up: func(*lucid.DB) error { return nil }, Down: func(*lucid.DB) error { return nil }})
 	}
 	NewMigrator(db, list).Up()
 	return nil
@@ -272,9 +285,10 @@ func (m *Migrator) Fresh() error {
 		}
 	}
 
-	// Drop all tables.
+	// Drop all tables (dialect-specific: SQLite does not support CASCADE on DROP TABLE).
 	for _, table := range tables {
-		if err := m.db.Exec(fmt.Sprintf("DROP TABLE IF EXISTS %q CASCADE", table)).Error; err != nil {
+		drop := dropTableSQL(m.db.Dialector.Name(), table)
+		if err := m.db.Exec(drop).Error; err != nil {
 			fmt.Fprintf(os.Stdout, "  %sdrop %s failed%s\n", colorRed, table, colorReset)
 		} else {
 			fmt.Fprintf(os.Stdout, "  %s%s dropped %s%s\n", colorYellow, crossMark, table, colorReset)

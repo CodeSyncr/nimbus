@@ -4,15 +4,15 @@ import (
 	"log"
 	"os"
 
+	"github.com/CodeSyncr/nimbus/lucid"
+	lucidlog "github.com/CodeSyncr/nimbus/lucid/logger"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlite"
-	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
 )
 
 // DB is the global GORM instance (AdonisJS Lucid-style; in production use DI).
-var DB *gorm.DB
+var DB *lucid.DB
 
 // ConnectConfig holds options for Connect.
 type ConnectConfig struct {
@@ -20,16 +20,19 @@ type ConnectConfig struct {
 	DSN    string
 	// Debug enables SQL logging (pretty-print in development).
 	Debug bool
+	PoolConfig
 }
 
 // Connect opens a connection based on driver and DSN (from config).
-func Connect(driver, dsn string) (*gorm.DB, error) {
+func Connect(driver, dsn string) (*lucid.DB, error) {
 	return ConnectWithConfig(ConnectConfig{Driver: driver, DSN: dsn})
 }
 
-// ConnectWithConfig opens a connection with full config.
-func ConnectWithConfig(cfg ConnectConfig) (*gorm.DB, error) {
-	var dialector gorm.Dialector
+// openConnection opens GORM without mutating the package-global DB.
+// Use ConnectWithConfig for the default connection; ConnectAll uses this
+// so each iteration does not overwrite DB before AddConnection runs.
+func openConnection(cfg ConnectConfig) (*lucid.DB, error) {
+	var dialector lucid.Dialector
 	switch cfg.Driver {
 	case "postgres", "pg":
 		dialector = postgres.Open(cfg.DSN)
@@ -41,12 +44,12 @@ func ConnectWithConfig(cfg ConnectConfig) (*gorm.DB, error) {
 		dialector = sqlite.Open(cfg.DSN)
 	}
 
-	gormConfig := &gorm.Config{}
+	gormConfig := &lucid.Config{}
 	if cfg.Debug || os.Getenv("APP_ENV") == "development" {
-		gormConfig.Logger = logger.Default.LogMode(logger.Info)
+		gormConfig.Logger = lucidlog.Default.LogMode(lucidlog.Info)
 	}
 
-	db, err := gorm.Open(dialector, gormConfig)
+	db, err := lucid.Open(dialector, gormConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -54,12 +57,26 @@ func ConnectWithConfig(cfg ConnectConfig) (*gorm.DB, error) {
 	// Register the Nimbus events plugin to broadcast DB operations
 	_ = db.Use(&eventPlugin{})
 
+	if err := ApplyPool(db, cfg.PoolConfig); err != nil {
+		return nil, err
+	}
+
+	return db, nil
+}
+
+// ConnectWithConfig opens a connection with full config and sets the
+// package-global DB to this handle.
+func ConnectWithConfig(cfg ConnectConfig) (*lucid.DB, error) {
+	db, err := openConnection(cfg)
+	if err != nil {
+		return nil, err
+	}
 	DB = db
 	return db, nil
 }
 
 // Get returns the global DB (panic if not connected).
-func Get() *gorm.DB {
+func Get() *lucid.DB {
 	return DB
 }
 

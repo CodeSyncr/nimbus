@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 )
 
 // defaultFuncs returns Edge-style template helpers (raw, dump, dict, slot).
@@ -100,6 +101,7 @@ func New(root string, funcs template.FuncMap) *Engine {
 
 // Render renders the named view (e.g. "home" -> views/home.nimbus) with data. Supports @layout('layout') like Edge.
 func (e *Engine) Render(name string, data any) (string, error) {
+	start := time.Now()
 	t, err := e.parse(name)
 	if err != nil {
 		return "", err
@@ -118,7 +120,14 @@ func (e *Engine) Render(name string, data any) (string, error) {
 		}
 		layoutData["embed"] = template.HTML(body)
 		layoutData["content"] = template.HTML(body)
-		return e.Render(layoutName, layoutData)
+		out, err := e.Render(layoutName, layoutData)
+		if err == nil && OnRendered != nil {
+			OnRendered(name, time.Since(start), data)
+		}
+		return out, err
+	}
+	if OnRendered != nil {
+		OnRendered(name, time.Since(start), data)
 	}
 	return body, nil
 }
@@ -422,6 +431,14 @@ var (
 	pluginViewsMu sync.RWMutex
 )
 
+var (
+	defaultFuncsMu sync.RWMutex
+)
+
+// OnRendered is called after a successful template render (name, duration, data).
+// Telescope sets this in Register; optional for apps.
+var OnRendered func(name string, duration time.Duration, data any)
+
 func init() {
 	// Prefer the modern resources/views convention when present.
 	if _, err := os.Stat("resources/views"); err == nil {
@@ -440,6 +457,50 @@ func init() {
 // SetRoot sets the default engine root and clears cache.
 func SetRoot(root string) {
 	Default = New(root, Default.funcs)
+}
+
+// RegisterFunc registers a global template function on the default view engine.
+// This is intended for plugins (e.g. Livewire) that need to expose helpers like
+// livewireStyles/livewireScripts without requiring apps to wire view engines manually.
+//
+// It rebuilds the default engine to ensure the func map is applied consistently.
+func RegisterFunc(name string, fn any) {
+	if name == "" || fn == nil {
+		return
+	}
+	defaultFuncsMu.Lock()
+	defer defaultFuncsMu.Unlock()
+	if Default == nil {
+		Default = New("resources/views", nil)
+	}
+	funcs := template.FuncMap{}
+	for k, v := range Default.funcs {
+		funcs[k] = v
+	}
+	funcs[name] = fn
+	Default = New(Default.root, funcs)
+}
+
+// RegisterFuncs registers multiple global template functions on the default view engine.
+func RegisterFuncs(funcs template.FuncMap) {
+	if len(funcs) == 0 {
+		return
+	}
+	defaultFuncsMu.Lock()
+	defer defaultFuncsMu.Unlock()
+	if Default == nil {
+		Default = New("resources/views", nil)
+	}
+	merged := template.FuncMap{}
+	for k, v := range Default.funcs {
+		merged[k] = v
+	}
+	for k, v := range funcs {
+		if k != "" && v != nil {
+			merged[k] = v
+		}
+	}
+	Default = New(Default.root, merged)
 }
 
 // RegisterPluginViews registers an embedded FS for views under the given prefix.

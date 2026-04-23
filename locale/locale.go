@@ -49,6 +49,16 @@ func T(key string, args ...any) string {
 	return TLocale(defaultLocale, key, args...)
 }
 
+// TCtx uses the locale from ctx (set by locale.Middleware or WithLocale).
+// Falls back to the default locale when ctx has no locale.
+func TCtx(ctx context.Context, key string, args ...any) string {
+	loc := FromContext(ctx)
+	if loc == "" {
+		loc = defaultLocale
+	}
+	return TLocale(loc, key, args...)
+}
+
 // TLocale returns the translated string for key in the given locale.
 func TLocale(loc, key string, args ...any) string {
 	mu.RLock()

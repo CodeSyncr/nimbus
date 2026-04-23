@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	"gorm.io/gorm"
+	"github.com/CodeSyncr/nimbus/lucid"
 )
 
 // ── Database Transaction Per Test ───────────────────────────────
@@ -21,7 +21,7 @@ import (
 //	    tx.Create(&User{Name: "Alice"})
 //	    // transaction is automatically rolled back when test ends
 //	}
-func RefreshDatabase(t testing.TB, db *gorm.DB) *gorm.DB {
+func RefreshDatabase(t testing.TB, db *lucid.DB) *lucid.DB {
 	t.Helper()
 	tx := db.Begin()
 	if tx.Error != nil {
@@ -35,7 +35,7 @@ func RefreshDatabase(t testing.TB, db *gorm.DB) *gorm.DB {
 
 // TruncateTables truncates the given table names. Useful for test setup
 // when RefreshDatabase (transaction-per-test) is not suitable.
-func TruncateTables(db *gorm.DB, tables ...string) error {
+func TruncateTables(db *lucid.DB, tables ...string) error {
 	for _, table := range tables {
 		if err := db.Exec("TRUNCATE TABLE " + table + " CASCADE").Error; err != nil {
 			// Fall back to DELETE for databases not supporting TRUNCATE CASCADE.
@@ -48,8 +48,8 @@ func TruncateTables(db *gorm.DB, tables ...string) error {
 }
 
 // SeedDatabase runs a seeder function within test scope.
-// The seeder receives a *gorm.DB (which could be a transaction).
-func SeedDatabase(db *gorm.DB, seeder func(db *gorm.DB) error) error {
+// The seeder receives a *lucid.DB (which could be a transaction).
+func SeedDatabase(db *lucid.DB, seeder func(db *lucid.DB) error) error {
 	return seeder(db)
 }
 
@@ -59,7 +59,7 @@ func SeedDatabase(db *gorm.DB, seeder func(db *gorm.DB) error) error {
 // in the specified table. Conditions is a map[string]any of column=value pairs.
 //
 //	nimbustesting.AssertDatabaseHas(t, db, "users", map[string]any{"email": "alice@example.com"})
-func AssertDatabaseHas(t testing.TB, db *gorm.DB, table string, conditions map[string]any) {
+func AssertDatabaseHas(t testing.TB, db *lucid.DB, table string, conditions map[string]any) {
 	t.Helper()
 	var count int64
 	q := db.Table(table)
@@ -78,7 +78,7 @@ func AssertDatabaseHas(t testing.TB, db *gorm.DB, table string, conditions map[s
 // exists in the specified table.
 //
 //	nimbustesting.AssertDatabaseMissing(t, db, "users", map[string]any{"email": "deleted@example.com"})
-func AssertDatabaseMissing(t testing.TB, db *gorm.DB, table string, conditions map[string]any) {
+func AssertDatabaseMissing(t testing.TB, db *lucid.DB, table string, conditions map[string]any) {
 	t.Helper()
 	var count int64
 	q := db.Table(table)
@@ -97,7 +97,7 @@ func AssertDatabaseMissing(t testing.TB, db *gorm.DB, table string, conditions m
 //
 //	nimbustesting.AssertDatabaseCount(t, db, "users", 5, nil)
 //	nimbustesting.AssertDatabaseCount(t, db, "users", 2, map[string]any{"role": "admin"})
-func AssertDatabaseCount(t testing.TB, db *gorm.DB, table string, expected int64, conditions map[string]any) {
+func AssertDatabaseCount(t testing.TB, db *lucid.DB, table string, expected int64, conditions map[string]any) {
 	t.Helper()
 	var count int64
 	q := db.Table(table)
@@ -114,7 +114,7 @@ func AssertDatabaseCount(t testing.TB, db *gorm.DB, table string, expected int64
 
 // AssertSoftDeleted asserts that a soft-deleted record exists in the table
 // (i.e., deleted_at IS NOT NULL).
-func AssertSoftDeleted(t testing.TB, db *gorm.DB, table string, conditions map[string]any) {
+func AssertSoftDeleted(t testing.TB, db *lucid.DB, table string, conditions map[string]any) {
 	t.Helper()
 	var count int64
 	q := db.Table(table).Where("deleted_at IS NOT NULL")
@@ -130,7 +130,7 @@ func AssertSoftDeleted(t testing.TB, db *gorm.DB, table string, conditions map[s
 }
 
 // AssertNotSoftDeleted asserts that a record exists and is NOT soft-deleted.
-func AssertNotSoftDeleted(t testing.TB, db *gorm.DB, table string, conditions map[string]any) {
+func AssertNotSoftDeleted(t testing.TB, db *lucid.DB, table string, conditions map[string]any) {
 	t.Helper()
 	var count int64
 	q := db.Table(table).Where("deleted_at IS NULL")
@@ -146,7 +146,7 @@ func AssertNotSoftDeleted(t testing.TB, db *gorm.DB, table string, conditions ma
 }
 
 // AssertModelExists asserts that the given GORM model exists in the database.
-func AssertModelExists(t testing.TB, db *gorm.DB, model any) {
+func AssertModelExists(t testing.TB, db *lucid.DB, model any) {
 	t.Helper()
 	result := db.First(model)
 	if result.Error != nil {
@@ -155,7 +155,7 @@ func AssertModelExists(t testing.TB, db *gorm.DB, model any) {
 }
 
 // AssertModelMissing asserts that the given GORM model does NOT exist.
-func AssertModelMissing(t testing.TB, db *gorm.DB, model any) {
+func AssertModelMissing(t testing.TB, db *lucid.DB, model any) {
 	t.Helper()
 	result := db.First(model)
 	if result.Error == nil {

@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/CodeSyncr/nimbus/http"
+	"github.com/CodeSyncr/nimbus/redis"
 	"github.com/CodeSyncr/nimbus/router"
-	"github.com/redis/go-redis/v9"
 )
 
 // RateLimitRedis returns middleware that rate-limits using Redis (suitable for multi-instance).

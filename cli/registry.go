@@ -29,9 +29,21 @@ type CommandWithArgs interface {
 
 var registry []Command
 
+// RootAttach is called after flat commands are registered; use it to add
+// nested commands (e.g. `nimbus plugin install` under `nimbus plugin`).
+type RootAttach func(root *cobra.Command)
+
+var rootAttach []RootAttach
+
 // RegisterCommand adds a command to the global CLI registry. Framework
 // code and user applications can call this from init() to auto-register
 // commands before the root executes.
 func RegisterCommand(c Command) {
 	registry = append(registry, c)
+}
+
+// RegisterRootAttach registers a function that attaches nested commands to
+// the CLI root. Called once during Execute, after all RegisterCommand hooks.
+func RegisterRootAttach(fn RootAttach) {
+	rootAttach = append(rootAttach, fn)
 }

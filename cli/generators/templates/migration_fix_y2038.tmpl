@@ -1,0 +1,37 @@
+package migrations
+
+import (
+	"github.com/CodeSyncr/nimbus"
+)
+
+// {{.SchemaName}} migration (auto-generated Y2038 fix).
+//
+// Converts MySQL TIMESTAMP columns to DATETIME(6) (Y2038-safe).
+// Review defaults/ON UPDATE clauses before applying in production.
+type {{.SchemaName}} struct{}
+
+func (m *{{.SchemaName}}) TableName() string { return "{{.MigrationName}}" }
+
+func (m *{{.SchemaName}}) Up(db *nimbus.DB) error {
+	stmts := []string{
+		{{- range .Statements }}
+		{{ . }},
+		{{- end }}
+	}
+	for _, stmt := range stmts {
+		if stmt == "" {
+			continue
+		}
+		if err := db.Exec(stmt).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (m *{{.SchemaName}}) Down(db *nimbus.DB) error {
+	// Intentionally left as a no-op. Converting DATETIME back to TIMESTAMP is not recommended.
+	_ = db
+	return nil
+}
+

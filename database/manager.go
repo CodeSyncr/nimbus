@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sync"
 
-	"gorm.io/gorm"
+	"github.com/CodeSyncr/nimbus/lucid"
 )
 
 // ══════════════════════════════════════════════════════════════════
@@ -29,7 +29,7 @@ import (
 // ConnectionManager manages named database connections.
 type ConnectionManager struct {
 	mu          sync.RWMutex
-	connections map[string]*gorm.DB
+	connections map[string]*lucid.DB
 	defaultName string
 }
 
@@ -42,7 +42,7 @@ var (
 func getManager() *ConnectionManager {
 	managerOnce.Do(func() {
 		manager = &ConnectionManager{
-			connections: make(map[string]*gorm.DB),
+			connections: make(map[string]*lucid.DB),
 			defaultName: "default",
 		}
 	})
@@ -51,7 +51,7 @@ func getManager() *ConnectionManager {
 
 // AddConnection registers a named database connection.
 // The first connection registered is also set as the global DB.
-func AddConnection(name string, db *gorm.DB) {
+func AddConnection(name string, db *lucid.DB) {
 	m := getManager()
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -66,7 +66,7 @@ func AddConnection(name string, db *gorm.DB) {
 
 // Connection returns a named database connection.
 // Returns nil if the connection name is not registered.
-func Connection(name string) *gorm.DB {
+func Connection(name string) *lucid.DB {
 	m := getManager()
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -74,12 +74,22 @@ func Connection(name string) *gorm.DB {
 }
 
 // MustConnection returns a named connection or panics if not found.
-func MustConnection(name string) *gorm.DB {
-	db := Connection(name)
-	if db == nil {
-		panic(fmt.Sprintf("database: connection %q not registered", name))
+func MustConnection(name string) *lucid.DB {
+	db, err := RequireConnection(name)
+	if err != nil {
+		panic(err.Error())
 	}
 	return db
+}
+
+// RequireConnection returns a named connection or an error if not found.
+// Prefer this in runtime paths where panic is undesirable.
+func RequireConnection(name string) (*lucid.DB, error) {
+	db := Connection(name)
+	if db == nil {
+		return nil, fmt.Errorf("database: connection %q not registered", name)
+	}
+	return db, nil
 }
 
 // SetDefault sets which named connection is the "default" one
@@ -128,7 +138,7 @@ func CloseAll() error {
 			lastErr = fmt.Errorf("database: close %q: %w", name, err)
 		}
 	}
-	m.connections = make(map[string]*gorm.DB)
+	m.connections = make(map[string]*lucid.DB)
 	DB = nil
 	return lastErr
 }
@@ -149,36 +159,20 @@ type ConnectionConfig struct {
 	// Debug enables SQL logging.
 	Debug bool
 
-	// MaxOpenConns sets the max number of open connections (0 = unlimited).
-	MaxOpenConns int
-
-	// MaxIdleConns sets the max number of idle connections.
-	MaxIdleConns int
+	PoolConfig
 }
 
 // ConnectAll establishes multiple database connections from config.
 func ConnectAll(configs []ConnectionConfig) error {
 	for _, cfg := range configs {
-		db, err := ConnectWithConfig(ConnectConfig{
-			Driver: cfg.Driver,
-			DSN:    cfg.DSN,
-			Debug:  cfg.Debug,
+		db, err := openConnection(ConnectConfig{
+			Driver:     cfg.Driver,
+			DSN:        cfg.DSN,
+			Debug:      cfg.Debug,
+			PoolConfig: cfg.PoolConfig,
 		})
 		if err != nil {
 			return fmt.Errorf("database: connect %q: %w", cfg.Name, err)
-		}
-
-		// Configure connection pool
-		if cfg.MaxOpenConns > 0 || cfg.MaxIdleConns > 0 {
-			sqlDB, err := db.DB()
-			if err == nil {
-				if cfg.MaxOpenConns > 0 {
-					sqlDB.SetMaxOpenConns(cfg.MaxOpenConns)
-				}
-				if cfg.MaxIdleConns > 0 {
-					sqlDB.SetMaxIdleConns(cfg.MaxIdleConns)
-				}
-			}
 		}
 
 		name := cfg.Name
@@ -199,7 +193,7 @@ func On(connectionName string) *Query {
 	db := Connection(connectionName)
 	if db == nil {
 		// Return a query that will fail gracefully
-		return &Query{db: &gorm.DB{}}
+		return &Query{db: &lucid.DB{}}
 	}
 	return &Query{db: db}
 }
@@ -210,7 +204,7 @@ func On(connectionName string) *Query {
 func OnModel(connectionName string, model any) *Query {
 	db := Connection(connectionName)
 	if db == nil {
-		return &Query{db: &gorm.DB{}}
+		return &Query{db: &lucid.DB{}}
 	}
 	return &Query{db: db.Model(model)}
 }

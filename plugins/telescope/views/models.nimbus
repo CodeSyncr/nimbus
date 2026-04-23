@@ -4,7 +4,7 @@
   <div class="t-card rounded-xl overflow-hidden">
     <div class="px-5 py-4 border-b t-border t-bg-sidebar flex items-center justify-between">
       <h2 class="font-semibold t-text">Model Events</h2>
-      <a href="/telescope" class="text-sm t-accent hover:opacity-80 transition">← Dashboard</a>
+      <a href="{{ .basePath }}" class="text-sm t-accent hover:opacity-80 transition">← Dashboard</a>
     </div>
     <div class="t-divide">
       @if(.empty)

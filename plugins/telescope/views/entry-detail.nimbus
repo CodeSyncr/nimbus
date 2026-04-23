@@ -1,0 +1,55 @@
+@layout('telescope/layout')
+<div class="detail-panel">
+  <div style="display:flex; flex-direction:column; height:100%; overflow:hidden;">
+      <div class="detail-header">
+        <div class="detail-title-row">
+          <span class="method-badge" style="background: var(--accent-dim); color: var(--accent);">{{ .entry.Type }}</span>
+          <span class="detail-path">{{ .entry.ID }}</span>
+          <span class="status-code detail-status mono">{{ .entry.CreatedAt.Format "Jan 02 15:04:05" }}</span>
+        </div>
+        <div class="detail-meta-row">
+          <div class="detail-meta-item">
+            <span class="detail-meta-label">back</span>
+            <span class="detail-meta-val"><a style="color: var(--accent); text-decoration:none;" href="{{ .basePath }}">dashboard</a></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="detail-tabs">
+        <div class="detail-tab active" onclick="setTab(this,'overview')">Overview</div>
+        <div class="detail-tab" onclick="setTab(this,'json')">JSON</div>
+      </div>
+
+      <div class="detail-body">
+        <div class="tab-content active" id="tab-overview">
+          <div class="detail-section">
+            <div class="detail-section-title">Content</div>
+            <div class="kv-row-wrap">
+              <table class="kv-table">
+                @range $k, $v := .entry.Content
+                <tr><td>{{ $k }}</td><td>{{ $v }}</td></tr>
+                @endrange
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div class="tab-content" id="tab-json">
+          <div class="detail-section">
+            <div class="detail-section-title">Raw</div>
+            <div class="code-block">{{ .entryJSON }}</div>
+          </div>
+        </div>
+      </div>
+  </div>
+</div>
+
+<script>
+  function setTab(el, name) {
+    document.querySelectorAll('.detail-tab').forEach(t => t.classList.remove('active'));
+    el.classList.add('active');
+    document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+    var p = document.getElementById('tab-' + name);
+    if (p) p.classList.add('active');
+  }
+</script>

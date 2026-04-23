@@ -3,6 +3,7 @@ package http
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html"
 	"html/template"
@@ -80,11 +81,21 @@ func (c *Context) Get(key string) (any, bool) {
 
 // MustGet retrieves a value or panics if not found.
 func (c *Context) MustGet(key string) any {
-	v, ok := c.Get(key)
-	if !ok {
-		panic("nimbus: context key \"" + key + "\" not found")
+	v, err := c.Require(key)
+	if err != nil {
+		panic(err.Error())
 	}
 	return v
+}
+
+// Require retrieves a stored value or returns an error when missing.
+// Prefer this in runtime code paths where panics are undesirable.
+func (c *Context) Require(key string) (any, error) {
+	v, ok := c.Get(key)
+	if !ok {
+		return nil, errors.New("nimbus: context key \"" + key + "\" not found")
+	}
+	return v, nil
 }
 
 // New creates a new request context.

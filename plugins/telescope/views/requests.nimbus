@@ -1,24 +1,365 @@
 @layout('telescope/layout')
-<div>
-  <h1 class="text-2xl font-bold t-text mb-2">Requests</h1>
-  <div class="t-card rounded-xl overflow-hidden">
-    <div class="px-5 py-4 border-b t-border t-bg-sidebar flex items-center justify-between">
-      <h2 class="font-semibold t-text">HTTP Requests</h2>
-      <a href="/telescope" class="text-sm t-accent hover:opacity-80 transition">← Dashboard</a>
+<!-- LIST -->
+<div class="list-panel">
+    <div class="panel-header">
+      <span class="panel-title">Requests</span>
+      <span class="panel-count">{{ if .empty }}0{{ else }}{{ len .entries }}{{ end }} entries</span>
     </div>
-    <div class="t-divide">
+
+    <div class="filter-row">
+      <a class="filter-chip {{ if eq .tag "" }}active{{ end }}" href="?q={{ .q }}&tag=" style="text-decoration:none;">All</a>
+      <a class="filter-chip {{ if eq .tag "2xx" }}active{{ end }}" href="?q={{ .q }}&tag=2xx" style="text-decoration:none;">2xx</a>
+      <a class="filter-chip yellow {{ if eq .tag "4xx" }}active{{ end }}" href="?q={{ .q }}&tag=4xx" style="text-decoration:none;">4xx</a>
+      <a class="filter-chip red {{ if eq .tag "5xx" }}active{{ end }}" href="?q={{ .q }}&tag=5xx" style="text-decoration:none;">5xx</a>
+      <a class="filter-chip {{ if eq .tag "error" }}active{{ end }}" href="?q={{ .q }}&tag=error" style="text-decoration:none;">error</a>
+    </div>
+
+    <div class="entries-list" id="entriesList">
       @if(.empty)
-      <div class="px-5 py-12 text-center t-text-subtle">No requests recorded yet.</div>
+      <div class="empty-state" style="padding: 24px;">
+        <div class="empty-title">No requests</div>
+        <div class="empty-sub">Make a request (and ensure Telescope request watcher is enabled)</div>
+      </div>
       @else
       @each(.entries)
-      <a href="/telescope/requests/{{ .ID }}" class="block px-5 py-4 flex items-center gap-4 t-hover transition">
-        <span class="text-xs font-medium px-2.5 py-1 rounded-full {{ $s := index .Content "response_status" }}{{ if and $s (ge $s 200) (lt $s 300) }}t-status-2xx{{ else }}{{ if and $s (ge $s 400) (lt $s 500) }}t-status-4xx{{ else }}{{ if and $s (ge $s 500) }}t-status-5xx{{ else }}t-accent-bg t-accent{{ end }}{{ end }}{{ end }}">{{ $s }}</span>
-        <span class="t-text-muted font-mono text-sm w-16">{{ index .Content "method" }}</span>
-        <span class="t-text font-mono text-sm break-all flex-1">{{ index .Content "path" }}</span>
-        <span class="t-text-subtle text-sm">{{ index .Content "duration_ms" }}ms</span>
+      {{ $m := index .Content "method" }}
+      {{ $p := index .Content "path" }}
+      {{ $s := index .Content "response_status" }}
+      {{ $d := index .Content "duration_ms" }}
+      <a class="entry-item {{ if eq $.selectedID .ID }}selected{{ end }}"
+         href="?q={{ $.q }}&tag={{ $.tag }}&selected={{ .ID }}" data-entry-id="{{ .ID }}" style="text-decoration:none;">
+        <div class="entry-row1">
+          <span class="method-badge method-{{ $m }}">{{ $m }}</span>
+          <span class="entry-path">{{ $p }}</span>
+          <span class="status-code {{ if and $s (ge $s 500) }}s5xx{{ else }}{{ if and $s (ge $s 400) }}s4xx{{ else }}{{ if and $s (ge $s 300) }}s3xx{{ else }}s2xx{{ end }}{{ end }}{{ end }}">{{ $s }}</span>
+        </div>
+        <div class="entry-row2">
+          <span class="entry-dur {{ if and $d (gt $d 1000) }}vslow{{ else }}{{ if and $d (gt $d 300) }}slow{{ end }}{{ end }}">{{ $d }}ms</span>
+          <span class="entry-meta-sep">·</span>
+          <span class="entry-meta mono">{{ index .Content "handler" }}</span>
+          <span class="entry-time mono">{{ .CreatedAt.Format "15:04:05" }}</span>
+        </div>
       </a>
       @endeach
       @endif
     </div>
   </div>
-</div>
+
+<!-- DETAIL -->
+<div class="detail-panel" id="detailPanel">
+    @if(not .selectedEntry)
+    <div class="empty-state">
+      <div class="empty-title">Select a request</div>
+      <div class="empty-sub">Click an entry to inspect its details</div>
+    </div>
+    @else
+    <div style="display:flex; flex-direction:column; height:100%; overflow:hidden;">
+      <div class="detail-header">
+        <div class="detail-title-row">
+          <span class="method-badge method-{{ index .selectedEntry.Content "method" }}">{{ index .selectedEntry.Content "method" }}</span>
+          <span class="detail-path">{{ index .selectedEntry.Content "path" }}</span>
+          {{ $s := index .selectedEntry.Content "response_status" }}
+          <span class="status-code detail-status {{ if and $s (ge $s 500) }}s5xx{{ else }}{{ if and $s (ge $s 400) }}s4xx{{ else }}{{ if and $s (ge $s 300) }}s3xx{{ else }}s2xx{{ end }}{{ end }}{{ end }}">{{ $s }}</span>
+        </div>
+        <div class="detail-meta-row">
+          <div class="detail-meta-item">
+            <span class="detail-meta-label">Duration</span>
+            <span class="detail-meta-val accent">{{ index .selectedEntry.Content "duration_ms" }}ms</span>
+          </div>
+          <div class="detail-meta-item">
+            <span class="detail-meta-label">Timestamp</span>
+            <span class="detail-meta-val">{{ .selectedEntry.CreatedAt.Format "Jan 02 15:04:05" }}</span>
+          </div>
+          <div class="detail-meta-item">
+            <span class="detail-meta-label">IP Address</span>
+            <span class="detail-meta-val">{{ if index .selectedEntry.Content "ip" }}{{ index .selectedEntry.Content "ip" }}{{ else }}—{{ end }}</span>
+          </div>
+          <div class="detail-meta-item">
+            <span class="detail-meta-label">User</span>
+            <span class="detail-meta-val">{{ if index .selectedEntry.Content "user_id" }}{{ index .selectedEntry.Content "user_id" }}{{ else }}—{{ end }}</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="detail-tabs">
+        <div class="detail-tab active" onclick="setTab(this,'headers')">Headers</div>
+        <div class="detail-tab" onclick="setTab(this,'payload')">Payload</div>
+        <div class="detail-tab" onclick="setTab(this,'timeline')">Timeline</div>
+        <div class="detail-tab" onclick="setTab(this,'response')">Response</div>
+      </div>
+
+      <div class="detail-body">
+        <div class="tab-content active" id="tab-headers">
+          <div class="detail-section">
+            <div class="detail-section-title">Request Headers</div>
+            <div class="kv-row-wrap">
+              <table class="kv-table">
+                {{ if index .selectedEntry.Content "request_headers" }}
+                {{ range $k, $v := index .selectedEntry.Content "request_headers" }}
+                <tr><td>{{ $k }}</td><td>{{ $v }}</td></tr>
+                {{ end }}
+                {{ else }}
+                <tr><td>—</td><td>None</td></tr>
+                {{ end }}
+              </table>
+            </div>
+          </div>
+          <div class="detail-section">
+            <div class="detail-section-title">Response Headers</div>
+            <div class="kv-row-wrap">
+              <table class="kv-table">
+                {{ if index .selectedEntry.Content "response_headers" }}
+                {{ range $k, $v := index .selectedEntry.Content "response_headers" }}
+                <tr><td>{{ $k }}</td><td>{{ $v }}</td></tr>
+                {{ end }}
+                {{ else }}
+                <tr><td>—</td><td>None</td></tr>
+                {{ end }}
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div class="tab-content" id="tab-payload">
+          <div class="detail-section">
+            <div class="detail-section-title">Request Body</div>
+            <div class="code-block">{{ if index .selectedEntry.Content "payload" }}{{ index .selectedEntry.Content "payload" }}{{ else }}// No body{{ end }}</div>
+          </div>
+          <div class="detail-section">
+            <div class="detail-section-title">Route / Action</div>
+            <div class="kv-row-wrap">
+              <table class="kv-table">
+                <tr><td>route</td><td>{{ if index .selectedEntry.Content "route" }}{{ index .selectedEntry.Content "route" }}{{ else }}—{{ end }}</td></tr>
+                <tr><td>handler</td><td>{{ if index .selectedEntry.Content "handler" }}{{ index .selectedEntry.Content "handler" }}{{ else }}—{{ end }}</td></tr>
+                <tr><td>middleware</td><td>{{ if index .selectedEntry.Content "middleware" }}{{ index .selectedEntry.Content "middleware" }}{{ else }}—{{ end }}</td></tr>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div class="tab-content" id="tab-timeline">
+          <div class="detail-section">
+            <div class="detail-section-title">Request Lifecycle</div>
+            <div class="kv-row-wrap">
+              <table class="kv-table">
+                <tr><td>matched</td><td><span class="mono">{{ index .selectedEntry.Content "method" }} {{ index .selectedEntry.Content "path" }}</span></td></tr>
+                <tr><td>response</td><td><span class="mono">{{ index .selectedEntry.Content "response_status" }} in {{ index .selectedEntry.Content "duration_ms" }}ms</span></td></tr>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div class="tab-content" id="tab-response">
+          <div class="detail-section">
+            <div class="detail-section-title">Response Body</div>
+            <div class="code-block">{{ if index .selectedEntry.Content "response_body" }}{{ index .selectedEntry.Content "response_body" }}{{ else }}{{ end }}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    @endif
+  </div>
+
+<script>
+  // Keep scroll position and avoid full reload when selecting
+  function __reqRestoreScroll() {
+    const list = document.getElementById('entriesList');
+    if (!list) return;
+    const v = sessionStorage.getItem('telescope:requestsScroll');
+    if (v) list.scrollTop = parseInt(v, 10) || 0;
+  }
+  function __reqSaveScroll() {
+    const list = document.getElementById('entriesList');
+    if (!list) return;
+    sessionStorage.setItem('telescope:requestsScroll', String(list.scrollTop || 0));
+  }
+
+  document.addEventListener('click', function(e) {
+    const a = e.target && e.target.closest ? e.target.closest('a[data-entry-id]') : null;
+    if (!a) return;
+    e.preventDefault();
+    __reqSaveScroll();
+    const id = a.getAttribute('data-entry-id');
+    document.querySelectorAll('a[data-entry-id]').forEach(x => x.classList.toggle('selected', x.getAttribute('data-entry-id') === id));
+    const u = new URL(window.location.href);
+    u.searchParams.set('selected', id);
+    history.pushState({ selected: id }, '', u.toString());
+    __reqRenderDetail(id);
+    __reqRestoreScroll();
+  });
+
+  function setTab(el, name) {
+    document.querySelectorAll('.detail-tab').forEach(t => t.classList.remove('active'));
+    el.classList.add('active');
+    document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+    document.getElementById('tab-' + name).classList.add('active');
+  }
+
+  let __REQ_ENTRIES = (function() {
+    const b64 = "{{ .entriesB64 }}";
+    if (!b64) return [];
+    try { return JSON.parse(atob(b64)); } catch { return []; }
+  })();
+
+  function __escapeHtml(v) {
+    return String(v ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+  }
+
+  function __renderHeaders(tableId, headersObj) {
+    const table = document.getElementById(tableId);
+    if (!table) return;
+    if (!headersObj) { table.innerHTML = '<tr><td>—</td><td>None</td></tr>'; return; }
+    const keys = Object.keys(headersObj);
+    keys.sort();
+    table.innerHTML = keys.map(k => `<tr><td>${__escapeHtml(k)}</td><td>${__escapeHtml(headersObj[k])}</td></tr>`).join('') || '<tr><td>—</td><td>None</td></tr>';
+  }
+
+  function __reqRenderDetail(id) {
+    const entry = __REQ_ENTRIES.find(e => (e.ID || e.id) === id);
+    if (!entry) return;
+    const c = entry.Content || entry.content || {};
+
+    // Update the existing server-rendered blocks by replacing their text where possible
+    const method = c.method || '';
+    const path = c.path || '';
+    const status = c.response_status || '';
+
+    // Header (find elements in DOM by simple selectors)
+    const methodBadge = document.querySelector('.detail-title-row .method-badge');
+    if (methodBadge) {
+      methodBadge.textContent = method;
+      methodBadge.className = 'method-badge method-' + method;
+    }
+    const pathEl = document.querySelector('.detail-title-row .detail-path');
+    if (pathEl) pathEl.textContent = path;
+    const statusEl = document.querySelector('.detail-title-row .detail-status');
+    if (statusEl) {
+      statusEl.textContent = String(status);
+      const s = parseInt(String(status || '0'), 10);
+      statusEl.className = 'status-code detail-status ' + (s >= 500 ? 's5xx' : s >= 400 ? 's4xx' : s >= 300 ? 's3xx' : 's2xx');
+    }
+
+    // Meta
+    const durEl = document.querySelectorAll('.detail-meta-item .detail-meta-val')[0];
+    if (durEl) durEl.textContent = String(c.duration_ms ?? '—') + 'ms';
+    const timeEl = document.querySelectorAll('.detail-meta-item .detail-meta-val')[1];
+    if (timeEl) timeEl.textContent = (entry.CreatedAt || entry.createdAt || '');
+    const ipEl = document.querySelectorAll('.detail-meta-item .detail-meta-val')[2];
+    if (ipEl) ipEl.textContent = c.ip || '—';
+    const userEl = document.querySelectorAll('.detail-meta-item .detail-meta-val')[3];
+    if (userEl) userEl.textContent = c.user_id || '—';
+
+    __renderHeaders('req-headers-table', c.request_headers);
+    __renderHeaders('res-headers-table', c.response_headers);
+
+    const payload = document.querySelector('#tab-payload .code-block');
+    if (payload) payload.textContent = c.payload || '// No body';
+
+    // Route / Action table
+    const rows = document.querySelectorAll('#tab-payload .kv-table tr td:last-child');
+    if (rows && rows.length >= 3) {
+      rows[0].textContent = c.route || '—';
+      rows[1].textContent = c.handler || '—';
+      rows[2].textContent = c.middleware || '—';
+    }
+
+    const resp = document.querySelector('#tab-response .code-block');
+    if (resp) resp.textContent = c.response_body || '';
+  }
+
+  // Init
+  __reqRestoreScroll();
+  (function() {
+    const u = new URL(window.location.href);
+    const sel = u.searchParams.get('selected');
+    const initial = sel || ((__REQ_ENTRIES[0] && (__REQ_ENTRIES[0].ID || __REQ_ENTRIES[0].id)) || null);
+    if (initial) __reqRenderDetail(initial);
+  })();
+
+  // Live polling for requests
+  let __reqPollTimer = null;
+  let __reqLastTopID = ((__REQ_ENTRIES[0] && (__REQ_ENTRIES[0].ID || __REQ_ENTRIES[0].id)) || '');
+  function __reqPoll() {
+    if (window.Pulse && !window.Pulse.isLive()) return;
+    const api = new URL("{{ .basePath }}/api/entries", window.location.origin);
+    api.searchParams.set('type', 'requests');
+    api.searchParams.set('limit', '50');
+    const cur = new URL(window.location.href);
+    const q = cur.searchParams.get('q') || '';
+    const tag = cur.searchParams.get('tag') || '';
+    api.searchParams.set('q', q);
+    api.searchParams.set('tag', tag);
+
+    fetch(api.toString(), { headers: { 'Accept': 'application/json' } })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data || !data.entries) return;
+        const incoming = data.entries || [];
+        const prevTop = (__REQ_ENTRIES[0] && (__REQ_ENTRIES[0].ID || __REQ_ENTRIES[0].id)) || '';
+        const nextTop = (incoming[0] && (incoming[0].ID || incoming[0].id)) || '';
+        if (prevTop === nextTop && incoming.length === __REQ_ENTRIES.length) return;
+        __REQ_ENTRIES = incoming;
+        if (nextTop && nextTop !== __reqLastTopID) {
+          __reqLastTopID = nextTop;
+          if (window.Pulse) window.Pulse.showToast('New request captured');
+        }
+
+        const list = document.getElementById('entriesList');
+        const st = list ? list.scrollTop : 0;
+        const selId = cur.searchParams.get('selected') || nextTop;
+
+        const html = __REQ_ENTRIES.map(e => {
+          const id = e.ID || e.id;
+          const c = e.Content || e.content || {};
+          const m = c.method || '';
+          const p = c.path || '';
+          const s = parseInt(String(c.response_status || '0'), 10);
+          const d = parseInt(String(c.duration_ms || '0'), 10);
+          const durClass = d > 1000 ? 'vslow' : d > 300 ? 'slow' : '';
+          const statusClass = s >= 500 ? 's5xx' : s >= 400 ? 's4xx' : s >= 300 ? 's3xx' : 's2xx';
+          const t = (() => {
+            try {
+              const dt = new Date(e.CreatedAt || e.createdAt || '');
+              if (isNaN(dt.getTime())) return '';
+              return dt.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+            } catch { return ''; }
+          })();
+          return `
+            <a class="entry-item ${id === selId ? 'selected' : ''}"
+               href="?q=${encodeURIComponent(q)}&tag=${encodeURIComponent(tag)}&selected=${encodeURIComponent(id)}"
+               data-entry-id="${__escapeHtml(id)}" style="text-decoration:none;">
+              <div class="entry-row1">
+                <span class="method-badge method-${__escapeHtml(m)}">${__escapeHtml(m)}</span>
+                <span class="entry-path">${__escapeHtml(p)}</span>
+                <span class="status-code ${statusClass}">${__escapeHtml(String(c.response_status || ''))}</span>
+              </div>
+              <div class="entry-row2">
+                <span class="entry-dur ${durClass}">${__escapeHtml(String(c.duration_ms || ''))}ms</span>
+                <span class="entry-meta-sep">·</span>
+                <span class="entry-meta mono">${__escapeHtml(String(c.handler || ''))}</span>
+                <span class="entry-time mono">${__escapeHtml(t)}</span>
+              </div>
+            </a>`;
+        }).join('');
+
+        if (list && html) {
+          list.innerHTML = html;
+          list.scrollTop = st;
+        }
+
+        const selected = __REQ_ENTRIES.find(e => (e.ID || e.id) === selId) || __REQ_ENTRIES[0];
+        if (selected) __reqRenderDetail(selected.ID || selected.id);
+      })
+      .catch(() => {});
+  }
+
+  function __reqStartPolling() {
+    if (__reqPollTimer) clearInterval(__reqPollTimer);
+    __reqPollTimer = setInterval(__reqPoll, 3000);
+  }
+  __reqStartPolling();
+  window.addEventListener('pulse-live-changed', function(e) {
+    if (!e || !e.detail) return;
+    if (e.detail.live) __reqPoll();
+  });
+</script>

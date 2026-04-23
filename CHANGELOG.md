@@ -6,7 +6,22 @@ This project follows Semantic Versioning.
 
 ## [Unreleased]
 
+(nothing yet)
+
+## [1.0.0] - 2026-03-23
+
+First **stable** release (`v1.0.0`). The packages listed under **Versioning & stability** in `README.md` follow SemVer: breaking changes require a new major version after deprecation when possible.
+
 ### Added
+- **CLI:** `nimbus plugin install` and `nimbus plugin list` as nested commands (same behavior as `plugin:install` / `plugin:list`).
+- **Tests:** coverage for `router` (named URLs, groups, route metadata), `http` context helpers, `session` middleware, `database` migrator (`Fresh` on SQLite, `dropTableSQL`).
+
+### Changed
+- **`database.Migrator.Fresh`:** dialect-safe `DROP TABLE` (PostgreSQL uses `CASCADE`; SQLite/MySQL no longer use invalid `CASCADE` on SQLite).
+
+### Previously unreleased (rolled into 1.0.0)
+
+#### Added
 - Queue reliability hardening:
   - retry backoff with jitter
   - Redis in-flight processing + visibility timeout reclaim
@@ -24,12 +39,26 @@ This project follows Semantic Versioning.
   - `go test -race ./...`
   - `go vet ./...`
 
-### Changed
+#### Changed
 - Public docs expanded:
   - getting started path
   - production readiness checklist
   - versioning/release policy
-  - release checklist
+  - release checklist (`V1_RELEASE.md`)
 
-### Fixed
+#### Fixed
 - `/docs/getting-started` docs page registration and routing.
+- `App.Run` / `RunTLS`: always cancel scheduler context on exit (including `Serve` errors) to satisfy `go vet` and avoid leaks.
+
+### Known limitations (v1)
+
+- **Telescope** plugin: many panels remain preview / “coming soon”; not treated as a v1-stable surface—see `README.md`.
+- **First-party OAuth / API tokens** (Sanctum/Passport-class): not included in v1; document your own token strategy or wait for a future release.
+- **HTML error pages** (404/500): applications should register `router.Fallback` and custom handlers; core focuses on structured JSON/API errors.
+- **Locale:** v1 supports programmatic `locale.AddTranslations` / middleware; file-based translation loading is not the primary focus.
+
+---
+
+## Earlier history
+
+Prior development was not consistently tagged in this changelog; see git history for detail.

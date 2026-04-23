@@ -9,11 +9,40 @@ import (
 	"strings"
 
 	"github.com/CodeSyncr/nimbus/cli"
+	"github.com/spf13/cobra"
 )
 
 func init() {
 	cli.RegisterCommand(&PluginInstallCommand{})
 	cli.RegisterCommand(&PluginListCommand{})
+	cli.RegisterRootAttach(attachPluginSubcommands)
+}
+
+// attachPluginSubcommands adds `nimbus plugin install` and `nimbus plugin list`
+// alongside the legacy `plugin:install` / `plugin:list` commands.
+func attachPluginSubcommands(root *cobra.Command) {
+	plugin := &cobra.Command{
+		Use:   "plugin",
+		Short: "Manage framework plugins",
+	}
+	install := &cobra.Command{
+		Use:   "install [name]",
+		Short: (&PluginInstallCommand{}).Description(),
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (&PluginInstallCommand{}).Run(cli.NewContext(cmd, args))
+		},
+	}
+	list := &cobra.Command{
+		Use:   "list",
+		Short: (&PluginListCommand{}).Description(),
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return (&PluginListCommand{}).Run(cli.NewContext(cmd, args))
+		},
+	}
+	plugin.AddCommand(install, list)
+	root.AddCommand(plugin)
 }
 
 // PluginDef describes how to install a plugin.
@@ -40,9 +69,23 @@ type PluginDef struct {
 	// ServerFuncInsert is a full Go function body appended to the end of
 	// bin/server.go (e.g. the bootNoSQL function).
 	ServerFuncInsert string
+	// ExtraImports are additional import lines when a plugin needs more than one
+	// package (each line must be tab-indented, include a quoted path, and end
+	// with \n). Skipped if that import path is already in bin/server.go.
+	ExtraImports []string
 }
 
 var pluginRegistry = map[string]PluginDef{
+	"livewire": {
+		Name:        "livewire",
+		ImportPath:  "github.com/CodeSyncr/nimbus-livewire/livewire",
+		PackageName: "livewire",
+		Description: "Livewire-style full-stack components (hashed assets + update endpoint)",
+		ServerInsert: "\tapp.Use(livewire.New())\n",
+		EnvVars: []string{
+			"APP_KEY=",
+		},
+	},
 	"telescope": {
 		Name:         "telescope",
 		ImportPath:   "github.com/CodeSyncr/nimbus/plugins/telescope",
@@ -144,6 +187,20 @@ var pluginRegistry = map[string]PluginDef{
 			"TRANSMIT_TRANSPORT=",
 		},
 	},
+	"reverb": {
+		Name:         "reverb",
+		ImportPath:   "github.com/CodeSyncr/nimbus/plugins/reverb",
+		PackageName:  "reverb",
+		Description:  "WebSocket channel broadcasting (Reverb-style, optional Redis fan-out)",
+		ServerInsert: "\tapp.Use(reverb.New(nil))\n",
+		ConfigFiles: map[string]string{
+			"config/reverb.go": reverbConfigFile,
+		},
+		ConfigLoaderInsert: "loadReverb()",
+		EnvVars: []string{
+			"REVERB_PATH=/reverb/ws",
+		},
+	},
 	"scout": {
 		Name:         "scout",
 		ImportPath:   "github.com/CodeSyncr/nimbus/search",
@@ -192,6 +249,9 @@ var pluginRegistry = map[string]PluginDef{
 		PackageName:  "socialite",
 		Description:  "OAuth social authentication (GitHub, Google, Discord, Apple)",
 		ServerInsert: socialiteServerInsert,
+		ExtraImports: []string{
+			"\tnhttp \"github.com/CodeSyncr/nimbus/http\"\n",
+		},
 		EnvVars: []string{
 			"GITHUB_CLIENT_ID=",
 			"GITHUB_CLIENT_SECRET=",
@@ -309,8 +369,20 @@ func (c *PluginListCommand) Run(ctx *cli.Context) error {
 		fmt.Fprintf(ctx.Stdout, "  %-12s %s\n", name, def.Description)
 	}
 	fmt.Fprintln(ctx.Stdout)
-	ctx.UI.Infof("Install with: nimbus plugin install <name>")
+	ctx.UI.Infof("Install with: nimbus plugin install <name> (or nimbus plugin:install <name>)")
 	return nil
+}
+
+// importPathFromLine returns the quoted import path from a single import line
+// such as `	"nimbus/foo"` or `	nhttp "github.com/CodeSyncr/nimbus/http"`.
+func importPathFromLine(line string) string {
+	s := strings.TrimSpace(strings.TrimSuffix(line, "\n"))
+	a := strings.Index(s, `"`)
+	b := strings.LastIndex(s, `"`)
+	if a < 0 || b <= a {
+		return ""
+	}
+	return s[a+1 : b]
 }
 
 func patchServerGo(path string, def PluginDef, appName string) error {
@@ -335,14 +407,38 @@ func patchServerGo(path string, def PluginDef, appName string) error {
 	} else {
 		newImport = "\t\"" + def.ImportPath + "\"\n"
 	}
+	for _, extra := range def.ExtraImports {
+		path := importPathFromLine(extra)
+		if path == "" || strings.Contains(importContent, path) {
+			continue
+		}
+		newImport += extra
+		if !strings.HasSuffix(newImport, "\n") {
+			newImport += "\n"
+		}
+	}
 	var newImportContent string
 	nimbusImport := regexp.MustCompile(`(?m)^\t"github\.com/CodeSyncr/nimbus[^"]*"\s*$`)
 	matches := nimbusImport.FindAllStringIndex(importContent, -1)
 	if len(matches) > 0 {
 		insertPos := matches[len(matches)-1][1]
+		// Advance past CRLF/LF so the new import is its own line; otherwise it
+		// gets concatenated onto the previous import (invalid dash Go).
+		if insertPos < len(importContent) && importContent[insertPos] == '\r' {
+			insertPos++
+		}
+		if insertPos < len(importContent) && importContent[insertPos] == '\n' {
+			insertPos++
+		} else if insertPos > 0 && importContent[insertPos-1] != '\n' {
+			newImport = "\n" + newImport
+		}
 		newImportContent = importContent[:insertPos] + newImport + importContent[insertPos:]
 	} else {
-		newImportContent = importContent + newImport
+		newImportContent = importContent
+		if len(newImportContent) > 0 && !strings.HasSuffix(newImportContent, "\n") {
+			newImportContent += "\n"
+		}
+		newImportContent += newImport
 	}
 	s = strings.Replace(s, imports[0], "import (\n"+newImportContent+")", 1)
 

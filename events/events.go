@@ -79,6 +79,12 @@ func (d *Dispatcher) Dispatch(event string, payload any) error {
 			firstErr = err
 		}
 	}
+	afterDispatchMu.Lock()
+	hooks := append([]func(string, any){}, afterDispatchHooks...)
+	afterDispatchMu.Unlock()
+	for _, h := range hooks {
+		h(event, payload)
+	}
 	return firstErr
 }
 
@@ -138,3 +144,19 @@ func Dispatch(event string, payload any) error { return Default.Dispatch(event, 
 
 // DispatchAsync is a shortcut for Default.DispatchAsync.
 func DispatchAsync(event string, payload any) { Default.DispatchAsync(event, payload) }
+
+var (
+	afterDispatchMu   sync.Mutex
+	afterDispatchHooks []func(event string, payload any)
+)
+
+// AfterDispatch registers a hook called after every successful Dispatch
+// (after all listeners). Used by Telescope; safe to register multiple times.
+func AfterDispatch(fn func(event string, payload any)) {
+	if fn == nil {
+		return
+	}
+	afterDispatchMu.Lock()
+	defer afterDispatchMu.Unlock()
+	afterDispatchHooks = append(afterDispatchHooks, fn)
+}

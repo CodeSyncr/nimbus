@@ -1,11 +1,47 @@
 @layout('horizon/layout')
 <div class="space-y-8">
   <p class="t-text-muted text-sm max-w-2xl">
-    Recently completed jobs. Requires persistent storage to be enabled.
+    Completed jobs summary from in-memory observer stats. For historical records across restarts, pair Horizon with durable queue metrics storage.
   </p>
-  <div class="t-card rounded-xl p-12 text-center t-text-subtle">
-    <svg class="w-12 h-12 mx-auto mb-4 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-    <p class="font-medium t-text mb-1">Completed jobs</p>
-    <p class="text-sm">Completed jobs list will be available in a future release.</p>
+
+  <div class="grid gap-4 sm:grid-cols-3">
+    <div class="t-card rounded-xl p-6">
+      <div class="text-xs font-semibold uppercase t-text-subtle mb-1">Processed</div>
+      <div class="text-2xl font-bold t-text">{{ index .stats "total_processed" }}</div>
+    </div>
+    <div class="t-card rounded-xl p-6">
+      <div class="text-xs font-semibold uppercase t-text-subtle mb-1">Failed</div>
+      <div class="text-2xl font-bold {{ if .hasFailed }}text-red-600 dark:text-red-400{{ else }}t-text{{ end }}">{{ index .stats "total_failed" }}</div>
+    </div>
+    <div class="t-card rounded-xl p-6">
+      <div class="text-xs font-semibold uppercase t-text-subtle mb-1">Since</div>
+      <div class="text-sm t-text">{{ index .stats "started_at" }}</div>
+    </div>
+  </div>
+
+  <div class="t-card rounded-xl overflow-hidden">
+    <div class="px-5 py-4 border-b t-border t-bg-sidebar">
+      <span class="font-medium t-text">Completed throughput by queue</span>
+    </div>
+    <div class="divide-y t-divide">
+      @if(.hasQueues)
+      <div class="px-5 py-3 text-xs font-semibold t-text-subtle grid grid-cols-4 gap-4">
+        <div>Queue</div>
+        <div class="text-right">Processed</div>
+        <div class="text-right">Failed</div>
+        <div class="text-right">Last processed</div>
+      </div>
+      @each(.queues)
+      <div class="px-5 py-3 grid grid-cols-4 gap-4 items-center text-sm">
+        <div class="font-mono t-text">{{ index . "name" }}</div>
+        <div class="text-right t-text">{{ index . "processed" }}</div>
+        <div class="text-right {{ if index . "failed" }}text-red-600 dark:text-red-400{{ else }}t-text{{ end }}">{{ index . "failed" }}</div>
+        <div class="text-right t-text-subtle text-xs">{{ if index . "last_processed" }}{{ index . "last_processed" }}{{ else }}—{{ end }}</div>
+      </div>
+      @endeach
+      @else
+      <div class="px-5 py-12 text-center t-text-subtle text-sm">No completed jobs recorded yet.</div>
+      @endif
+    </div>
   </div>
 </div>

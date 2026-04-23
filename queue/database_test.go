@@ -8,13 +8,13 @@ import (
 	"time"
 
 	"gorm.io/driver/sqlite"
-	"gorm.io/gorm"
+	"github.com/CodeSyncr/nimbus/lucid"
 )
 
-func openQueueTestDB(t *testing.T) *gorm.DB {
+func openQueueTestDB(t *testing.T) *lucid.DB {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "queue-test.db")
-	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
+	db, err := lucid.Open(sqlite.Open(dbPath), &lucid.Config{})
 	if err != nil {
 		t.Fatalf("open sqlite db: %v", err)
 	}

@@ -5,6 +5,11 @@ Telescope provides insight into your local Nimbus development environment, inspi
 ## Features
 
 - **Request watcher** — Records HTTP requests (method, path, status, duration)
+- **Exceptions** — Records panics and handled framework errors
+- **Queries + model events** — Database query log plus create/update/delete model hooks
+- **Logs** — Mirrors Nimbus logger output into Telescope entries
+- **Views** — Render timing from `view.Render` / `c.View`
+- **Queue + schedule + events** — Observes global queue lifecycle, scheduler runs, and dispatched events
 - **Dashboard** — View recent activity at `/telescope`
 - **In-memory storage** — Ring buffer (configurable max entries)
 
@@ -39,9 +44,11 @@ if te := app.Plugin("telescope"); te != nil {
 Access the dashboard at `http://localhost:3333/telescope` (or your app URL + `/telescope`).
 
 - **Requests** — HTTP request log with status, method, path, duration
-- **Exceptions** — (Coming soon) Panics and errors
-- **Queries** — (Coming soon) Database query log
-- **Logs** — (Coming soon) Application log entries
+- **Exceptions** — Panics and app/framework errors
+- **Queries** — Database query log
+- **Logs** — Application log entries
+- **Views** — Template render timings
+- **Jobs / Schedule / Events** — Runtime operational activity
 
 ## Security
 

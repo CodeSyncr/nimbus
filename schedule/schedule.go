@@ -15,10 +15,35 @@ package schedule
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"sync"
 	"time"
 )
+
+var (
+	taskRunMu   sync.Mutex
+	taskRunHooks []func(name, expression, status string, duration time.Duration, output string)
+)
+
+// OnTaskRun registers a hook after each scheduled task attempt (Telescope, metrics).
+func OnTaskRun(fn func(name, expression, status string, duration time.Duration, output string)) {
+	if fn == nil {
+		return
+	}
+	taskRunMu.Lock()
+	defer taskRunMu.Unlock()
+	taskRunHooks = append(taskRunHooks, fn)
+}
+
+func notifyTaskRun(name, expression, status string, duration time.Duration, output string) {
+	taskRunMu.Lock()
+	hooks := append([]func(string, string, string, time.Duration, string){}, taskRunHooks...)
+	taskRunMu.Unlock()
+	for _, h := range hooks {
+		h(name, expression, status, duration, output)
+	}
+}
 
 // Task is a scheduled function.
 type Task func(ctx context.Context) error
@@ -37,11 +62,28 @@ type Scheduler struct {
 	entries []entry
 	cancel  context.CancelFunc
 	running bool
+	locker  Locker
+}
+
+// Locker coordinates schedule execution across multiple app instances.
+// When configured, each task tick tries to acquire a distributed lock and
+// runs only on the lock holder.
+type Locker interface {
+	TryLock(ctx context.Context, key string, ttl time.Duration) (unlock func(), acquired bool, err error)
 }
 
 // New creates a new Scheduler.
 func New() *Scheduler {
 	return &Scheduler{}
+}
+
+// WithLocker enables distributed lock coordination for scheduled task runs.
+// Use this in multi-instance deployments to avoid duplicate task execution.
+func (s *Scheduler) WithLocker(locker Locker) *Scheduler {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.locker = locker
+	return s
 }
 
 // Every registers a task that runs at a fixed interval.
@@ -147,14 +189,64 @@ func (s *Scheduler) runEntry(ctx context.Context, e entry) {
 }
 
 func (s *Scheduler) execute(ctx context.Context, e entry) {
+	if s.locker != nil {
+		lockTTL := e.interval + 5*time.Second
+		if lockTTL < 10*time.Second {
+			lockTTL = 10 * time.Second
+		}
+		// Use a time bucket in the lock key so only one instance can execute
+		// this task for the current interval window.
+		bucketSize := int64(e.interval.Seconds())
+		if bucketSize <= 0 {
+			bucketSize = 60
+		}
+		bucket := time.Now().Unix() / bucketSize
+		lockKey := fmt.Sprintf("nimbus:schedule:%s:%d", e.name, bucket)
+		_, acquired, err := s.locker.TryLock(ctx, lockKey, lockTTL)
+		if err != nil {
+			log.Printf("[schedule] lock error for task %q: %v", e.name, err)
+			return
+		}
+		if !acquired {
+			return
+		}
+	}
+
+	start := time.Now()
+	var out string
+	var runErr error
+	var panicked any
 	defer func() {
-		if r := recover(); r != nil {
-			log.Printf("[schedule] panic in task %q: %v", e.name, r)
+		dur := time.Since(start)
+		status := "ok"
+		if panicked != nil {
+			status = "panic"
+			out = fmt.Sprint(panicked)
+		} else if runErr != nil {
+			status = "failed"
+			out = runErr.Error()
+		}
+		notifyTaskRun(e.name, scheduleExpr(e), status, dur, out)
+	}()
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				panicked = r
+				log.Printf("[schedule] panic in task %q: %v", e.name, r)
+			}
+		}()
+		runErr = e.task(ctx)
+		if runErr != nil {
+			log.Printf("[schedule] task %q error: %v", e.name, runErr)
 		}
 	}()
-	if err := e.task(ctx); err != nil {
-		log.Printf("[schedule] task %q error: %v", e.name, err)
+}
+
+func scheduleExpr(e entry) string {
+	if e.at != "" {
+		return "daily@" + e.at
 	}
+	return fmt.Sprintf("every %s", e.interval)
 }
 
 // untilNext computes the duration until the next occurrence of "HH:MM" today

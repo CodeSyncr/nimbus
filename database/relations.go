@@ -1,7 +1,7 @@
 package database
 
 import (
-	"gorm.io/gorm"
+	"github.com/CodeSyncr/nimbus/lucid"
 )
 
 // Preload loads associations via GORM's built-in eager loading.
@@ -41,7 +41,7 @@ import (
 //	database.Attach(db, &user, "Teams", &team1, &team2)
 //	database.Detach(db, &user, "Teams", &team1)
 //	database.Sync(db, &user, "Teams", &team1, &team3)
-func Preload(db *gorm.DB, name string, args ...any) *gorm.DB {
+func Preload(db *lucid.DB, name string, args ...any) *lucid.DB {
 	if len(args) > 0 {
 		return db.Preload(name, args...)
 	}

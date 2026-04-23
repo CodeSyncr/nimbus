@@ -6,13 +6,13 @@ import (
 	"fmt"
 	"strings"
 
-	"gorm.io/gorm"
+	"github.com/CodeSyncr/nimbus/lucid"
 )
 
 // PostgresEngine uses PostgreSQL's built-in tsvector full-text search.
 // It stores searchable data in a `search_index` table with a GIN index.
 type PostgresEngine struct {
-	db *gorm.DB
+	db *lucid.DB
 }
 
 // searchDocument is the model for the search_index table.
@@ -29,7 +29,7 @@ func (searchDocument) TableName() string { return "search_index" }
 
 // NewPostgresEngine creates a PostgreSQL-backed search engine.
 // It auto-migrates the search_index table.
-func NewPostgresEngine(db *gorm.DB) *PostgresEngine {
+func NewPostgresEngine(db *lucid.DB) *PostgresEngine {
 	_ = db.AutoMigrate(&searchDocument{})
 	// Create the tsvector GIN index and trigger (idempotent)
 	db.Exec(`
@@ -60,7 +60,7 @@ func (e *PostgresEngine) Index(ctx context.Context, index string, id string, dat
 		Where("index_name = ? AND doc_id = ?", index, id).
 		First(&existing).Error
 
-	if err == gorm.ErrRecordNotFound {
+	if err == lucid.ErrRecordNotFound {
 		// Insert
 		doc := searchDocument{
 			IndexName: index,

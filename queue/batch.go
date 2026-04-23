@@ -192,6 +192,7 @@ func (b *Batch) Dispatch(ctx context.Context) error {
 		b.finally(ctx, b)
 	}
 
+	runAfterBatchHooks(ctx, b)
 	return nil
 }
 

@@ -12,7 +12,8 @@ dashboard authorization.
 - **Dashboard authorization**: optional `Gate` so only allowed users can access Horizon in production
 - **Code-driven config**: environments, supervisors, balance strategy, tries, timeout, backoff (for future worker scaling)
 - **Job interfaces**: optional `Tags() []string` and `Silenced() bool` on jobs for Laravel-style tagging and silencing
-- **JSON API**: `/horizon/metrics`, `/horizon/failed` (list), POST `/horizon/failed/:id/forget`, `/horizon/failed/forget-all`, `/horizon/failed/:id/retry`
+- **JSON API**: `/horizon/api/metrics`, `/horizon/api/workloads` (live Redis queue depths), `/horizon/api/failed` (list), POST `/horizon/failed/:id/forget`, `/horizon/failed/forget-all`, `/horizon/failed/:id/retry`
+- **Live Redis workloads** (when `RedisURL` is set): pending / delayed / processing / in-flight counts per queue on the **Pending** page — same Redis keys as `queue.RedisAdapter`. Use `HORIZON_QUEUES` (comma-separated) to always probe named queues even before traffic.
 
 ## Installation
 
@@ -40,9 +41,10 @@ Ensure `queue.Boot()` is called (e.g. in `bin/server.go`) and that jobs are regi
 |-------------------|------------------------------------------|-------------|
 | `HORIZON_ENABLED` | Allow dashboard in production            | `false`     |
 | `HORIZON_PATH`    | Dashboard base path                      | `/horizon`  |
-| `REDIS_URL`       | Used by Options.RedisURL for failed store| —           |
+| `REDIS_URL`       | Used by Options.RedisURL for failed store + live workloads | —   |
+| `HORIZON_QUEUES`  | Extra queue names to show Redis depths for (comma-separated) | — |
 
-Without `RedisURL`, the dashboard still shows in-memory stats but failed jobs are not persisted (no list/forget/retry).
+Without `RedisURL`, the dashboard still shows in-memory stats but failed jobs are not persisted (no list/forget/retry) and Redis workload rows are hidden.
 
 ## Horizon Config (workers)
 

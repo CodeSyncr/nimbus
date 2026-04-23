@@ -5,11 +5,12 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
 
-	"gorm.io/gorm"
+	"github.com/CodeSyncr/nimbus/lucid"
 )
 
 // ── Personal Access Token Model ─────────────────────────────────
@@ -27,7 +28,7 @@ type PersonalAccessToken struct {
 	ExpiresAt  *time.Time     `json:"expires_at"`
 	CreatedAt  time.Time      `json:"created_at"`
 	UpdatedAt  time.Time      `json:"updated_at"`
-	DeletedAt  gorm.DeletedAt `gorm:"index" json:"-"`
+	DeletedAt  lucid.DeletedAt `gorm:"index" json:"-"`
 }
 
 // TableName returns the database table name.
@@ -49,25 +50,19 @@ func (t *PersonalAccessToken) IsExpired() bool {
 	return time.Now().After(*t.ExpiresAt)
 }
 
-// HasAbility checks if the token has a specific ability.
+// HasAbility checks if the token has a specific ability (Sanctum-style JSON array).
 // Supports the wildcard "*" which grants all abilities.
 func (t *PersonalAccessToken) HasAbility(ability string) bool {
-	// Fast-path: default value
 	if t.Abilities == "" || t.Abilities == `["*"]` {
 		return true
 	}
-	// Simple JSON array parse (avoids importing encoding/json for a hot path)
-	for i := 0; i < len(t.Abilities); i++ {
-		if t.Abilities[i] == '"' {
-			j := i + 1
-			for j < len(t.Abilities) && t.Abilities[j] != '"' {
-				j++
-			}
-			val := t.Abilities[i+1 : j]
-			if val == "*" || val == ability {
-				return true
-			}
-			i = j
+	var abs []string
+	if err := json.Unmarshal([]byte(t.Abilities), &abs); err != nil {
+		return false
+	}
+	for _, a := range abs {
+		if a == "*" || a == ability {
+			return true
 		}
 	}
 	return false
@@ -95,14 +90,14 @@ func hashToken(plainText string) string {
 // TokenGuard authenticates requests via Bearer tokens (personal access tokens).
 // It reads the Authorization header and looks up the hashed token in the DB.
 type TokenGuard struct {
-	db     *gorm.DB
+	db     *lucid.DB
 	loader UserLoader
 }
 
 // NewTokenGuard creates a new API token guard.
 // db is the GORM database handle.
 // loader loads a User by ID from the database.
-func NewTokenGuard(db *gorm.DB, loader UserLoader) *TokenGuard {
+func NewTokenGuard(db *lucid.DB, loader UserLoader) *TokenGuard {
 	return &TokenGuard{db: db, loader: loader}
 }
 
@@ -120,7 +115,7 @@ func (g *TokenGuard) User(ctx context.Context) (User, error) {
 	if err := g.db.WithContext(ctx).
 		Where("token = ?", hash).
 		First(&pat).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, lucid.ErrRecordNotFound) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("auth: token lookup failed: %w", err)

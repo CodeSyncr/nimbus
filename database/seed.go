@@ -1,25 +1,25 @@
 package database
 
-import "gorm.io/gorm"
+import "github.com/CodeSyncr/nimbus/lucid"
 
 // Seeder runs seed data (AdonisJS database/seeders).
 type Seeder interface {
-	Run(db *gorm.DB) error
+	Run(db *lucid.DB) error
 }
 
 // SeedFunc adapts a function to Seeder.
-type SeedFunc func(*gorm.DB) error
+type SeedFunc func(*lucid.DB) error
 
-func (f SeedFunc) Run(db *gorm.DB) error { return f(db) }
+func (f SeedFunc) Run(db *lucid.DB) error { return f(db) }
 
 // SeedRunner runs multiple seeders in order.
 type SeedRunner struct {
-	db      *gorm.DB
+	db      *lucid.DB
 	seeders []Seeder
 }
 
 // NewSeedRunner creates a runner for the given seeders.
-func NewSeedRunner(db *gorm.DB, seeders []Seeder) *SeedRunner {
+func NewSeedRunner(db *lucid.DB, seeders []Seeder) *SeedRunner {
 	return &SeedRunner{db: db, seeders: seeders}
 }
 

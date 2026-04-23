@@ -1,8 +1,36 @@
 @layout('horizon/layout')
 <div class="space-y-8">
   <p class="t-text-muted text-sm max-w-2xl">
-    Jobs waiting in queues. Counts are from in-memory stats since last boot.
+    In-memory stats since last boot. When Horizon is configured with <code class="text-xs bg-slate-100 dark:bg-slate-800 px-1 rounded">RedisURL</code>, live Redis queue depths appear below (same keys as the Redis queue driver).
   </p>
+
+  @if(.redis_workloads_ok)
+  <div class="t-card rounded-xl overflow-hidden">
+    <div class="px-5 py-4 border-b t-border t-bg-sidebar">
+      <span class="font-medium t-text">Live Redis workloads</span>
+      <span class="text-xs t-text-subtle ml-2">(pending / delayed / processing / in-flight)</span>
+    </div>
+    <div class="divide-y t-divide">
+      <div class="px-5 py-3 text-xs font-semibold t-text-subtle grid grid-cols-5 gap-4">
+        <div>Queue</div>
+        <div class="text-right">Pending</div>
+        <div class="text-right">Delayed</div>
+        <div class="text-right">Processing</div>
+        <div class="text-right">In-flight</div>
+      </div>
+      @each(.redis_workloads)
+      <div class="px-5 py-3 grid grid-cols-5 gap-4 items-center text-sm font-mono">
+        <div class="t-text">{{ index . "name" }}</div>
+        <div class="text-right t-text">{{ index . "pending" }}</div>
+        <div class="text-right t-text">{{ index . "delayed" }}</div>
+        <div class="text-right t-text">{{ index . "processing" }}</div>
+        <div class="text-right t-text">{{ index . "in_flight" }}</div>
+      </div>
+      @endeach
+    </div>
+  </div>
+  @endif
+
   <div class="t-card rounded-xl overflow-hidden">
     <div class="px-5 py-4 border-b t-border t-bg-sidebar">
       <span class="font-medium t-text">Pending by queue</span>

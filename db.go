@@ -6,14 +6,14 @@ import (
 
 	"github.com/CodeSyncr/nimbus/database"
 	"github.com/CodeSyncr/nimbus/database/nosql"
-	"gorm.io/gorm"
+	"github.com/CodeSyncr/nimbus/lucid"
 )
 
 // DB is Nimbus's high-level database handle.
 // Controllers and services can depend on *nimbus.DB instead of importing gorm.
-// It is defined as a type alias so that *nimbus.DB and *gorm.DB are identical
+// It is defined as a type alias so that *nimbus.DB and *lucid.DB are identical
 // types, but applications should reference the nimbus.DB name.
-type DB = gorm.DB
+type DB = lucid.DB
 
 // db is the global Nimbus database handle set by the framework at boot.
 var db *DB
@@ -49,7 +49,7 @@ func Transaction(fn func(tx *DB) error) error {
 	if db == nil {
 		return fmt.Errorf("nimbus: database not initialized")
 	}
-	return db.Transaction(func(tx *gorm.DB) error {
+	return db.Transaction(func(tx *lucid.DB) error {
 		return fn(tx)
 	})
 }

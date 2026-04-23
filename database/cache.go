@@ -4,7 +4,7 @@ import (
 	"time"
 
 	"github.com/CodeSyncr/nimbus/cache"
-	"gorm.io/gorm"
+	"github.com/CodeSyncr/nimbus/lucid"
 )
 
 // CachedFind runs the query and caches the result. Use for read-heavy, rarely-changing data.
@@ -14,9 +14,9 @@ import (
 //
 //	var users []User
 //	err := database.CachedFind(db.Model(&User{}).Where("active = ?", true), "users:active", 10*time.Minute, &users)
-func CachedFind(db *gorm.DB, key string, ttl time.Duration, dest any) error {
+func CachedFind(db *lucid.DB, key string, ttl time.Duration, dest any) error {
 	_, err := cache.Remember(key, ttl, func() (any, error) {
-		clone := db.Session(&gorm.Session{})
+		clone := db.Session(&lucid.Session{})
 		err := clone.Find(dest).Error
 		return dest, err
 	})

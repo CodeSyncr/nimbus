@@ -8,11 +8,19 @@
         <span class="t-text-muted font-mono text-sm">{{ index .entry.Content "method" }}</span>
         <span class="t-text font-mono text-sm break-all">{{ index .entry.Content "path" }}{{ if index .entry.Content "query" }}?{{ index .entry.Content "query" }}{{ end }}</span>
       </div>
-      <a href="/telescope/requests" class="text-sm t-accent hover:opacity-80 transition">← Requests</a>
+      <a href="{{ .basePath }}/requests" class="text-sm t-accent hover:opacity-80 transition">← Requests</a>
     </div>
-    <div class="p-5 border-b t-border t-bg-sidebar flex items-center gap-6 text-sm t-text-muted">
-      <span><strong class="t-text">Duration:</strong> {{ index .entry.Content "duration_ms" }}ms</span>
-      <span><strong class="t-text">Size:</strong> {{ index .entry.Content "response_size" }} bytes</span>
+    <div class="p-5 border-b t-border t-bg-sidebar grid grid-cols-1 md:grid-cols-3 gap-3 text-sm t-text-muted">
+      <div><strong class="t-text">Duration:</strong> {{ index .entry.Content "duration_ms" }}ms</div>
+      <div><strong class="t-text">Size:</strong> {{ index .entry.Content "response_size" }} bytes</div>
+      <div class="md:col-span-3">
+        <strong class="t-text">Action:</strong>
+        <span class="font-mono">{{ index .entry.Content "handler" }}</span>
+      </div>
+      <div class="md:col-span-3">
+        <strong class="t-text">Middleware:</strong>
+        <span class="font-mono">{{ index .entry.Content "middleware" }}</span>
+      </div>
     </div>
     <div class="border-b t-border">
       <div class="flex">
@@ -24,9 +32,9 @@
       <div class="mb-6">
         <h3 class="text-sm font-semibold t-text mb-2">Headers</h3>
         <div class="t-code-block rounded-lg overflow-x-auto">
-          {{ if index .entry.Content "headers" }}
+          {{ if index .entry.Content "request_headers" }}
           <table class="w-full text-sm font-mono">
-            {{ range $k, $v := index .entry.Content "headers" }}
+            {{ range $k, $v := index .entry.Content "request_headers" }}
             <tr class="border-b t-border">
               <td class="py-2 pr-4 t-accent font-medium">{{ $k }}</td>
               <td class="py-2 t-text-muted break-all">{{ $v }}</td>
@@ -47,9 +55,20 @@
     </div>
     <div id="panel-response" class="p-5 hidden">
       <div class="mb-6">
-        <h3 class="text-sm font-semibold t-text mb-2">Status</h3>
-        <div class="t-code-block rounded-lg p-4">
-          <span class="font-mono text-sm">{{ index .entry.Content "response_status" }}</span>
+        <h3 class="text-sm font-semibold t-text mb-2">Headers</h3>
+        <div class="t-code-block rounded-lg overflow-x-auto">
+          {{ if index .entry.Content "response_headers" }}
+          <table class="w-full text-sm font-mono">
+            {{ range $k, $v := index .entry.Content "response_headers" }}
+            <tr class="border-b t-border">
+              <td class="py-2 pr-4 t-accent font-medium">{{ $k }}</td>
+              <td class="py-2 t-text-muted break-all">{{ $v }}</td>
+            </tr>
+            {{ end }}
+          </table>
+          {{ else }}
+          <div class="p-4 t-text-subtle text-sm">No response headers</div>
+          {{ end }}
         </div>
       </div>
       <div>

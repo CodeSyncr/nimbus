@@ -17,6 +17,8 @@ import (
 type S3Driver struct {
 	client *s3.Client
 	bucket string
+	// requestTimeout bounds SDK calls when caller context is unavailable.
+	requestTimeout time.Duration
 
 	// presign is lazily created for signed URLs.
 	presign *s3.PresignClient
@@ -29,14 +31,30 @@ type S3Config struct {
 
 	// Bucket is the S3 bucket name.
 	Bucket string
+	// RequestTimeout limits S3 SDK calls made via storage Driver methods.
+	// Defaults to 15s.
+	RequestTimeout time.Duration
 }
 
 // NewS3Driver creates a new S3-backed storage driver.
 func NewS3Driver(cfg S3Config) *S3Driver {
-	return &S3Driver{
-		client: cfg.Client,
-		bucket: cfg.Bucket,
+	timeout := cfg.RequestTimeout
+	if timeout <= 0 {
+		timeout = 15 * time.Second
 	}
+	return &S3Driver{
+		client:         cfg.Client,
+		bucket:         cfg.Bucket,
+		requestTimeout: timeout,
+	}
+}
+
+func (d *S3Driver) sdkContext() (context.Context, context.CancelFunc) {
+	timeout := d.requestTimeout
+	if timeout <= 0 {
+		timeout = 15 * time.Second
+	}
+	return context.WithTimeout(context.Background(), timeout)
 }
 
 // Put uploads src to the given path in the bucket.
@@ -49,7 +67,9 @@ func (d *S3Driver) Put(path string, src io.Reader) error {
 
 	contentType := http.DetectContentType(data)
 
-	_, err = d.client.PutObject(context.TODO(), &s3.PutObjectInput{
+	ctx, cancel := d.sdkContext()
+	defer cancel()
+	_, err = d.client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket:      aws.String(d.bucket),
 		Key:         aws.String(path),
 		Body:        bytes.NewReader(data),
@@ -80,7 +100,9 @@ func (d *S3Driver) PutWithOptions(path string, src io.Reader, contentType string
 		input.ACL = acl
 	}
 
-	_, err = d.client.PutObject(context.TODO(), input)
+	ctx, cancel := d.sdkContext()
+	defer cancel()
+	_, err = d.client.PutObject(ctx, input)
 	if err != nil {
 		return fmt.Errorf("s3: put %q: %w", path, err)
 	}
@@ -89,7 +111,9 @@ func (d *S3Driver) PutWithOptions(path string, src io.Reader, contentType string
 
 // Get downloads the object at path and returns a ReadCloser.
 func (d *S3Driver) Get(path string) (io.ReadCloser, error) {
-	out, err := d.client.GetObject(context.TODO(), &s3.GetObjectInput{
+	ctx, cancel := d.sdkContext()
+	defer cancel()
+	out, err := d.client.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(d.bucket),
 		Key:    aws.String(path),
 	})
@@ -101,7 +125,9 @@ func (d *S3Driver) Get(path string) (io.ReadCloser, error) {
 
 // Delete removes the object at path.
 func (d *S3Driver) Delete(path string) error {
-	_, err := d.client.DeleteObject(context.TODO(), &s3.DeleteObjectInput{
+	ctx, cancel := d.sdkContext()
+	defer cancel()
+	_, err := d.client.DeleteObject(ctx, &s3.DeleteObjectInput{
 		Bucket: aws.String(d.bucket),
 		Key:    aws.String(path),
 	})
@@ -117,7 +143,9 @@ func (d *S3Driver) DeleteMany(paths []string) error {
 	for i, p := range paths {
 		objects[i] = types.ObjectIdentifier{Key: aws.String(p)}
 	}
-	_, err := d.client.DeleteObjects(context.TODO(), &s3.DeleteObjectsInput{
+	ctx, cancel := d.sdkContext()
+	defer cancel()
+	_, err := d.client.DeleteObjects(ctx, &s3.DeleteObjectsInput{
 		Bucket: aws.String(d.bucket),
 		Delete: &types.Delete{Objects: objects, Quiet: aws.Bool(true)},
 	})
@@ -129,7 +157,9 @@ func (d *S3Driver) DeleteMany(paths []string) error {
 
 // Exists checks if the object exists in the bucket.
 func (d *S3Driver) Exists(path string) (bool, error) {
-	_, err := d.client.HeadObject(context.TODO(), &s3.HeadObjectInput{
+	ctx, cancel := d.sdkContext()
+	defer cancel()
+	_, err := d.client.HeadObject(ctx, &s3.HeadObjectInput{
 		Bucket: aws.String(d.bucket),
 		Key:    aws.String(path),
 	})
@@ -142,7 +172,9 @@ func (d *S3Driver) Exists(path string) (bool, error) {
 
 // Size returns the size in bytes of the object.
 func (d *S3Driver) Size(path string) (int64, error) {
-	out, err := d.client.HeadObject(context.TODO(), &s3.HeadObjectInput{
+	ctx, cancel := d.sdkContext()
+	defer cancel()
+	out, err := d.client.HeadObject(ctx, &s3.HeadObjectInput{
 		Bucket: aws.String(d.bucket),
 		Key:    aws.String(path),
 	})
@@ -157,7 +189,9 @@ func (d *S3Driver) Size(path string) (int64, error) {
 
 // LastModified returns the last modified time of the object.
 func (d *S3Driver) LastModified(path string) (time.Time, error) {
-	out, err := d.client.HeadObject(context.TODO(), &s3.HeadObjectInput{
+	ctx, cancel := d.sdkContext()
+	defer cancel()
+	out, err := d.client.HeadObject(ctx, &s3.HeadObjectInput{
 		Bucket: aws.String(d.bucket),
 		Key:    aws.String(path),
 	})
@@ -172,7 +206,9 @@ func (d *S3Driver) LastModified(path string) (time.Time, error) {
 
 // Copy copies an object from src to dst within the same bucket.
 func (d *S3Driver) Copy(src, dst string) error {
-	_, err := d.client.CopyObject(context.TODO(), &s3.CopyObjectInput{
+	ctx, cancel := d.sdkContext()
+	defer cancel()
+	_, err := d.client.CopyObject(ctx, &s3.CopyObjectInput{
 		Bucket:     aws.String(d.bucket),
 		CopySource: aws.String(d.bucket + "/" + src),
 		Key:        aws.String(dst),
@@ -202,7 +238,9 @@ func (d *S3Driver) TemporaryURL(path string, duration time.Duration) (string, er
 		d.presign = s3.NewPresignClient(d.client)
 	}
 
-	req, err := d.presign.PresignGetObject(context.TODO(), &s3.GetObjectInput{
+	ctx, cancel := d.sdkContext()
+	defer cancel()
+	req, err := d.presign.PresignGetObject(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(d.bucket),
 		Key:    aws.String(path),
 	}, s3.WithPresignExpires(duration))
@@ -218,7 +256,9 @@ func (d *S3Driver) TemporaryUploadURL(path string, duration time.Duration) (stri
 		d.presign = s3.NewPresignClient(d.client)
 	}
 
-	req, err := d.presign.PresignPutObject(context.TODO(), &s3.PutObjectInput{
+	ctx, cancel := d.sdkContext()
+	defer cancel()
+	req, err := d.presign.PresignPutObject(ctx, &s3.PutObjectInput{
 		Bucket: aws.String(d.bucket),
 		Key:    aws.String(path),
 	}, s3.WithPresignExpires(duration))
@@ -230,7 +270,9 @@ func (d *S3Driver) TemporaryUploadURL(path string, duration time.Duration) (stri
 
 // List lists objects with the given prefix. Returns keys.
 func (d *S3Driver) List(prefix string) ([]string, error) {
-	out, err := d.client.ListObjectsV2(context.TODO(), &s3.ListObjectsV2Input{
+	ctx, cancel := d.sdkContext()
+	defer cancel()
+	out, err := d.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
 		Bucket: aws.String(d.bucket),
 		Prefix: aws.String(prefix),
 	})

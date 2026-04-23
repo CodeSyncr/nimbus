@@ -26,7 +26,7 @@
 |
 |   // Row-level: auto-applies WHERE tenant_id = ? to queries
 |   // Schema-level: switches Postgres search_path
-|   // Database-level: returns the tenant's own *gorm.DB
+|   // Database-level: returns the tenant's own *lucid.DB
 |
 */
 
@@ -43,7 +43,7 @@ import (
 	"github.com/CodeSyncr/nimbus"
 	nhttp "github.com/CodeSyncr/nimbus/http"
 	"github.com/CodeSyncr/nimbus/router"
-	"gorm.io/gorm"
+	"github.com/CodeSyncr/nimbus/lucid"
 )
 
 // ---------------------------------------------------------------------------
@@ -86,8 +86,8 @@ type Config struct {
 	HeaderName     string // for ResolveHeader (default: X-Tenant-ID)
 	PathPrefix     string // for ResolvePath (default: first path segment)
 	Strategy       Strategy
-	DefaultDB      *gorm.DB                               // the main database connection
-	DBResolver     func(tenant *Tenant) (*gorm.DB, error) // for StrategyDatabase
+	DefaultDB      *lucid.DB                               // the main database connection
+	DBResolver     func(tenant *Tenant) (*lucid.DB, error) // for StrategyDatabase
 	CustomResolver func(r *http.Request) (string, error)  // for ResolveCustom
 }
 
@@ -104,7 +104,7 @@ const tenantDBKey contextKey = "nimbus.tenant.db"
 type Manager struct {
 	config  Config
 	tenants sync.Map // id -> *Tenant
-	dbs     sync.Map // id -> *gorm.DB (for database strategy caching)
+	dbs     sync.Map // id -> *lucid.DB (for database strategy caching)
 	store   TenantStore
 }
 
@@ -206,7 +206,7 @@ func (m *Manager) resolvePath(r *http.Request) (string, error) {
 // ---------------------------------------------------------------------------
 
 // ScopeDB returns a tenant-scoped database connection.
-func (m *Manager) ScopeDB(tenant *Tenant) (*gorm.DB, error) {
+func (m *Manager) ScopeDB(tenant *Tenant) (*lucid.DB, error) {
 	switch m.config.Strategy {
 	case StrategyRow:
 		return m.scopeRow(tenant)
@@ -219,15 +219,15 @@ func (m *Manager) ScopeDB(tenant *Tenant) (*gorm.DB, error) {
 	}
 }
 
-func (m *Manager) scopeRow(tenant *Tenant) (*gorm.DB, error) {
+func (m *Manager) scopeRow(tenant *Tenant) (*lucid.DB, error) {
 	if m.config.DefaultDB == nil {
 		return nil, fmt.Errorf("tenancy: DefaultDB not configured")
 	}
 	// Add a global scope that filters by tenant_id
-	db := m.config.DefaultDB.Session(&gorm.Session{NewDB: true})
+	db := m.config.DefaultDB.Session(&lucid.Session{NewDB: true})
 	db = db.Where("tenant_id = ?", tenant.ID)
 	// Add a callback to auto-set tenant_id on create
-	db.Callback().Create().Before("gorm:create").Register("tenancy:set_tenant_id", func(tx *gorm.DB) {
+	db.Callback().Create().Before("gorm:create").Register("tenancy:set_tenant_id", func(tx *lucid.DB) {
 		if tx.Statement.Schema != nil {
 			for _, field := range tx.Statement.Schema.Fields {
 				if field.DBName == "tenant_id" {
@@ -239,7 +239,7 @@ func (m *Manager) scopeRow(tenant *Tenant) (*gorm.DB, error) {
 	return db, nil
 }
 
-func (m *Manager) scopeSchema(tenant *Tenant) (*gorm.DB, error) {
+func (m *Manager) scopeSchema(tenant *Tenant) (*lucid.DB, error) {
 	if m.config.DefaultDB == nil {
 		return nil, fmt.Errorf("tenancy: DefaultDB not configured")
 	}
@@ -247,15 +247,15 @@ func (m *Manager) scopeSchema(tenant *Tenant) (*gorm.DB, error) {
 	if schema == "" {
 		schema = "tenant_" + tenant.ID
 	}
-	db := m.config.DefaultDB.Session(&gorm.Session{NewDB: true})
+	db := m.config.DefaultDB.Session(&lucid.Session{NewDB: true})
 	db = db.Exec("SET search_path TO " + schema + ", public")
 	return db, nil
 }
 
-func (m *Manager) scopeDatabase(tenant *Tenant) (*gorm.DB, error) {
+func (m *Manager) scopeDatabase(tenant *Tenant) (*lucid.DB, error) {
 	// Check cache first
 	if cached, ok := m.dbs.Load(tenant.ID); ok {
-		return cached.(*gorm.DB), nil
+		return cached.(*lucid.DB), nil
 	}
 	if m.config.DBResolver == nil {
 		return nil, fmt.Errorf("tenancy: DBResolver not configured for database strategy")
@@ -337,12 +337,12 @@ func Current(c *nhttp.Context) *Tenant {
 }
 
 // DB returns the tenant-scoped database from the request context.
-func DB(c *nhttp.Context) *gorm.DB {
+func DB(c *nhttp.Context) *lucid.DB {
 	val := c.Request.Context().Value(tenantDBKey)
 	if val == nil {
 		return nil
 	}
-	return val.(*gorm.DB)
+	return val.(*lucid.DB)
 }
 
 // ID returns just the tenant ID from context.
@@ -472,11 +472,11 @@ func (p *TenantPlugin) currentTenant(c *nhttp.Context) error {
 
 // GormStore implements TenantStore using GORM.
 type GormStore struct {
-	db *gorm.DB
+	db *lucid.DB
 }
 
 // NewGormStore creates a GORM-backed tenant store.
-func NewGormStore(db *gorm.DB) *GormStore {
+func NewGormStore(db *lucid.DB) *GormStore {
 	_ = db.AutoMigrate(&Tenant{})
 	return &GormStore{db: db}
 }

@@ -49,8 +49,36 @@ func authConfigContent(guard string) string {
 
 package config
 
+import "os"
+
 // AuthGuard defines the authentication guard type.
 var AuthGuard = "session"
+
+// StatelessToken is defined for compatibility with bin/server.go scaffolding.
+// It is only used when AuthGuard == "stateless".
+type StatelessTokenConfig struct {
+	Driver    string
+	Secret    string
+	ExpiresIn string
+}
+
+var StatelessToken = StatelessTokenConfig{
+	Driver:    "jwt",
+	Secret:    "",
+	ExpiresIn: "24h",
+}
+
+func init() {
+	if v := os.Getenv("AUTH_TOKEN_DRIVER"); v != "" {
+		StatelessToken.Driver = v
+	}
+	if v := os.Getenv("AUTH_TOKEN_SECRET"); v != "" {
+		StatelessToken.Secret = v
+	}
+	if v := os.Getenv("AUTH_TOKEN_EXPIRES_IN"); v != "" {
+		StatelessToken.ExpiresIn = v
+	}
+}
 `
 
 	case "access_token":
@@ -78,8 +106,36 @@ var AuthGuard = "session"
 
 package config
 
+import "os"
+
 // AuthGuard defines the authentication guard type.
 var AuthGuard = "access_token"
+
+// StatelessToken is defined for compatibility with bin/server.go scaffolding.
+// It is only used when AuthGuard == "stateless".
+type StatelessTokenConfig struct {
+	Driver    string
+	Secret    string
+	ExpiresIn string
+}
+
+var StatelessToken = StatelessTokenConfig{
+	Driver:    "jwt",
+	Secret:    "",
+	ExpiresIn: "24h",
+}
+
+func init() {
+	if v := os.Getenv("AUTH_TOKEN_DRIVER"); v != "" {
+		StatelessToken.Driver = v
+	}
+	if v := os.Getenv("AUTH_TOKEN_SECRET"); v != "" {
+		StatelessToken.Secret = v
+	}
+	if v := os.Getenv("AUTH_TOKEN_EXPIRES_IN"); v != "" {
+		StatelessToken.ExpiresIn = v
+	}
+}
 `
 
 	case "basic":
@@ -104,11 +160,39 @@ var AuthGuard = "access_token"
 
 package config
 
+import "os"
+
 // AuthGuard defines the authentication guard type.
 var AuthGuard = "basic"
 
 // BasicAuthRealm is the realm name shown in the browser's login dialog.
 var BasicAuthRealm = "Restricted"
+
+// StatelessToken is defined for compatibility with bin/server.go scaffolding.
+// It is only used when AuthGuard == "stateless".
+type StatelessTokenConfig struct {
+	Driver    string
+	Secret    string
+	ExpiresIn string
+}
+
+var StatelessToken = StatelessTokenConfig{
+	Driver:    "jwt",
+	Secret:    "",
+	ExpiresIn: "24h",
+}
+
+func init() {
+	if v := os.Getenv("AUTH_TOKEN_DRIVER"); v != "" {
+		StatelessToken.Driver = v
+	}
+	if v := os.Getenv("AUTH_TOKEN_SECRET"); v != "" {
+		StatelessToken.Secret = v
+	}
+	if v := os.Getenv("AUTH_TOKEN_EXPIRES_IN"); v != "" {
+		StatelessToken.ExpiresIn = v
+	}
+}
 `
 
 	case "stateless":

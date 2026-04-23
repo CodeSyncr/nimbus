@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/redis/go-redis/v9"
+	"github.com/CodeSyncr/nimbus/redis"
 )
 
 const redisPrefix = "nimbus:cache:"

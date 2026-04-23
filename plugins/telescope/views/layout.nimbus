@@ -1,240 +1,928 @@
 <!DOCTYPE html>
-<html lang="en" class="">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Telescope · {{ .title }}</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>tailwind.config = { darkMode: 'class' };</script>
+
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=JetBrains+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+
   <style>
-    :root {
-      --t-bg: 248 250 252;
-      --t-bg-sidebar: 241 245 249;
-      --t-bg-card: 255 255 255;
-      --t-border: 226 232 240;
-      --t-text: 15 23 42;
-      --t-text-muted: 100 116 139;
-      --t-text-subtle: 148 163 184;
-      --t-accent: 20 184 166;
-      --t-accent-hover: 13 148 136;
-      --t-accent-muted: 204 251 241;
-      --t-hover: 241 245 249;
-      --t-active: 226 232 240;
-      --t-success: 34 197 94;
-      --t-warning: 234 179 8;
-      --t-error: 239 68 68;
-      --t-shadow: 0 1px 3px rgb(0 0 0 / 0.06);
-      --t-shadow-lg: 0 4px 6px -1px rgb(0 0 0 / 0.08), 0 2px 4px -2px rgb(0 0 0 / 0.06);
-    }
-    .dark {
-      --t-bg: 15 23 42;
-      --t-bg-sidebar: 30 41 59;
-      --t-bg-card: 30 41 59;
-      --t-border: 51 65 85;
-      --t-text: 248 250 252;
-      --t-text-muted: 203 213 225;
-      --t-text-subtle: 148 163 184;
-      --t-accent: 45 212 191;
-      --t-accent-hover: 94 234 212;
-      --t-accent-muted: 20 184 166;
-      --t-hover: 51 65 85;
-      --t-active: 71 85 105;
-      --t-success: 74 222 128;
-      --t-warning: 250 204 21;
-      --t-error: 248 113 113;
-      --t-shadow: 0 1px 3px rgb(0 0 0 / 0.3);
-      --t-shadow-lg: 0 4px 6px -1px rgb(0 0 0 / 0.4), 0 2px 4px -2px rgb(0 0 0 / 0.3);
-    }
-    body { font-family: 'Plus Jakarta Sans', system-ui, sans-serif; }
-    .font-mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
-    .t-bg { background-color: rgb(var(--t-bg)); }
-    .t-bg-sidebar { background-color: rgb(var(--t-bg-sidebar)); }
-    .t-bg-card { background-color: rgb(var(--t-bg-card)); }
-    .t-border { border-color: rgb(var(--t-border)); }
-    .t-text { color: rgb(var(--t-text)); }
-    .t-text-muted { color: rgb(var(--t-text-muted)); }
-    .t-text-subtle { color: rgb(var(--t-text-subtle)); }
-    .t-accent { color: rgb(var(--t-accent)); }
-    .t-accent-bg { background-color: rgb(var(--t-accent-muted)); }
-    .dark .t-accent-bg { background-color: rgb(var(--t-accent) / 0.15); }
-    .t-hover:hover { background-color: rgb(var(--t-hover)); }
-    .t-active { background-color: rgb(var(--t-active)); }
-    .t-nav-active { background-color: rgb(var(--t-active)); color: rgb(var(--t-text)); }
-    .t-nav-inactive { color: rgb(var(--t-text-muted)); }
-    .t-nav-inactive:hover { color: rgb(var(--t-text)); background-color: rgb(var(--t-hover)); }
-    .t-card { background-color: rgb(var(--t-bg-card)); border: 1px solid rgb(var(--t-border)); box-shadow: var(--t-shadow); }
-    .t-status-2xx { background-color: rgb(var(--t-success) / 0.15); color: rgb(var(--t-success)); }
-    .t-status-4xx { background-color: rgb(var(--t-warning) / 0.15); color: rgb(var(--t-warning)); }
-    .t-status-5xx { background-color: rgb(var(--t-error) / 0.15); color: rgb(var(--t-error)); }
-    .t-error { color: rgb(var(--t-error)); }
-    .t-code-block { background-color: rgb(var(--t-bg-sidebar)); border: 1px solid rgb(var(--t-border)); }
-    .t-divide > * + * { border-top: 1px solid rgb(var(--t-border)); }
+   :root {
+    --bg: #0a0b0d;
+    --bg2: #0f1114;
+    --bg3: #141619;
+    --bg4: #1a1d21;
+    --border: rgba(255,255,255,0.06);
+    --border2: rgba(255,255,255,0.1);
+    --text: #e2e4e9;
+    --text2: #7a7f8a;
+    --text3: #4a4f5a;
+    --accent: #00e5b0;
+    --accent2: #00b88a;
+    --accent-dim: rgba(0,229,176,0.08);
+    --accent-glow: rgba(0,229,176,0.15);
+    --red: #ff4d6a;
+    --red-dim: rgba(255,77,106,0.1);
+    --yellow: #ffb347;
+    --yellow-dim: rgba(255,179,71,0.1);
+    --blue: #4d9eff;
+    --blue-dim: rgba(77,158,255,0.1);
+    --purple: #a78bfa;
+    --purple-dim: rgba(167,139,250,0.1);
+    --green: #4ade80;
+    --green-dim: rgba(74,222,128,0.1);
+    --sidebar-w: 220px;
+    --header-h: 52px;
+  }
+ 
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+ 
+  body {
+    font-family: 'Syne', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    height: 100vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+ 
+  /* ── HEADER ── */
+  header {
+    height: var(--header-h);
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 20px;
+    gap: 16px;
+    flex-shrink: 0;
+    position: relative;
+    z-index: 10;
+  }
+ 
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    margin-right: 12px;
+  }
+ 
+  .logo-icon {
+    width: 26px; height: 26px;
+    background: var(--accent);
+    border-radius: 7px;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 0 14px var(--accent-glow);
+  }
+  .logo-icon svg { width:14px; height:14px; fill: #0a0b0d; }
+ 
+  .logo-name {
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    color: var(--text);
+  }
+
+  /* Query operation chip colors (used by Telescope entries list/detail) */
+  .method-badge.op-SELECT { background: var(--green-dim); color: var(--green); border-color: rgba(74,222,128,0.25); }
+  .method-badge.op-INSERT { background: var(--blue-dim); color: var(--blue); border-color: rgba(77,158,255,0.25); }
+  .method-badge.op-UPDATE { background: var(--yellow-dim); color: var(--yellow); border-color: rgba(255,179,71,0.25); }
+  .method-badge.op-DELETE { background: var(--red-dim); color: var(--red); border-color: rgba(255,77,106,0.25); }
+ 
+  .header-divider {
+    width: 1px; height: 20px;
+    background: var(--border2);
+    margin: 0 4px;
+  }
+ 
+  .header-env {
+    font-size: 11px;
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--accent);
+    background: var(--accent-dim);
+    border: 1px solid rgba(0,229,176,0.2);
+    padding: 2px 8px;
+    border-radius: 4px;
+    letter-spacing: 0.08em;
+  }
+ 
+  .header-search {
+    flex: 1;
+    max-width: 380px;
+    margin-left: auto;
+    position: relative;
+  }
+  .header-search input {
+    width: 100%;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-family: 'Syne', sans-serif;
+    font-size: 13px;
+    padding: 7px 12px 7px 34px;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  .header-search input:focus { border-color: rgba(0,229,176,0.35); }
+  .header-search input::placeholder { color: var(--text3); }
+  .search-icon {
+    position: absolute; left: 11px; top: 50%; transform: translateY(-50%);
+    opacity: 0.35;
+  }
+ 
+  .header-actions { display: flex; align-items: center; gap: 8px; margin-left: 12px; }
+ 
+  .live-badge {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 11px; font-weight: 600; letter-spacing: 0.06em;
+    color: var(--green); text-transform: uppercase;
+    background: var(--green-dim);
+    border: 1px solid rgba(74,222,128,0.2);
+    border-radius: 20px;
+    padding: 4px 10px;
+  }
+  .live-dot {
+    width: 6px; height: 6px;
+    background: var(--green);
+    border-radius: 50%;
+    animation: pulse 2s infinite;
+  }
+ 
+  @keyframes pulse {
+    0%,100% { opacity:1; transform:scale(1); }
+    50% { opacity:0.4; transform:scale(0.8); }
+  }
+ 
+  .btn-icon {
+    width: 32px; height: 32px;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    transition: all 0.15s;
+    color: var(--text2);
+  }
+  .btn-icon:hover { background: var(--bg4); border-color: var(--border2); color: var(--text); }
+ 
+  /* ── LAYOUT ── */
+  .layout {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+  }
+ 
+  /* ── SIDEBAR ── */
+  nav {
+    width: var(--sidebar-w);
+    background: var(--bg2);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+    overflow-y: auto;
+    scrollbar-width: none;
+  }
+  nav::-webkit-scrollbar { display: none; }
+ 
+  .nav-section {
+    padding: 18px 12px 8px;
+  }
+ 
+  .nav-section-label {
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text3);
+    padding: 0 8px;
+    margin-bottom: 6px;
+  }
+ 
+  .nav-item {
+    display: flex; align-items: center; gap: 9px;
+    padding: 8px 10px;
+    border-radius: 7px;
+    cursor: pointer;
+    transition: all 0.15s;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text2);
+    position: relative;
+    user-select: none;
+  }
+  .nav-item:hover { background: var(--bg4); color: var(--text); }
+  .nav-item.active {
+    background: var(--accent-dim);
+    color: var(--accent);
+    border: 1px solid rgba(0,229,176,0.12);
+  }
+  .nav-item.active .nav-icon { opacity: 1; }
+ 
+  .nav-icon {
+    width: 16px; height: 16px; flex-shrink: 0;
+    opacity: 0.6;
+  }
+  .nav-item.active .nav-icon { opacity: 1; }
+ 
+  .nav-badge {
+    margin-left: auto;
+    font-size: 10px;
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 500;
+    padding: 1px 6px;
+    border-radius: 10px;
+    background: var(--bg4);
+    color: var(--text3);
+    min-width: 22px;
+    text-align: center;
+  }
+  .nav-item.active .nav-badge {
+    background: var(--accent-glow);
+    color: var(--accent);
+  }
+  .nav-badge.red { background: var(--red-dim); color: var(--red); }
+ 
+  .nav-sep {
+    height: 1px;
+    background: var(--border);
+    margin: 8px 12px;
+  }
+ 
+  .nav-footer {
+    margin-top: auto;
+    padding: 12px;
+    border-top: 1px solid var(--border);
+  }
+ 
+  .status-bar {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+  }
+  .status-bar-title { font-size: 11px; color: var(--text3); margin-bottom: 8px; font-weight: 600; letter-spacing: 0.05em; }
+  .status-metrics { display: flex; flex-direction: column; gap: 6px; }
+  .status-metric { display: flex; justify-content: space-between; align-items: center; }
+  .status-metric-label { font-size: 11px; color: var(--text2); }
+  .status-metric-val {
+    font-size: 11px;
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--accent);
+    font-weight: 500;
+  }
+  .mini-bar { height: 3px; background: var(--bg4); border-radius: 2px; margin-top: 4px; overflow: hidden; }
+  .mini-bar-fill { height: 100%; border-radius: 2px; background: var(--accent); transition: width 0.5s; }
+ 
+  /* ── MAIN ── */
+  main {
+    flex: 1;
+    display: flex;
+    overflow: hidden;
+  }
+ 
+  /* ── LIST PANEL ── */
+  .list-panel {
+    width: 420px;
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+  }
+ 
+  .panel-header {
+    padding: 14px 16px 12px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+  }
+ 
+  .panel-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text);
+    flex: 1;
+  }
+ 
+  .panel-count {
+    font-size: 12px;
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--text3);
+    background: var(--bg3);
+    padding: 2px 8px;
+    border-radius: 10px;
+  }
+ 
+  .filter-row {
+    padding: 10px 14px;
+    display: flex;
+    gap: 6px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+ 
+  .filter-chip {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 4px 10px;
+    border-radius: 20px;
+    cursor: pointer;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text2);
+    transition: all 0.15s;
+    letter-spacing: 0.04em;
+  }
+  .filter-chip:hover { border-color: var(--border2); color: var(--text); }
+  .filter-chip.active { background: var(--accent-dim); border-color: rgba(0,229,176,0.25); color: var(--accent); }
+  .filter-chip.red.active { background: var(--red-dim); border-color: rgba(255,77,106,0.25); color: var(--red); }
+  .filter-chip.yellow.active { background: var(--yellow-dim); border-color: rgba(255,179,71,0.25); color: var(--yellow); }
+ 
+  .entries-list {
+    flex: 1;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border2) transparent;
+  }
+  .entries-list::-webkit-scrollbar { width: 4px; }
+  .entries-list::-webkit-scrollbar-track { background: transparent; }
+  .entries-list::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+ 
+  .entry-item {
+  display: flex;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    transition: background 0.12s;
+    position: relative;
+    animation: fadeSlideIn 0.25s ease both;
+  }
+  .entry-item:hover { background: var(--bg3); }
+  .entry-item.selected {
+    background: var(--accent-dim);
+    border-left: 2px solid var(--accent);
+    padding-left: 14px;
+  }
+  .entry-item.selected::after {
+    content: '';
+    position: absolute;
+    right: 0; top: 0; bottom: 0;
+    width: 1px;
+    background: var(--accent);
+    opacity: 0.3;
+  }
+ 
+  @keyframes fadeSlideIn {
+    from { opacity: 0; transform: translateY(-6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+ 
+  .entry-row1 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 5px;
+  }
+ 
+  .method-badge {
+    font-size: 9px;
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    padding: 2px 6px;
+    border-radius: 4px;
+    flex-shrink: 0;
+  }
+  .method-GET { background: var(--blue-dim); color: var(--blue); }
+  .method-POST { background: var(--green-dim); color: var(--green); }
+  .method-PUT { background: var(--yellow-dim); color: var(--yellow); }
+  .method-DELETE { background: var(--red-dim); color: var(--red); }
+  .method-PATCH { background: var(--purple-dim); color: var(--purple); }
+ 
+  /* Query operation chip colors (override base badge styles) */
+  .method-badge.op-SELECT { background: var(--green-dim) !important; color: var(--green) !important; border-color: rgba(74,222,128,0.25) !important; }
+  .method-badge.op-INSERT { background: var(--blue-dim) !important; color: var(--blue) !important; border-color: rgba(77,158,255,0.25) !important; }
+  .method-badge.op-UPDATE { background: var(--yellow-dim) !important; color: var(--yellow) !important; border-color: rgba(255,179,71,0.25) !important; }
+  .method-badge.op-DELETE { background: var(--red-dim) !important; color: var(--red) !important; border-color: rgba(255,77,106,0.25) !important; }
+ 
+  .entry-path {
+    font-size: 13px;
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 400;
+    color: var(--text);
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+ 
+  .status-code {
+    font-size: 11px;
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 600;
+    flex-shrink: 0;
+  }
+  .s2xx { color: var(--green); }
+  .s3xx { color: var(--blue); }
+  .s4xx { color: var(--yellow); }
+  .s5xx { color: var(--red); }
+ 
+  .entry-row2 {
+    display: flex; align-items: center; gap: 6px;
+  }
+  .entry-meta {
+    font-size: 11px;
+    color: var(--text3);
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .entry-meta-sep { color: var(--text3); font-size: 10px; }
+  .entry-dur {
+    font-size: 11px;
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--text2);
+  }
+  .entry-dur.slow { color: var(--yellow); }
+  .entry-dur.vslow { color: var(--red); }
+  .entry-time { font-size: 11px; color: var(--text3); margin-left: auto; font-family: 'JetBrains Mono', monospace; }
+ 
+  /* ── DETAIL PANEL ── */
+  .detail-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: var(--bg);
+  }
+ 
+  .detail-header {
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+ 
+  .detail-title-row {
+    display: flex; align-items: center; gap: 10px; margin-bottom: 10px;
+  }
+ 
+  .detail-method { font-size: 11px; font-family: 'JetBrains Mono', monospace; font-weight: 700; }
+  .detail-path {
+    font-size: 15px;
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--text);
+    font-weight: 400;
+  }
+  .detail-status { margin-left: auto; }
+ 
+  .detail-meta-row {
+    display: flex; gap: 20px; flex-wrap: wrap;
+  }
+ 
+  .detail-meta-item {
+    display: flex; flex-direction: column; gap: 3px;
+  }
+  .detail-meta-label { font-size: 10px; color: var(--text3); letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600; }
+  .detail-meta-val { font-size: 12px; font-family: 'JetBrains Mono', monospace; color: var(--text2); }
+  .detail-meta-val.accent { color: var(--accent); }
+ 
+  .detail-tabs {
+    display: flex; gap: 0;
+    border-bottom: 1px solid var(--border);
+    padding: 0 20px;
+    flex-shrink: 0;
+  }
+ 
+  .detail-tab {
+    font-size: 12px;
+    font-weight: 600;
+    padding: 10px 14px;
+    cursor: pointer;
+    color: var(--text3);
+    border-bottom: 2px solid transparent;
+    transition: all 0.15s;
+    letter-spacing: 0.04em;
+    margin-bottom: -1px;
+  }
+  .detail-tab:hover { color: var(--text2); }
+  .detail-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+ 
+  .detail-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border2) transparent;
+  }
+  .detail-body::-webkit-scrollbar { width: 4px; }
+  .detail-body::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+ 
+  /* DETAIL SECTIONS */
+  .detail-section { margin-bottom: 24px; }
+  .detail-section-title {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text3);
+    margin-bottom: 10px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .detail-section-title::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+ 
+  .kv-table { width: 100%; border-collapse: collapse; }
+  .kv-table tr { border-bottom: 1px solid var(--border); }
+  .kv-table tr:last-child { border-bottom: none; }
+  .kv-table td {
+    padding: 8px 10px;
+    font-size: 12px;
+    font-family: 'JetBrains Mono', monospace;
+    vertical-align: top;
+  }
+  .kv-table td:first-child {
+    color: var(--text3);
+    width: 38%;
+    white-space: nowrap;
+    font-weight: 500;
+  }
+  .kv-table td:last-child { color: var(--text2); word-break: break-all; }
+  .kv-row-wrap { background: var(--bg2); border-radius: 6px; overflow: hidden; border: 1px solid var(--border); }
+ 
+  .code-block {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--text2);
+    white-space: pre;
+    overflow-x: auto;
+    line-height: 1.7;
+  }
+  .code-block .k { color: var(--purple); }
+  .code-block .s { color: var(--green); }
+  .code-block .n { color: var(--blue); }
+  .code-block .c { color: var(--text3); font-style: italic; }
+ 
+  .query-item {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+    margin-bottom: 8px;
+    transition: border-color 0.15s;
+  }
+  .query-item:hover { border-color: var(--border2); }
+  .query-top { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .query-dur { font-size: 10px; font-family: 'JetBrains Mono', monospace; color: var(--yellow); background: var(--yellow-dim); padding: 2px 6px; border-radius: 4px; }
+  .query-conn { font-size: 10px; font-family: 'JetBrains Mono', monospace; color: var(--text3); margin-left: auto; }
+  .query-sql { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--text2); line-height: 1.5; }
+  .sql-k { color: var(--blue); font-weight: 600; }
+  .sql-t { color: var(--accent); }
+  .sql-v { color: var(--yellow); }
+ 
+  .timeline {
+    position: relative;
+    padding-left: 20px;
+  }
+  .timeline::before {
+    content: '';
+    position: absolute;
+    left: 6px; top: 6px; bottom: 6px;
+    width: 1px;
+    background: var(--border2);
+  }
+  .timeline-item {
+    position: relative;
+    margin-bottom: 16px;
+  }
+  .timeline-dot {
+    position: absolute;
+    left: -17px; top: 5px;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--bg4);
+    border: 2px solid var(--border2);
+  }
+  .timeline-dot.success { border-color: var(--green); background: var(--green-dim); }
+  .timeline-dot.warning { border-color: var(--yellow); background: var(--yellow-dim); }
+  .timeline-dot.error { border-color: var(--red); background: var(--red-dim); }
+  .timeline-content {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    padding: 10px 12px;
+  }
+  .timeline-title { font-size: 12px; color: var(--text); font-weight: 600; margin-bottom: 3px; }
+  .timeline-sub { font-size: 11px; font-family: 'JetBrains Mono', monospace; color: var(--text3); }
+ 
+  /* EMPTY STATE */
+  .empty-state {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    color: var(--text3);
+  }
+  .empty-icon { opacity: 0.2; }
+  .empty-title { font-size: 14px; font-weight: 600; color: var(--text2); }
+  .empty-sub { font-size: 12px; }
+ 
+  /* SCROLLBAR */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+ 
+  /* NEW ENTRY TOAST */
+  .toast {
+    position: fixed;
+    bottom: 20px; right: 20px;
+    background: var(--bg3);
+    border: 1px solid var(--border2);
+    border-radius: 10px;
+    padding: 12px 16px;
+    display: flex; align-items: center; gap: 10px;
+    font-size: 12px; color: var(--text2);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+    transform: translateY(80px);
+    opacity: 0;
+    transition: all 0.3s cubic-bezier(.34,1.56,.64,1);
+    z-index: 100;
+  }
+  .toast.show { transform: translateY(0); opacity: 1; }
+  .toast-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex-shrink: 0; animation: pulse 1.5s infinite; }
+ 
+  /* ── HIDE TABS CONTENT ── */
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+
+  /* Utility */
+  .hidden { display: none !important; }
+
+  /* Links should look like UI elements, not web defaults */
+  a { color: inherit; text-decoration: none; }
+  a:hover { text-decoration: none; }
   </style>
 </head>
-<body class="min-h-screen t-bg t-text flex transition-colors duration-200">
-  <script>
-    (function() {
-      const stored = localStorage.getItem('telescope-theme');
-      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-      const dark = stored === 'dark' || (stored === null && prefersDark);
-      document.documentElement.classList.toggle('dark', dark);
-    })();
-    function toggleTheme() {
-      const dark = document.documentElement.classList.toggle('dark');
-      localStorage.setItem('telescope-theme', dark ? 'dark' : 'light');
-    }
-    let liveInterval = null;
-    const LIVE_KEY = 'telescope-live';
-    function toggleLive() {
-      const live = localStorage.getItem(LIVE_KEY) !== 'false';
-      const next = !live;
-      localStorage.setItem(LIVE_KEY, next ? 'true' : 'false');
-      const btn = document.getElementById('telescope-live-btn');
-      if (next) {
-        btn.classList.add('t-accent');
-        btn.title = 'Live polling on (click to pause)';
-        startPolling();
-      } else {
-        btn.classList.remove('t-accent');
-        btn.title = 'Live polling off (click to enable)';
-        stopPolling();
-      }
-    }
-    function startPolling() {
-      stopPolling();
-      liveInterval = setInterval(function() { location.reload(); }, 3000);
-    }
-    function stopPolling() {
-      if (liveInterval) { clearInterval(liveInterval); liveInterval = null; }
-    }
-    function initLive() {
-      const live = localStorage.getItem(LIVE_KEY) !== 'false';
-      const btn = document.getElementById('telescope-live-btn');
-      if (btn) {
-        if (live) { btn.classList.add('t-accent'); startPolling(); }
-        else { btn.title = 'Live polling off (click to enable)'; }
-      }
-    }
-    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initLive);
-    else initLive();
-  </script>
-  <!-- Sidebar -->
-  <aside class="w-64 border-r t-border t-bg-sidebar flex flex-col shrink-0 transition-colors duration-200">
-    <div class="p-5 border-b t-border">
-      <a href="/telescope" class="flex items-center gap-2.5 font-semibold t-accent hover:opacity-90 transition">
-        <svg class="w-6 h-6 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
-        Telescope
-      </a>
+<body>
+  <header>
+    <div class="logo">
+      <div class="logo-icon">
+        <svg viewBox="0 0 16 16" width="14" height="14"><path d="M8 1L14 4.5V11.5L8 15L2 11.5V4.5L8 1Z" fill="#0a0b0d"/></svg>
+      </div>
+      <span class="logo-name">Telescope</span>
     </div>
-    <nav class="flex-1 overflow-y-auto py-3 px-2">
-      <a href="/telescope" class="flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg transition {{ if eq .watcher "dashboard" }}t-nav-active{{ else }}t-nav-inactive{{ end }}">
-        <svg class="w-5 h-5 shrink-0 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6z"/></svg>
-        Dashboard
-      </a>
-      <a href="/telescope/requests" class="flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg transition {{ if eq .watcher "requests" }}t-nav-active{{ else }}t-nav-inactive{{ end }}">
-        <svg class="w-5 h-5 shrink-0 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/></svg>
-        Requests
-      </a>
-      <a href="/telescope/commands" class="flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg transition {{ if eq .watcher "commands" }}t-nav-active{{ else }}t-nav-inactive{{ end }}">
-        <svg class="w-5 h-5 shrink-0 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
-        Commands
-      </a>
-      <a href="/telescope/schedule" class="flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg transition {{ if eq .watcher "schedule" }}t-nav-active{{ else }}t-nav-inactive{{ end }}">
-        <svg class="w-5 h-5 shrink-0 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-        Schedule
-      </a>
-      <a href="/telescope/jobs" class="flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg transition {{ if eq .watcher "jobs" }}t-nav-active{{ else }}t-nav-inactive{{ end }}">
-        <svg class="w-5 h-5 shrink-0 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"/></svg>
-        Jobs
-      </a>
-      <a href="/telescope/batches" class="flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg transition {{ if eq .watcher "batches" }}t-nav-active{{ else }}t-nav-inactive{{ end }}">
-        <svg class="w-5 h-5 shrink-0 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
-        Batches
-      </a>
-      <a href="/telescope/cache" class="flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg transition {{ if eq .watcher "cache" }}t-nav-active{{ else }}t-nav-inactive{{ end }}">
-        <svg class="w-5 h-5 shrink-0 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-        Cache
-      </a>
-      <a href="/telescope/dumps" class="flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg transition {{ if eq .watcher "dumps" }}t-nav-active{{ else }}t-nav-inactive{{ end }}">
-        <svg class="w-5 h-5 shrink-0 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/></svg>
-        Dumps
-      </a>
-      <a href="/telescope/events" class="flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg transition {{ if eq .watcher "events" }}t-nav-active{{ else }}t-nav-inactive{{ end }}">
-        <svg class="w-5 h-5 shrink-0 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z"/></svg>
-        Events
-      </a>
-      <a href="/telescope/exceptions" class="flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg transition {{ if eq .watcher "exceptions" }}t-nav-active{{ else }}t-nav-inactive{{ end }}">
-        <svg class="w-5 h-5 shrink-0 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
-        Exceptions
-      </a>
-      <a href="/telescope/gates" class="flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg transition {{ if eq .watcher "gates" }}t-nav-active{{ else }}t-nav-inactive{{ end }}">
-        <svg class="w-5 h-5 shrink-0 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
-        Gates
-      </a>
-      <a href="/telescope/http-client" class="flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg transition {{ if eq .watcher "http_client" }}t-nav-active{{ else }}t-nav-inactive{{ end }}">
-        <svg class="w-5 h-5 shrink-0 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"/></svg>
-        HTTP Client
-      </a>
-      <a href="/telescope/logs" class="flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg transition {{ if eq .watcher "logs" }}t-nav-active{{ else }}t-nav-inactive{{ end }}">
-        <svg class="w-5 h-5 shrink-0 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"/></svg>
-        Logs
-      </a>
-      <a href="/telescope/mail" class="flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg transition {{ if eq .watcher "mail" }}t-nav-active{{ else }}t-nav-inactive{{ end }}">
-        <svg class="w-5 h-5 shrink-0 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
-        Mail
-      </a>
-      <a href="/telescope/models" class="flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg transition {{ if eq .watcher "models" }}t-nav-active{{ else }}t-nav-inactive{{ end }}">
-        <svg class="w-5 h-5 shrink-0 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"/></svg>
-        Models
-      </a>
-      <a href="/telescope/notifications" class="flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg transition {{ if eq .watcher "notifications" }}t-nav-active{{ else }}t-nav-inactive{{ end }}">
-        <svg class="w-5 h-5 shrink-0 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>
-        Notifications
-      </a>
-      <a href="/telescope/queries" class="flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg transition {{ if eq .watcher "queries" }}t-nav-active{{ else }}t-nav-inactive{{ end }}">
-        <svg class="w-5 h-5 shrink-0 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"/></svg>
-        Queries
-      </a>
-      <a href="/telescope/redis" class="flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg transition {{ if eq .watcher "redis" }}t-nav-active{{ else }}t-nav-inactive{{ end }}">
-        <svg class="w-5 h-5 shrink-0 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 4a2 2 0 114 0v1a1 1 0 001 1h3a1 1 0 011 1v3a1 1 0 01-1 1h-3a2 2 0 100 4h3a1 1 0 011 1v3a1 1 0 01-1 1h-3a1 1 0 01-1-1v-1a2 2 0 10-4 0v1a1 1 0 01-1 1H7a1 1 0 01-1-1v-3a1 1 0 00-1-1H4a2 2 0 110-4h1a1 1 0 001-1V7a1 1 0 011-1h3a1 1 0 001-1V4z"/></svg>
-        Redis
-      </a>
-      <a href="/telescope/views" class="flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg transition {{ if eq .watcher "views" }}t-nav-active{{ else }}t-nav-inactive{{ end }}">
-        <svg class="w-5 h-5 shrink-0 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
-        Views
-      </a>
-    </nav>
-    <div class="p-4 border-t t-border">
-      <a href="/" class="text-sm t-text-muted hover:t-text transition">← Back to app</a>
+    <div class="header-divider"></div>
+    <span class="header-env">local</span>
+    <div class="header-search">
+      <svg class="search-icon" width="14" height="14" viewBox="0 0 16 16" fill="none">
+        <circle cx="6.5" cy="6.5" r="5" stroke="currentColor" stroke-width="1.5"/>
+        <path d="M10.5 10.5L14 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>
+      <input type="text" placeholder="Search requests, queries, events…" id="globalSearch" disabled>
     </div>
-  </aside>
-  <!-- Main content -->
-  <main class="flex-1 overflow-auto flex flex-col transition-colors duration-200">
-    <div class="border-b t-border t-bg-sidebar px-6 py-3 flex items-center justify-between sticky top-0 z-10">
-      <span class="text-sm t-text-subtle">Nimbus Telescope</span>
-      <div class="flex items-center gap-1">
-        <button type="button" id="telescope-live-btn" onclick="toggleLive()" class="p-2 rounded-lg t-text-subtle hover:t-text hover:t-hover transition" title="Toggle live polling (auto-refresh every 3s)">
-          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+    <div class="header-actions">
+      <button class="live-badge" id="pulseLiveToggle" type="button" onclick="Pulse.toggleLive()" title="Toggle live polling">
+        <div class="live-dot"></div> Live
+      </button>
+      <form id="pulseClearForm" method="POST" action="{{ .basePath }}/clear" style="margin:0;">
+        {{ .csrfField }}
+        <button class="btn-icon" type="button" title="Clear entries" aria-label="Clear entries" onclick="Pulse.confirmClear()">
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+            <path d="M2 4h12M5 4V2h6v2M6 7v5M10 7v5M3 4l1 10h8l1-10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
         </button>
-        <button type="button" onclick="toggleTheme()" class="p-2 rounded-lg t-text-subtle hover:t-text hover:t-hover transition" title="Toggle light/dark mode">
-          <svg class="w-5 h-5 dark:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/></svg>
-          <svg class="w-5 h-5 hidden dark:block" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
-        </button>
-        <form method="POST" action="/telescope/clear" class="inline" onsubmit="return confirm('Clear all entries?')">
-          <button type="submit" class="p-2 rounded-lg t-text-subtle hover:t-text hover:t-hover transition" title="Clear entries">
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
-          </button>
-        </form>
-        <a href="javascript:location.reload()" class="p-2 rounded-lg t-text-subtle hover:t-text hover:t-hover transition" title="Refresh">
-          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+      </form>
+      <button class="btn-icon" type="button" title="Refresh" aria-label="Refresh" onclick="location.reload()">
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+          <path d="M13 3v4H9" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M13 7a5 5 0 10 1.2 3.2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav>
+      <div class="nav-section">
+        <div class="nav-section-label">HTTP</div>
+        <a class="nav-item {{ if eq .watcher "dashboard" }}active{{ end }}" href="{{ .basePath }}">
+          <svg class="nav-icon" viewBox="0 0 16 16" fill="none"><path d="M1 4h14M1 8h10M1 12h6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+          Dashboard
+        </a>
+        <a class="nav-item {{ if eq .watcher "requests" }}active{{ end }}" href="{{ .basePath }}/requests">
+          <svg class="nav-icon" viewBox="0 0 16 16" fill="none"><path d="M1 4h14M1 8h10M1 12h6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+          Requests
+        </a>
+        <a class="nav-item {{ if eq .watcher "commands" }}active{{ end }}" href="{{ .basePath }}/commands">
+          <svg class="nav-icon" viewBox="0 0 16 16" fill="none"><rect x="1" y="2" width="14" height="12" rx="2" stroke="currentColor" stroke-width="1.4"/><path d="M4 6l3 2-3 2M8 10h4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Commands
+        </a>
+        <a class="nav-item {{ if eq .watcher "schedule" }}active{{ end }}" href="{{ .basePath }}/schedule">
+          <svg class="nav-icon" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.4"/><path d="M8 4.5v4l2.5 1.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+          Schedule
         </a>
       </div>
-    </div>
-    <div class="flex-1 max-w-6xl w-full mx-auto px-6 py-8">
+
+      <div class="nav-sep"></div>
+
+      <div class="nav-section">
+        <div class="nav-section-label">Queue</div>
+        <a class="nav-item {{ if eq .watcher "jobs" }}active{{ end }}" href="{{ .basePath }}/jobs">
+          <svg class="nav-icon" viewBox="0 0 16 16" fill="none"><path d="M2 4h12v9a1 1 0 01-1 1H3a1 1 0 01-1-1V4z" stroke="currentColor" stroke-width="1.4"/><path d="M5 4V2h6v2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+          Jobs
+        </a>
+        <a class="nav-item {{ if eq .watcher "batches" }}active{{ end }}" href="{{ .basePath }}/batches">
+          <svg class="nav-icon" viewBox="0 0 16 16" fill="none"><rect x="1" y="5" width="14" height="9" rx="1.5" stroke="currentColor" stroke-width="1.4"/><path d="M4 5V3.5A1.5 1.5 0 015.5 2h5A1.5 1.5 0 0112 3.5V5" stroke="currentColor" stroke-width="1.4"/></svg>
+          Batches
+        </a>
+      </div>
+
+      <div class="nav-sep"></div>
+
+      <div class="nav-section">
+        <div class="nav-section-label">Database</div>
+        <a class="nav-item {{ if eq .watcher "queries" }}active{{ end }}" href="{{ .basePath }}/queries">
+          <svg class="nav-icon" viewBox="0 0 16 16" fill="none"><ellipse cx="8" cy="4" rx="5" ry="2" stroke="currentColor" stroke-width="1.4"/><path d="M3 4v4c0 1.1 2.24 2 5 2s5-.9 5-2V4" stroke="currentColor" stroke-width="1.4"/><path d="M3 8v4c0 1.1 2.24 2 5 2s5-.9 5-2V8" stroke="currentColor" stroke-width="1.4"/></svg>
+          Queries
+        </a>
+        <a class="nav-item {{ if eq .watcher "models" }}active{{ end }}" href="{{ .basePath }}/models">
+          <svg class="nav-icon" viewBox="0 0 16 16" fill="none"><path d="M8 1l6 3.5v7L8 15l-6-3.5v-7L8 1z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M8 1v14M2 4.5l6 3.5 6-3.5" stroke="currentColor" stroke-width="1.4"/></svg>
+          Models
+        </a>
+        <a class="nav-item {{ if eq .watcher "redis" }}active{{ end }}" href="{{ .basePath }}/redis">
+          <svg class="nav-icon" viewBox="0 0 16 16" fill="none"><path d="M3 5l5-2 5 2v6l-5 2-5-2V5z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M3 5l5 2 5-2" stroke="currentColor" stroke-width="1.4"/></svg>
+          Redis
+        </a>
+      </div>
+
+      <div class="nav-sep"></div>
+
+      <div class="nav-section">
+        <div class="nav-section-label">Diagnostics</div>
+        <a class="nav-item {{ if eq .watcher "exceptions" }}active{{ end }}" href="{{ .basePath }}/exceptions">
+          <svg class="nav-icon" viewBox="0 0 16 16" fill="none"><path d="M8 2L14 13H2L8 2z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>
+          Exceptions
+        </a>
+        <a class="nav-item {{ if eq .watcher "logs" }}active{{ end }}" href="{{ .basePath }}/logs">
+          <svg class="nav-icon" viewBox="0 0 16 16" fill="none"><path d="M2 3h12M2 7h8M2 11h10M2 15h6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+          Logs
+        </a>
+        <a class="nav-item {{ if eq .watcher "http_client" }}active{{ end }}" href="{{ .basePath }}/http-client">
+          <svg class="nav-icon" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.4"/></svg>
+          HTTP Client
+        </a>
+      </div>
+
+      <div class="nav-sep"></div>
+
+      <div class="nav-section">
+        <div class="nav-section-label">App</div>
+        <a class="nav-item {{ if eq .watcher "cache" }}active{{ end }}" href="{{ .basePath }}/cache">
+          <svg class="nav-icon" viewBox="0 0 16 16" fill="none"><path d="M2 4l6-2 6 2v8l-6 2-6-2V4z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>
+          Cache
+        </a>
+        <a class="nav-item {{ if eq .watcher "mail" }}active{{ end }}" href="{{ .basePath }}/mail">
+          <svg class="nav-icon" viewBox="0 0 16 16" fill="none"><rect x="1" y="3" width="14" height="10" rx="1.5" stroke="currentColor" stroke-width="1.4"/><path d="M1 5l7 4 7-4" stroke="currentColor" stroke-width="1.4"/></svg>
+          Mail
+        </a>
+        <a class="nav-item {{ if eq .watcher "notifications" }}active{{ end }}" href="{{ .basePath }}/notifications">
+          <svg class="nav-icon" viewBox="0 0 16 16" fill="none"><path d="M8 14a2 2 0 002-2H6a2 2 0 002 2z" fill="currentColor" opacity=".7"/><path d="M13 12H3l1-1V7a4 4 0 118 0v4l1 1z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>
+          Notifications
+        </a>
+        <a class="nav-item {{ if eq .watcher "gates" }}active{{ end }}" href="{{ .basePath }}/gates">
+          <svg class="nav-icon" viewBox="0 0 16 16" fill="none"><rect x="3" y="7" width="10" height="7" rx="1.5" stroke="currentColor" stroke-width="1.4"/><path d="M5 7V5.5A3 3 0 0111 5.5V7" stroke="currentColor" stroke-width="1.4"/></svg>
+          Gates
+        </a>
+        <a class="nav-item {{ if eq .watcher "dumps" }}active{{ end }}" href="{{ .basePath }}/dumps">
+          <svg class="nav-icon" viewBox="0 0 16 16" fill="none"><rect x="2" y="2" width="12" height="12" rx="1.5" stroke="currentColor" stroke-width="1.4"/></svg>
+          Dumps
+        </a>
+        <a class="nav-item {{ if eq .watcher "views" }}active{{ end }}" href="{{ .basePath }}/views">
+          <svg class="nav-icon" viewBox="0 0 16 16" fill="none"><rect x="2" y="3" width="12" height="10" rx="1.5" stroke="currentColor" stroke-width="1.4"/></svg>
+          Views
+        </a>
+      </div>
+    </nav>
+
+    <main>
       {{ .embed }}
+    </main>
+  </div>
+
+  <!-- TOAST -->
+  <div class="toast" id="toast">
+    <div class="toast-dot"></div>
+    <span id="toastMsg">New entry</span>
+  </div>
+
+  <!-- CONFIRM MODAL -->
+  <div id="pulseModal" style="position:fixed; inset:0; display:none; align-items:center; justify-content:center; z-index:200; font-family:'Syne', sans-serif;">
+    <div id="pulseModalOverlay" style="position:absolute; inset:0; background:rgba(0,0,0,0.55);"></div>
+    <div style="position:relative; width:min(520px, calc(100vw - 32px)); background:var(--bg2); border:1px solid var(--border2); border-radius:14px; box-shadow: 0 18px 60px rgba(0,0,0,0.6); overflow:hidden;">
+      <div style="padding:16px 18px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:12px;">
+        <div style="width:30px; height:30px; border-radius:10px; background:var(--red-dim); border:1px solid rgba(255,77,106,0.18); display:flex; align-items:center; justify-content:center; color:var(--red); flex-shrink:0;">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <path d="M8 2L14 13H2L8 2z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+            <path d="M8 6v4M8 11.5v.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <div style="flex:1; min-width:0;">
+          <div style="font-size:13px; font-weight:800; letter-spacing:0.02em; color:var(--text);">Clear Telescope entries</div>
+          <div style="font-size:12px; color:var(--text3); margin-top:2px; font-family:'JetBrains Mono', monospace;">This will remove all recorded entries (including logs, requests, queries, etc.).</div>
+        </div>
+        <button class="btn-icon" type="button" aria-label="Close" onclick="Pulse.closeModal()">
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+            <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+          </svg>
+        </button>
+      </div>
+      <div style="padding:16px 18px;">
+        <div style="font-size:12px; color:var(--text2); line-height:1.55; font-family:'JetBrains Mono', monospace;">
+          Are you sure you want to clear all entries?
+        </div>
+      </div>
+      <div style="padding:14px 18px; border-top:1px solid var(--border); display:flex; justify-content:flex-end; gap:10px;">
+        <button class="btn-icon" type="button" onclick="Pulse.closeModal()" style="width:auto; padding:0 12px; height:34px; font-family:'Syne', sans-serif; font-weight:700;">Cancel</button>
+        <button class="btn-icon" type="button" onclick="Pulse.confirmModal()" style="width:auto; padding:0 12px; height:34px; border-color: rgba(255,77,106,0.25); background: var(--red-dim); color: var(--red); font-family:'Syne', sans-serif; font-weight:800;">Clear</button>
+      </div>
     </div>
-  </main>
+  </div>
+
+  <script>
+    (function() {
+      const LIVE_KEY = 'pulse-live';
+      const toastEl = document.getElementById('toast');
+      const toastMsg = document.getElementById('toastMsg');
+      const modalEl = document.getElementById('pulseModal');
+      const modalOverlay = document.getElementById('pulseModalOverlay');
+      let modalOnConfirm = null;
+
+      function isLive() {
+        return localStorage.getItem(LIVE_KEY) !== 'false';
+      }
+      function setLive(next) {
+        localStorage.setItem(LIVE_KEY, next ? 'true' : 'false');
+        const btn = document.getElementById('pulseLiveToggle');
+        if (btn) btn.style.opacity = next ? '1' : '0.45';
+        window.dispatchEvent(new CustomEvent('pulse-live-changed', { detail: { live: next }}));
+      }
+      function toggleLive() { setLive(!isLive()); }
+
+      function showToast(msg) {
+        if (!toastEl || !toastMsg) return;
+        toastMsg.textContent = msg || 'New entry';
+        toastEl.classList.add('show');
+        clearTimeout(showToast._t);
+        showToast._t = setTimeout(() => toastEl.classList.remove('show'), 2500);
+      }
+
+      // Expose globally for panels
+      window.Pulse = {
+        isLive,
+        toggleLive,
+        showToast,
+        confirmClear: function() {
+          const form = document.getElementById('pulseClearForm');
+          if (!form) return;
+          Pulse.openModal(function() { form.submit(); });
+        },
+        openModal: function(onConfirm) {
+          modalOnConfirm = onConfirm || null;
+          if (!modalEl) return;
+          modalEl.style.display = 'flex';
+        },
+        closeModal: function() {
+          if (!modalEl) return;
+          modalEl.style.display = 'none';
+          modalOnConfirm = null;
+        },
+        confirmModal: function() {
+          const fn = modalOnConfirm;
+          Pulse.closeModal();
+          if (fn) fn();
+        }
+      };
+
+      if (modalOverlay) {
+        modalOverlay.addEventListener('click', function() { Pulse.closeModal(); });
+      }
+
+      // Init UI state
+      setLive(isLive());
+    })();
+  </script>
 </body>
 </html>

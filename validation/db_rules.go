@@ -3,20 +3,20 @@ package validation
 import (
 	"fmt"
 
-	"gorm.io/gorm"
+	"github.com/CodeSyncr/nimbus/lucid"
 )
 
-// dbProvider is the function used to get the global *gorm.DB.
+// dbProvider is the function used to get the global *lucid.DB.
 // It defaults to nil; set via SetDB or it tries to import database.DB at runtime.
-var dbProvider func() *gorm.DB
+var dbProvider func() *lucid.DB
 
 // SetDB sets the database provider for unique/exists rules.
-// Call this in your app bootstrap: validation.SetDB(func() *gorm.DB { return database.DB })
-func SetDB(fn func() *gorm.DB) {
+// Call this in your app bootstrap: validation.SetDB(func() *lucid.DB { return database.DB })
+func SetDB(fn func() *lucid.DB) {
 	dbProvider = fn
 }
 
-func getDB() *gorm.DB {
+func getDB() *lucid.DB {
 	if dbProvider != nil {
 		return dbProvider()
 	}
@@ -29,7 +29,7 @@ func getDB() *gorm.DB {
 //
 //	validation.String().Required().Email().Unique(validation.UniqueOpts{
 //	    Table: "users",
-//	    Filter: func(db *gorm.DB, value, field string) *gorm.DB {
+//	    Filter: func(db *lucid.DB, value, field string) *lucid.DB {
 //	        return db.Where("id != ?", currentUserID)
 //	    },
 //	})
@@ -41,7 +41,7 @@ type UniqueOpts struct {
 	Column string
 
 	// Filter adds extra conditions to the query (e.g. exclude current record).
-	Filter func(db *gorm.DB, value string, field string) *gorm.DB
+	Filter func(db *lucid.DB, value string, field string) *lucid.DB
 }
 
 // ExistsOpts configures the exists database rule.
@@ -60,7 +60,7 @@ type ExistsOpts struct {
 	Column string
 
 	// Filter adds extra conditions to the query.
-	Filter func(db *gorm.DB, value string, field string) *gorm.DB
+	Filter func(db *lucid.DB, value string, field string) *lucid.DB
 }
 
 // checkUnique returns an error if the value already exists in the database.

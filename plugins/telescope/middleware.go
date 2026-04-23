@@ -8,6 +8,7 @@ import (
 
 	"github.com/CodeSyncr/nimbus/http"
 	"github.com/CodeSyncr/nimbus/router"
+	"github.com/go-chi/chi/v5"
 )
 
 const maxBodyCapture = 64 * 1024 // 64KB max for request/response body
@@ -45,11 +46,18 @@ func (r *responseRecorder) Write(b []byte) (int, error) {
 func (p *Plugin) RequestWatcher() router.Middleware {
 	return func(next router.HandlerFunc) router.HandlerFunc {
 		return func(c *http.Context) error {
-			// Skip telescope's own routes
-			if strings.HasPrefix(c.Request.URL.Path, "/telescope") {
+			// Skip telescope's own routes (respect TELESCOPE_PATH).
+			if p.basePath != "" && strings.HasPrefix(c.Request.URL.Path, p.basePath) {
 				return next(c)
 			}
 			start := time.Now()
+			routePattern := ""
+			if rc := chi.RouteContext(c.Request.Context()); rc != nil {
+				// Prefer the most specific pattern (last).
+				if n := len(rc.RoutePatterns); n > 0 {
+					routePattern = rc.RoutePatterns[n-1]
+				}
+			}
 
 			// Capture request body (restore for handler)
 			var payload string
@@ -87,29 +95,52 @@ func (p *Plugin) RequestWatcher() router.Middleware {
 				}
 			}
 
-			headers := make(map[string]string)
+			reqHeaders := make(map[string]string)
 			for k, v := range c.Request.Header {
 				if len(v) > 0 && !isSensitiveHeader(k) {
-					headers[k] = v[0]
+					reqHeaders[k] = v[0]
+				}
+			}
+			resHeaders := make(map[string]string)
+			for k, v := range rec.Header() {
+				if len(v) > 0 && !isSensitiveHeader(k) {
+					resHeaders[k] = v[0]
 				}
 			}
 
 			content := map[string]any{
-				"method":          c.Request.Method,
-				"path":            c.Request.URL.Path,
-				"query":           c.Request.URL.RawQuery,
-				"headers":         headers,
-				"payload":         payload,
-				"response_status": status,
-				"duration_ms":     duration.Milliseconds(),
-				"response_size":   rec.size,
-				"response_body":   responseBody,
-				"error":           err != nil,
+				"method":           c.Request.Method,
+				"path":             c.Request.URL.Path,
+				"route":            routePattern,
+				"handler":          "",
+				"middleware":       nil,
+				"query":            c.Request.URL.RawQuery,
+				"request_headers":  reqHeaders,
+				"payload":          payload,
+				"response_status":  status,
+				"duration_ms":      duration.Milliseconds(),
+				"response_size":    rec.size,
+				"response_headers": resHeaders,
+				"response_body":    responseBody,
+				"error":            err != nil,
+			}
+			if h, ok := c.Get("route_handler"); ok {
+				content["handler"] = h
+			}
+			if mw, ok := c.Get("route_middleware"); ok {
+				content["middleware"] = mw
+			}
+			if err != nil {
+				content["error_message"] = err.Error()
+			}
+			tags := []string{statusCategory(status)}
+			if err != nil {
+				tags = append(tags, "error")
 			}
 			p.store.Record(&Entry{
 				Type:    EntryRequest,
 				Content: content,
-				Tags:    []string{statusCategory(status)},
+				Tags:    tags,
 			})
 			return err
 		}

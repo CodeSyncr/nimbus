@@ -2,7 +2,7 @@ package errors
 
 import (
 	"log"
-	"strings"
+	"runtime/debug"
 
 	"github.com/CodeSyncr/nimbus/http"
 	"github.com/CodeSyncr/nimbus/router"
@@ -25,12 +25,17 @@ func Handler() router.Middleware {
 			// Validation errors
 			if ve, ok := err.(validation.ValidationErrors); ok {
 				log.Printf("validation error: %v", ve)
+				if WantsHTML(c) {
+					_ = writeValidationHTML(c, ve)
+					return nil
+				}
 				_ = c.JSON(http.StatusUnprocessableEntity, ve.ToMap())
 				return nil
 			}
 			// AppError with ID tracking
 			if ae, ok := err.(*AppError); ok {
 				log.Printf("error_id=%s status=%d %s", ae.ID, ae.Status, ae.Message)
+				notifyExceptionRecorded("AppError", ae.Message, "", 0, ae.StackTrace)
 				reportCtx := map[string]any{
 					"error_id": ae.ID,
 					"status":   ae.Status,
@@ -42,6 +47,10 @@ func Handler() router.Middleware {
 				status := ae.Status
 				if status == 0 {
 					status = http.StatusInternalServerError
+				}
+				if WantsHTML(c) {
+					_ = writeAppErrorHTML(c, ae)
+					return nil
 				}
 				_ = c.JSON(status, map[string]string{
 					"error":    http.StatusText(status),
@@ -62,6 +71,7 @@ func Handler() router.Middleware {
 			// Fallback 500 with error ID for tracking
 			appErr := Wrap(http.StatusInternalServerError, err)
 			log.Printf("error_id=%s handler error: %v", appErr.ID, err)
+			notifyExceptionRecorded("error", err.Error(), "", 0, string(debug.Stack()))
 			reportCtx := map[string]any{
 				"error_id": appErr.ID,
 				"status":   500,
@@ -70,6 +80,10 @@ func Handler() router.Middleware {
 				reportCtx["request_id"] = rid
 			}
 			go ReportError(appErr, reportCtx)
+			if WantsHTML(c) {
+				_ = writeGeneric500HTML(c, appErr.ID)
+				return nil
+			}
 			_ = c.JSON(http.StatusInternalServerError, map[string]string{
 				"error":    "Internal server error",
 				"error_id": appErr.ID,
@@ -100,8 +114,6 @@ func WriteHTTPError(c *http.Context, he HTTPError) {
 	if he.Status == 0 {
 		he.Status = http.StatusInternalServerError
 	}
-	accept := c.Request.Header.Get("Accept")
-	// For now, always return JSON; HTML error views can be implemented in app code.
 	if he.Payload != nil {
 		_ = c.JSON(he.Status, he.Payload)
 		return
@@ -110,13 +122,15 @@ func WriteHTTPError(c *http.Context, he HTTPError) {
 	if msg == "" {
 		msg = http.StatusText(he.Status)
 	}
-	resp := map[string]string{"error": msg}
-	// If client prefers HTML, still respond with JSON but status code set accordingly.
-	if strings.Contains(accept, "application/json") || strings.Contains(accept, "text/json") || accept == "" {
-		_ = c.JSON(he.Status, resp)
+	if WantsHTML(c) {
+		_ = RenderDefaultHTML(c, HTMLPageData{
+			Status:     he.Status,
+			StatusText: http.StatusText(he.Status),
+			Title:      http.StatusText(he.Status),
+			Message:    msg,
+		})
 		return
 	}
-	// Simple text fallback for non-JSON clients.
-	c.Response.WriteHeader(he.Status)
-	_, _ = c.Response.Write([]byte(msg))
+	resp := map[string]string{"error": msg}
+	_ = c.JSON(he.Status, resp)
 }

@@ -15,8 +15,8 @@ import (
 	"encoding/json"
 	"time"
 
-	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
+	"github.com/CodeSyncr/nimbus/lucid"
+	lucidclause "github.com/CodeSyncr/nimbus/lucid/clause"
 )
 
 // QueueJob is the database model for jobs.
@@ -34,12 +34,12 @@ func (QueueJob) TableName() string { return "queue_jobs" }
 
 // DatabaseAdapter uses a SQL database for job storage.
 type DatabaseAdapter struct {
-	db            *gorm.DB
+	db            *lucid.DB
 	leaseDuration time.Duration
 }
 
 // NewDatabaseAdapter creates a database adapter.
-func NewDatabaseAdapter(db *gorm.DB) *DatabaseAdapter {
+func NewDatabaseAdapter(db *lucid.DB) *DatabaseAdapter {
 	return &DatabaseAdapter{
 		db:            db,
 		leaseDuration: 2 * time.Minute,
@@ -93,18 +93,18 @@ func (d *DatabaseAdapter) Pop(ctx context.Context, queue string) (*JobPayload, e
 			}
 
 			var j QueueJob
-			err := d.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			err := d.db.WithContext(ctx).Transaction(func(tx *lucid.DB) error {
 				q := tx.Where("queue = ? AND status = ? AND run_at <= ?", queue, "pending", time.Now()).
 					Order("run_at ASC")
 				if tx.Dialector.Name() == "postgres" || tx.Dialector.Name() == "mysql" {
-					q = q.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"})
+					q = q.Clauses(lucidclause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"})
 				}
 				if err := q.First(&j).Error; err != nil {
 					return err
 				}
 				return tx.Model(&j).Update("status", "processing").Error
 			})
-			if err == gorm.ErrRecordNotFound {
+			if err == lucid.ErrRecordNotFound {
 				continue
 			}
 			if err != nil {

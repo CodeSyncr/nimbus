@@ -3,22 +3,22 @@ package database
 import (
 	"fmt"
 
-	"gorm.io/gorm"
+	"github.com/CodeSyncr/nimbus/lucid"
 )
 
 // Query wraps GORM's query builder for Lucid-style fluent API.
 // Use db.Table("posts") or Model.Query() to start.
 type Query struct {
-	db *gorm.DB
+	db *lucid.DB
 }
 
 // From starts a query on the given table (returns plain objects).
-func From(db *gorm.DB, table string) *Query {
+func From(db *lucid.DB, table string) *Query {
 	return &Query{db: db.Table(table)}
 }
 
 // Query returns a query builder for the model's table.
-func QueryFor(db *gorm.DB, model any) *Query {
+func QueryFor(db *lucid.DB, model any) *Query {
 	return &Query{db: db.Model(model)}
 }
 
@@ -198,7 +198,7 @@ func (q *Query) Distinct(columns ...string) *Query {
 // ── Scopes ──────────────────────────────────────────────────────
 
 // Scopes applies one or more scopes to the query.
-func (q *Query) Scopes(scopes ...func(*gorm.DB) *gorm.DB) *Query {
+func (q *Query) Scopes(scopes ...func(*lucid.DB) *lucid.DB) *Query {
 	q.db = q.db.Scopes(scopes...)
 	return q
 }
@@ -282,16 +282,16 @@ func (q *Query) Paginate(dest any, page, perPage int) (*Paginator, error) {
 // ── Raw Queries ─────────────────────────────────────────────────
 
 // Raw executes a raw SQL query and scans into dest.
-func Raw(db *gorm.DB, sql string, dest any, args ...any) error {
+func Raw(db *lucid.DB, sql string, dest any, args ...any) error {
 	return db.Raw(sql, args...).Scan(dest).Error
 }
 
 // Exec executes a raw SQL statement (INSERT, UPDATE, DELETE).
-func Exec(db *gorm.DB, sql string, args ...any) error {
+func Exec(db *lucid.DB, sql string, args ...any) error {
 	return db.Exec(sql, args...).Error
 }
 
 // DB returns the underlying GORM DB for advanced usage.
-func (q *Query) DB() *gorm.DB {
+func (q *Query) DB() *lucid.DB {
 	return q.db
 }

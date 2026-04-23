@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"reflect"
 	"strconv"
 	"strings"
@@ -23,11 +24,22 @@ func Get[T any](key string) (T, bool) {
 
 // Must returns the value or panics if not found. Use when key is required.
 func Must[T any](key string) T {
-	v, ok := Get[T](key)
-	if !ok {
-		panic("config: missing required key " + key)
+	v, err := Require[T](key)
+	if err != nil {
+		panic(err.Error())
 	}
 	return v
+}
+
+// Require returns the value or an error if not found/convertible.
+// Prefer this in runtime request paths where panics are undesirable.
+func Require[T any](key string) (T, error) {
+	v, ok := Get[T](key)
+	if !ok {
+		var zero T
+		return zero, fmt.Errorf("config: missing required key %s", key)
+	}
+	return v, nil
 }
 
 // GetOrDefault returns the value or default if not found.

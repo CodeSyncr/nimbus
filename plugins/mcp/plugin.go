@@ -29,6 +29,7 @@
 package mcp
 
 import (
+	"os"
 	"strings"
 
 	"github.com/CodeSyncr/nimbus"
@@ -44,6 +45,7 @@ var (
 type Plugin struct {
 	nimbus.BasePlugin
 	servers []*webServerRegistration
+	prefix  string
 }
 
 // webServerRegistration holds path and server for mounting.
@@ -54,12 +56,17 @@ type webServerRegistration struct {
 
 // New creates a new MCP plugin instance.
 func New() *Plugin {
+	prefix := "/" + strings.Trim(os.Getenv("MCP_PREFIX"), "/")
+	if prefix == "/" {
+		prefix = ""
+	}
 	return &Plugin{
 		BasePlugin: nimbus.BasePlugin{
 			PluginName:    "mcp",
 			PluginVersion: "1.0.0",
 		},
 		servers: nil,
+		prefix:  prefix,
 	}
 }
 
@@ -89,6 +96,10 @@ func (p *Plugin) Web(path string, srv *Server) {
 // RegisterRoutes mounts all registered MCP servers onto the router.
 func (p *Plugin) RegisterRoutes(r *router.Router) {
 	for _, reg := range p.servers {
-		r.Mount(reg.path, reg.server.Handler())
+		full := reg.path
+		if p.prefix != "" {
+			full = p.prefix + reg.path
+		}
+		r.Mount(full, reg.server.Handler())
 	}
 }

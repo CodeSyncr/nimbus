@@ -1,42 +1,180 @@
 @layout('telescope/layout')
-<div>
-  <h1 class="text-2xl font-bold t-text mb-2">Dashboard</h1>
-  <p class="t-text-muted mb-8">Insight into requests, exceptions, and more. Inspired by <a href="https://laravel.com/docs/telescope" target="_blank" rel="noopener" class="t-accent hover:opacity-80 transition">Laravel Telescope</a>.</p>
-
-  <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-8">
-    <a href="/telescope/requests" class="t-card rounded-xl p-6 hover:shadow-lg transition group">
-      <div class="text-3xl font-bold t-accent mb-2 group-hover:opacity-90">{{ .count }}</div>
-      <div class="t-text-muted text-sm">Recent entries</div>
-    </a>
-    <div class="t-card rounded-xl p-6">
-      <div class="flex items-baseline justify-between mb-2">
-        <div class="text-2xl font-semibold t-accent">{{ index .runtime "goroutines" }}</div>
-        <span class="t-text-muted text-xs uppercase tracking-wide">runtime</span>
-      </div>
-      <div class="t-text-muted text-sm mb-1">Goroutines</div>
-      <div class="t-text-subtle text-xs">
-        GC cycles: {{ index .runtime "num_gc" }} · Heap: {{ index .runtime "heap_alloc" }} bytes
-      </div>
+<div class="list-panel">
+    <div class="panel-header">
+      <span class="panel-title">Dashboard</span>
+      <span class="panel-count">{{ .count }} entries</span>
     </div>
-  </div>
 
-  <div class="t-card rounded-xl overflow-hidden">
-    <div class="px-5 py-4 border-b t-border t-bg-sidebar">
-      <h2 class="font-semibold t-text">Recent activity</h2>
+    <div class="filter-row">
+      <a class="filter-chip active" href="{{ .basePath }}/requests">Requests</a>
+      <a class="filter-chip" href="{{ .basePath }}/queries">Queries</a>
+      <a class="filter-chip" href="{{ .basePath }}/exceptions">Exceptions</a>
+      <a class="filter-chip" href="{{ .basePath }}/jobs">Jobs</a>
     </div>
-    <div class="t-divide">
+
+    <div class="entries-list">
       @if(.empty)
-      <div class="px-5 py-12 text-center t-text-subtle">No entries yet. Make some requests to see them here.</div>
+      <div class="empty-state" style="padding: 24px;">
+        <div class="empty-title">No activity yet</div>
+        <div class="empty-sub">Make some requests to record entries</div>
+      </div>
       @else
       @each(.entries)
-      <a href="{{ if eq .Type "request" }}/telescope/requests/{{ .ID }}{{ else }}/telescope{{ end }}" class="block px-5 py-4 flex items-center gap-4 t-hover transition">
-        <span class="text-xs font-medium px-2.5 py-1 rounded-full t-accent-bg t-accent shrink-0">{{ if index .Content "response_status" }}{{ index .Content "response_status" }}{{ else }}{{ .Type }}{{ end }}</span>
-        <span class="t-text-muted font-mono text-sm w-16 shrink-0">{{ index .Content "method" }}</span>
-        <span class="t-text font-mono text-sm break-all flex-1 min-w-0">{{ if index .Content "path" }}{{ index .Content "path" }}{{ else }}{{ if index .Content "sql" }}{{ index .Content "sql" }}{{ else }}{{ if index .Content "model" }}{{ index .Content "event" }} {{ index .Content "model" }}{{ else }}{{ index .Content "label" }}{{ index .Content "message" }}{{ index .Content "name" }}{{ end }}{{ end }}{{ end }}</span>
-        <span class="t-text-subtle text-sm shrink-0">{{ index .Content "duration_ms" }}ms{{ if index .Content "rows" }} · {{ index .Content "rows" }} rows{{ end }}</span>
+      <a class="entry-item" href="{{ printf "%s/entry/%s" $.basePath .ID }}" data-entry-id="{{ .ID }}" style="text-decoration:none;">
+        <div class="entry-row1">
+          <span class="method-badge" style="background: var(--accent-dim); color: var(--accent);">{{ .Type }}</span>
+          <span class="entry-path">{{ if index .Content "path" }}{{ index .Content "path" }}{{ else }}{{ if index .Content "name" }}{{ index .Content "name" }}{{ else }}{{ if index .Content "command" }}{{ index .Content "command" }}{{ else }}{{ if index .Content "sql" }}SQL{{ else }}{{ .ID }}{{ end }}{{ end }}{{ end }}{{ end }}</span>
+          <span class="status-code mono">{{ .CreatedAt.Format "15:04:05" }}</span>
+        </div>
+        <div class="entry-row2">
+          {{ if index .Content "duration_ms" }}<span class="entry-dur">{{ index .Content "duration_ms" }}ms</span>{{ else }}<span class="entry-dur">—</span>{{ end }}
+        </div>
       </a>
       @endeach
       @endif
     </div>
   </div>
+
+<div class="detail-panel">
+  <div class="empty-state" id="dashDetailEmpty">
+    <div class="empty-title">Select an entry</div>
+    <div class="empty-sub">Choose one from the list to inspect details</div>
+  </div>
+
+  <div id="dashDetailContent" class="hidden" style="display:none; flex-direction:column; height:100%; overflow:hidden;">
+    <div class="detail-header">
+      <div class="detail-title-row">
+        <span class="method-badge" id="dash-type" style="background: var(--accent-dim); color: var(--accent);"></span>
+        <span class="detail-path" id="dash-title"></span>
+        <span class="status-code detail-status mono" id="dash-time"></span>
+      </div>
+      <div class="detail-meta-row">
+        <div class="detail-meta-item">
+          <span class="detail-meta-label">id</span>
+          <span class="detail-meta-val mono" id="dash-id"></span>
+        </div>
+        <div class="detail-meta-item">
+          <span class="detail-meta-label">runtime goroutines</span>
+          <span class="detail-meta-val accent">{{ index .runtime "goroutines" }}</span>
+        </div>
+        <div class="detail-meta-item">
+          <span class="detail-meta-label">heap alloc</span>
+          <span class="detail-meta-val">{{ index .runtime "heap_alloc" }}</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="detail-tabs">
+      <div class="detail-tab active" onclick="dashSetTab(this,'overview')">Overview</div>
+      <div class="detail-tab" onclick="dashSetTab(this,'json')">JSON</div>
+    </div>
+
+    <div class="detail-body">
+      <div class="tab-content active" id="dash-tab-overview">
+        <div class="detail-section">
+          <div class="detail-section-title">Content</div>
+          <div class="kv-row-wrap">
+            <table class="kv-table" id="dash-content"></table>
+          </div>
+        </div>
+      </div>
+      <div class="tab-content" id="dash-tab-json">
+        <div class="detail-section">
+          <div class="detail-section-title">Entry JSON</div>
+          <div class="code-block" id="dash-json"></div>
+          <div style="margin-top: 10px;">
+            <a class="filter-chip" id="dash-raw" href="#" style="text-decoration:none;">Open raw entry</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
 </div>
+
+<script>
+  let __DASH_ENTRIES = (function() {
+    const b64 = "{{ .entriesB64 }}";
+    if (!b64) return [];
+    try { return JSON.parse(atob(b64)); } catch { return []; }
+  })();
+
+  function __dashEscape(v) {
+    return String(v ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+  }
+  function __dashFmtTime(s) {
+    if (!s) return '';
+    try {
+      const d = new Date(s);
+      if (isNaN(d.getTime())) return '';
+      return d.toLocaleString(undefined, { month:'short', day:'2-digit', hour:'2-digit', minute:'2-digit', second:'2-digit' });
+    } catch { return ''; }
+  }
+  function __dashFmtCell(v) {
+    if (v === null || v === undefined) return '';
+    if (typeof v === 'string') return v;
+    if (typeof v === 'number' || typeof v === 'boolean' || typeof v === 'bigint') return String(v);
+    try { return JSON.stringify(v, null, 2); } catch { return String(v); }
+  }
+
+  function __dashRender(entry) {
+    const empty = document.getElementById('dashDetailEmpty');
+    const content = document.getElementById('dashDetailContent');
+    if (!entry) {
+      if (empty) empty.style.display = 'flex';
+      if (content) { content.classList.add('hidden'); content.style.display = 'none'; }
+      return;
+    }
+    if (empty) empty.style.display = 'none';
+    if (content) { content.classList.remove('hidden'); content.style.display = 'flex'; }
+
+    const typ = entry.Type || entry.type || '';
+    const id = entry.ID || entry.id || '';
+    const created = entry.CreatedAt || entry.createdAt || '';
+    const c = entry.Content || entry.content || {};
+    const title = c.path || c.name || c.command || c.table || c.summary || (c.sql ? 'SQL' : '') || id;
+
+    const tEl = document.getElementById('dash-type'); if (tEl) tEl.textContent = typ;
+    const titleEl = document.getElementById('dash-title'); if (titleEl) titleEl.textContent = title;
+    const timeEl = document.getElementById('dash-time'); if (timeEl) timeEl.textContent = __dashFmtTime(created);
+    const idEl = document.getElementById('dash-id'); if (idEl) idEl.textContent = id;
+
+    const table = document.getElementById('dash-content');
+    if (table) {
+      const keys = Object.keys(c || {});
+      keys.sort();
+      table.innerHTML = keys.map(k => `<tr><td>${__dashEscape(k)}</td><td><pre style="margin:0; white-space:pre-wrap; word-break:break-word;">${__dashEscape(__dashFmtCell(c[k]))}</pre></td></tr>`).join('') || '<tr><td>—</td><td>Empty</td></tr>';
+    }
+
+    const jsonEl = document.getElementById('dash-json');
+    if (jsonEl) jsonEl.textContent = JSON.stringify(entry, null, 2);
+    const raw = document.getElementById('dash-raw');
+    if (raw) raw.setAttribute('href', "{{ .basePath }}/entry/" + id);
+  }
+
+  function dashSetTab(el, name) {
+    document.querySelectorAll('.detail-tab').forEach(t => t.classList.remove('active'));
+    el.classList.add('active');
+    document.querySelectorAll('#dashDetailContent .tab-content').forEach(t => t.classList.remove('active'));
+    const p = document.getElementById('dash-tab-' + name);
+    if (p) p.classList.add('active');
+  }
+
+  function __dashSetSelected(id) {
+    document.querySelectorAll('[data-entry-id]').forEach(el => {
+      el.classList.toggle('selected', el.getAttribute('data-entry-id') === id);
+    });
+    const entry = __DASH_ENTRIES.find(e => (e.ID || e.id) === id);
+    __dashRender(entry);
+    return false;
+  }
+
+  document.addEventListener('click', function(e) {
+    const a = e.target && e.target.closest ? e.target.closest('a[data-entry-id]') : null;
+    if (!a) return;
+    e.preventDefault();
+    __dashSetSelected(a.getAttribute('data-entry-id'));
+  });
+
+  // initial: don't auto-select, keep runtime info visible until user clicks
+  __dashRender(null);
+</script>

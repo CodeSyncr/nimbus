@@ -19,9 +19,11 @@ type Notification interface {
 // If mail.Default is nil, the mail channel is skipped.
 func Send(n Notification) error {
 	if err := SendMail(n); err != nil {
+		runAfterSendHooks(n, err)
 		return err
 	}
 	Broadcast(n)
+	runAfterSendHooks(n, nil)
 	return nil
 }
 

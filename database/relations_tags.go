@@ -199,7 +199,7 @@ func ParseRelations(model any) []Relation {
 			}
 		}
 
-		// Only consider struct element types (skip time.Time, gorm.DeletedAt, etc.)
+		// Only consider struct element types (skip time.Time, lucid.DeletedAt, etc.)
 		if elemType.Kind() != reflect.Struct || isSkippedType(elemType) {
 			continue
 		}
@@ -259,6 +259,7 @@ func isSkippedType(t reflect.Type) bool {
 	full := t.PkgPath() + "." + t.Name()
 	switch full {
 	case "time.Time",
+		"github.com/CodeSyncr/nimbus/lucid.DeletedAt",
 		"gorm.io/gorm.DeletedAt",
 		"database/sql.NullTime",
 		"database/sql.NullString",

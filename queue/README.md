@@ -1,6 +1,6 @@
 # Queue Package for Nimbus
 
-Background job processing (Laravel/AdonisJS style). Queue is **core**—no plugin needed. Call `queue.Boot()` in your app bootstrap.
+Background job processing (Laravel-inspired). Queue is **core**—no plugin needed. Call `queue.Boot()` in your app bootstrap.
 
 ## Installation
 
@@ -20,6 +20,7 @@ queue.Boot(&queue.BootConfig{RegisterJobs: start.RegisterQueueJobs})
 | `REDIS_URL` | Redis URL (for redis driver) | `redis://localhost:6379` |
 | `QUEUE_REDIS_VISIBILITY_TIMEOUT_SECONDS` | Redis in-flight lease timeout before reclaim | `60` |
 | `QUEUE_DB_LEASE_SECONDS` | Database processing lease before reclaim | `120` |
+| `QUEUE_BOOT_STRICT` | Fail boot on unknown driver values | `false` |
 | `SQS_QUEUE_URL` | AWS SQS queue URL | — |
 | `KAFKA_BROKERS` | Kafka brokers (comma-separated) | — |
 | `KAFKA_TOPIC` | Kafka topic | `nimbus-queue` |
@@ -119,6 +120,7 @@ Use this section as a starting baseline for reliable queue processing.
 
 - Prefer `redis` or `database` (avoid `sync` in production).
 - Run multiple workers (`nimbus queue:work`) behind a process supervisor.
+- Set `QUEUE_BOOT_STRICT=true` to fail fast on invalid queue driver config.
 
 ### 2) Tune lease / visibility timeouts
 

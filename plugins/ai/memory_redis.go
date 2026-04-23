@@ -22,8 +22,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/redis/go-redis/v9"
-	"gorm.io/gorm"
+	"github.com/CodeSyncr/nimbus/lucid"
+	"github.com/CodeSyncr/nimbus/redis"
 )
 
 // ---------------------------------------------------------------------------
@@ -122,7 +122,7 @@ func (ConversationRecord) TableName() string {
 }
 
 type databaseMemory struct {
-	db          *gorm.DB
+	db          *lucid.DB
 	autoMigrate bool
 	migrated    bool
 }
@@ -140,7 +140,7 @@ func WithAutoMigrate(enabled bool) DatabaseMemoryOption {
 //
 //	mem := ai.DatabaseMemory(db)
 //	agent.WithMemory(mem, "session:user123")
-func DatabaseMemory(db *gorm.DB, opts ...DatabaseMemoryOption) Memory {
+func DatabaseMemory(db *lucid.DB, opts ...DatabaseMemoryOption) Memory {
 	m := &databaseMemory{
 		db:          db,
 		autoMigrate: true,
@@ -167,7 +167,7 @@ func (m *databaseMemory) Load(_ context.Context, key string) ([]Message, error) 
 	var record ConversationRecord
 	result := m.db.Where("key = ?", key).First(&record)
 	if result.Error != nil {
-		if result.Error == gorm.ErrRecordNotFound {
+		if result.Error == lucid.ErrRecordNotFound {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("ai: db memory load: %w", result.Error)
@@ -192,7 +192,7 @@ func (m *databaseMemory) Save(_ context.Context, key string, messages []Message)
 
 	var record ConversationRecord
 	result := m.db.Where("key = ?", key).First(&record)
-	if result.Error == gorm.ErrRecordNotFound {
+	if result.Error == lucid.ErrRecordNotFound {
 		record = ConversationRecord{
 			Key:      key,
 			Messages: string(data),

@@ -26,6 +26,12 @@ var (
 	globalMu      sync.RWMutex
 )
 
+// ObserverV2 is an optional extension interface for richer job lifecycle metadata.
+// Observers can implement this in addition to Observer.
+type ObserverV2 interface {
+	JobProcessedV2(payload *JobPayload, duration time.Duration, err error)
+}
+
 // Observer can be used to observe queue lifecycle events (for dashboards
 // like Horizon). It is optional and only called when set.
 type Observer interface {
@@ -35,20 +41,59 @@ type Observer interface {
 
 var (
 	observerMu sync.RWMutex
-	observer   Observer
+	observers  []Observer
 )
 
-// SetObserver sets a global queue observer (e.g. Horizon plugin).
+// SetObserver replaces the observer list with a single observer (Horizon).
 func SetObserver(o Observer) {
 	observerMu.Lock()
 	defer observerMu.Unlock()
-	observer = o
+	if o == nil {
+		observers = nil
+		return
+	}
+	observers = []Observer{o}
 }
 
+// AddObserver appends an observer (e.g. Telescope alongside Horizon).
+func AddObserver(o Observer) {
+	if o == nil {
+		return
+	}
+	observerMu.Lock()
+	defer observerMu.Unlock()
+	observers = append(observers, o)
+}
+
+func eachObserver(fn func(Observer)) {
+	observerMu.RLock()
+	list := append([]Observer(nil), observers...)
+	observerMu.RUnlock()
+	for _, o := range list {
+		if o != nil {
+			fn(o)
+		}
+	}
+}
+
+func notifyProcessed(payload *JobPayload, duration time.Duration, err error) {
+	eachObserver(func(o Observer) {
+		if v2, ok := o.(ObserverV2); ok {
+			v2.JobProcessedV2(payload, duration, err)
+			return
+		}
+		o.JobProcessed(payload, err)
+	})
+}
+
+// getObserver returns the first observer for legacy single-observer call sites.
 func getObserver() Observer {
 	observerMu.RLock()
 	defer observerMu.RUnlock()
-	return observer
+	if len(observers) == 0 {
+		return nil
+	}
+	return observers[0]
 }
 
 // Manager manages adapters and job dispatch.
@@ -150,9 +195,7 @@ func (b *DispatchBuilder) Dispatch(ctx context.Context) error {
 	if err := b.manager.adapter.Push(ctx, payload); err != nil {
 		return err
 	}
-	if o := getObserver(); o != nil {
-		o.JobDispatched(payload)
-	}
+	eachObserver(func(o Observer) { o.JobDispatched(payload) })
 	return nil
 }
 
@@ -192,9 +235,12 @@ func (m *Manager) Process(ctx context.Context, queue string) error {
 	job, err := m.deserialize(payload)
 	if err != nil {
 		ack()
+		notifyProcessed(payload, 0, err)
 		return err
 	}
+	start := time.Now()
 	err = job.Handle(ctx)
+	duration := time.Since(start)
 	if err != nil {
 		payload.Attempts++
 		if payload.Attempts <= payload.MaxRetries {
@@ -215,16 +261,12 @@ func (m *Manager) Process(ctx context.Context, queue string) error {
 		if store := GetFailedJobStore(); store != nil {
 			_ = store.Push(ctx, payload, err.Error())
 		}
-		if o := getObserver(); o != nil {
-			o.JobProcessed(payload, err)
-		}
+		notifyProcessed(payload, duration, err)
 		ack()
 		return err
 	}
 	ack()
-	if o := getObserver(); o != nil {
-		o.JobProcessed(payload, err)
-	}
+	notifyProcessed(payload, duration, nil)
 	return nil
 }
 

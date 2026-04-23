@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strconv"
 
-	"gorm.io/gorm"
+	"github.com/CodeSyncr/nimbus/lucid"
 )
 
 // Paginator holds paginated results and metadata (Lucid-style).
@@ -64,7 +64,7 @@ func (p *Paginator) pageURL(page int) string {
 }
 
 // Paginate runs the query with limit/offset and returns a Paginator.
-func Paginate(db *gorm.DB, dest any, page, perPage int) (*Paginator, error) {
+func Paginate(db *lucid.DB, dest any, page, perPage int) (*Paginator, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -73,7 +73,7 @@ func Paginate(db *gorm.DB, dest any, page, perPage int) (*Paginator, error) {
 	}
 
 	var total int64
-	countDB := db.Session(&gorm.Session{})
+	countDB := db.Session(&lucid.Session{})
 	if err := countDB.Count(&total).Error; err != nil {
 		return nil, err
 	}
@@ -133,12 +133,12 @@ func (p *Paginator) GetUrlsForRange(start, end int) []struct {
 
 // PaginateQuery is a convenience that paginates a model query.
 // Example: PaginateQuery(Post.Query().Where("status","published"), &posts, page, 20)
-func PaginateQuery(q *gorm.DB, dest any, page, perPage int) (*Paginator, error) {
+func PaginateQuery(q *lucid.DB, dest any, page, perPage int) (*Paginator, error) {
 	return Paginate(q, dest, page, perPage)
 }
 
 // PaginateWithBaseURL runs Paginate and sets the base URL.
-func PaginateWithBaseURL(db *gorm.DB, dest any, page, perPage int, baseURL string) (*Paginator, error) {
+func PaginateWithBaseURL(db *lucid.DB, dest any, page, perPage int, baseURL string) (*Paginator, error) {
 	p, err := Paginate(db, dest, page, perPage)
 	if err != nil {
 		return nil, err
@@ -183,7 +183,7 @@ type CursorPaginateOptions struct {
 
 // CursorPaginate performs cursor/keyset pagination.
 // Requires a sortable, unique column (typically ID or created_at).
-func CursorPaginate(db *gorm.DB, dest any, opts CursorPaginateOptions) (*CursorPaginator, error) {
+func CursorPaginate(db *lucid.DB, dest any, opts CursorPaginateOptions) (*CursorPaginator, error) {
 	if opts.Column == "" {
 		opts.Column = "id"
 	}
@@ -194,7 +194,7 @@ func CursorPaginate(db *gorm.DB, dest any, opts CursorPaginateOptions) (*CursorP
 		opts.Order = "desc"
 	}
 
-	q := db.Session(&gorm.Session{})
+	q := db.Session(&lucid.Session{})
 
 	if opts.After != "" {
 		if opts.Order == "desc" {
@@ -226,7 +226,7 @@ func CursorPaginate(db *gorm.DB, dest any, opts CursorPaginateOptions) (*CursorP
 }
 
 // SimplePaginate returns results without counting total (faster for large tables).
-func SimplePaginate(db *gorm.DB, dest any, page, perPage int) (*SimplePaginatorResult, error) {
+func SimplePaginate(db *lucid.DB, dest any, page, perPage int) (*SimplePaginatorResult, error) {
 	if page < 1 {
 		page = 1
 	}

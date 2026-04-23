@@ -1,0 +1,46 @@
+@layout('telescope/layout')
+<div>
+  <h1 class="text-2xl font-bold t-text mb-2">Gates</h1>
+  <div class="t-card rounded-xl overflow-hidden">
+    <div class="px-5 py-4 border-b t-border t-bg-sidebar flex items-center justify-between">
+      <h2 class="font-semibold t-text">Authorization checks</h2>
+      <div class="flex items-center gap-3">
+        <form method="GET" class="flex items-center gap-2">
+          <input name="q" value="{{ .q }}" placeholder="Search…" class="text-sm px-3 py-1.5 rounded-lg t-code-block t-text w-56 focus:outline-none" />
+          <input name="tag" value="{{ .tag }}" placeholder="Tag" class="text-sm px-3 py-1.5 rounded-lg t-code-block t-text w-28 focus:outline-none font-mono" />
+          <button type="submit" class="text-sm px-3 py-1.5 rounded-lg t-accent-bg t-accent hover:opacity-90 transition">Go</button>
+        </form>
+        <a href="{{ .basePath }}" class="text-sm t-accent hover:opacity-80 transition">← Dashboard</a>
+      </div>
+    </div>
+    <div class="px-5 py-3 border-b t-border flex flex-wrap gap-2 text-xs">
+      <a href="?q={{ .q }}&tag=allowed" class="px-2.5 py-1 rounded-full t-accent-bg t-accent font-mono">allowed ({{ index .tagCounts "allowed" }})</a>
+      <a href="?q={{ .q }}&tag=denied" class="px-2.5 py-1 rounded-full t-accent-bg t-accent font-mono">denied ({{ index .tagCounts "denied" }})</a>
+      <a href="?q={{ .q }}&tag=" class="px-2.5 py-1 rounded-full t-code-block t-text-muted font-mono">clear</a>
+    </div>
+    <div class="t-divide">
+      @if(.empty)
+      <div class="px-5 py-12 text-center t-text-subtle">No gate checks recorded yet.</div>
+      @else
+      @each(.entries)
+      <a href="{{ $.basePath }}/entry/{{ .ID }}" class="block px-5 py-4 t-hover transition">
+        <div class="flex items-center justify-between gap-4">
+          <div class="min-w-0">
+            <div class="flex items-center gap-2 mb-1">
+              {{ $res := index .Content "result" }}
+              <span class="text-xs font-medium px-2.5 py-1 rounded-full {{ if $res }}t-status-2xx{{ else }}t-status-4xx{{ end }} shrink-0">{{ if $res }}allowed{{ else }}denied{{ end }}</span>
+              <span class="t-text-subtle text-xs font-mono shrink-0">{{ .CreatedAt.Format "Jan 02 15:04:05" }}</span>
+            </div>
+            <div class="t-text font-mono text-sm break-all">{{ index .Content "ability" }}</div>
+            @if(index .Content "user_id")
+            <div class="t-text-subtle text-xs font-mono">user {{ index .Content "user_id" }}</div>
+            @endif
+          </div>
+        </div>
+      </a>
+      @endeach
+      @endif
+    </div>
+  </div>
+</div>
+

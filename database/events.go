@@ -4,7 +4,7 @@ import (
 	"time"
 
 	"github.com/CodeSyncr/nimbus/events"
-	"gorm.io/gorm"
+	"github.com/CodeSyncr/nimbus/lucid"
 )
 
 // Event constants for database operations.
@@ -22,6 +22,7 @@ type QueryPayload struct {
 	RowsAffected int64
 	Duration     time.Duration
 	Error        error
+	Connection   string
 }
 
 // eventPlugin is a GORM plugin that hooks into lifecycle callbacks to dispatch events.
@@ -31,7 +32,7 @@ func (e *eventPlugin) Name() string {
 	return "nimbus:events"
 }
 
-func (e *eventPlugin) Initialize(db *gorm.DB) error {
+func (e *eventPlugin) Initialize(db *lucid.DB) error {
 	// Register before/after callbacks for the 4 main operations
 
 	// Query
@@ -54,13 +55,13 @@ func (e *eventPlugin) Initialize(db *gorm.DB) error {
 }
 
 // before simply injects a start timer into the DB instance context
-func (e *eventPlugin) before(db *gorm.DB) {
+func (e *eventPlugin) before(db *lucid.DB) {
 	db.InstanceSet("nimbus:start_time", time.Now())
 }
 
 // after dispatches the event using the recorded start time
-func (e *eventPlugin) after(eventName string) func(*gorm.DB) {
-	return func(db *gorm.DB) {
+func (e *eventPlugin) after(eventName string) func(*lucid.DB) {
+	return func(db *lucid.DB) {
 		// Only dispatch if there is someone listening (optimization)
 		if !events.Default.Has(eventName) {
 			return
@@ -80,6 +81,7 @@ func (e *eventPlugin) after(eventName string) func(*gorm.DB) {
 			RowsAffected: db.Statement.RowsAffected,
 			Duration:     duration,
 			Error:        db.Error,
+			Connection:   db.Dialector.Name(),
 		}
 
 		// Fire asynchronously to avoid blocking the DB operation

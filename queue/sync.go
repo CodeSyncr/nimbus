@@ -3,6 +3,7 @@ package queue
 import (
 	"context"
 	"sync"
+	"time"
 )
 
 // SyncAdapter runs jobs immediately in the same process. No persistence.
@@ -22,15 +23,12 @@ func NewSyncAdapter(m *Manager) *SyncAdapter {
 func (s *SyncAdapter) Push(ctx context.Context, payload *JobPayload) error {
 	job, err := s.manager.deserialize(payload)
 	if err != nil {
-		if o := getObserver(); o != nil {
-			o.JobProcessed(payload, err)
-		}
+		notifyProcessed(payload, 0, err)
 		return err
 	}
+	start := time.Now()
 	err = job.Handle(ctx)
-	if o := getObserver(); o != nil {
-		o.JobProcessed(payload, err)
-	}
+	notifyProcessed(payload, time.Since(start), err)
 	return err
 }
 

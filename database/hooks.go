@@ -1,11 +1,11 @@
 package database
 
 import (
-	"gorm.io/gorm"
+	"github.com/CodeSyncr/nimbus/lucid"
 )
 
 // HookFunc is a function that runs at a model lifecycle point.
-type HookFunc func(db *gorm.DB)
+type HookFunc func(db *lucid.DB)
 
 // RegisterHooks registers GORM callbacks for a model (Lucid-style hooks).
 // Use with db.Callback() or pass the model's table name.
@@ -13,8 +13,8 @@ type HookFunc func(db *gorm.DB)
 // Example:
 //
 //	database.RegisterHooks(db, "users", database.Hooks{
-//	    BeforeCreate: func(db *gorm.DB) { /* hash password */ },
-//	    AfterCreate:  func(db *gorm.DB) { /* send welcome email */ },
+//	    BeforeCreate: func(db *lucid.DB) { /* hash password */ },
+//	    AfterCreate:  func(db *lucid.DB) { /* send welcome email */ },
 //	})
 type Hooks struct {
 	BeforeCreate HookFunc
@@ -30,7 +30,7 @@ type Hooks struct {
 // RegisterHooks registers the given hooks for the model.
 // Hooks are registered globally per callback name; for model-specific hooks,
 // use GORM's Scopes or register in your model's init.
-func RegisterHooks(db *gorm.DB, name string, h Hooks) {
+func RegisterHooks(db *lucid.DB, name string, h Hooks) {
 	if h.BeforeCreate != nil {
 		db.Callback().Create().Before("gorm:before_create").Register("nimbus:before_create_"+name, h.BeforeCreate)
 	}

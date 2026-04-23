@@ -9,7 +9,7 @@
 |
 | Usage:
 |
-|   db, _ := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+|   db, _ := lucid.Open(postgres.Open(dsn), &lucid.Config{})
 |   backend := ai.NewPgvectorStore(db, ai.WithPgvectorTable("embeddings"))
 |   store := ai.VectorStoreInstance("knowledge", backend)
 |
@@ -22,7 +22,7 @@ import (
 	"fmt"
 	"strings"
 
-	"gorm.io/gorm"
+	"github.com/CodeSyncr/nimbus/lucid"
 )
 
 // ---------------------------------------------------------------------------
@@ -38,7 +38,7 @@ type PgvectorRecord struct {
 }
 
 type pgvectorStore struct {
-	db        *gorm.DB
+	db        *lucid.DB
 	table     string
 	dimension int
 	migrated  bool
@@ -60,10 +60,10 @@ func WithPgvectorDimension(d int) PgvectorOption {
 // NewPgvectorStore creates a pgvector-backed VectorStoreBackend.
 // Requires the `pgvector` extension on PostgreSQL.
 //
-//	db, _ := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+//	db, _ := lucid.Open(postgres.Open(dsn), &lucid.Config{})
 //	backend := ai.NewPgvectorStore(db)
 //	store := ai.VectorStoreInstance("docs", backend)
-func NewPgvectorStore(db *gorm.DB, opts ...PgvectorOption) VectorStoreBackend {
+func NewPgvectorStore(db *lucid.DB, opts ...PgvectorOption) VectorStoreBackend {
 	s := &pgvectorStore{
 		db:        db,
 		table:     "ai_vectors",

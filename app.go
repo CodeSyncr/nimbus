@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net"
-	"net/http"
+	stdhttp "net/http"
 	_ "net/http/pprof"
 	"os"
 	"os/signal"
@@ -18,8 +18,11 @@ import (
 	"github.com/CodeSyncr/nimbus/cli"
 	"github.com/CodeSyncr/nimbus/config"
 	"github.com/CodeSyncr/nimbus/container"
+	"github.com/CodeSyncr/nimbus/errors"
 	"github.com/CodeSyncr/nimbus/events"
 	"github.com/CodeSyncr/nimbus/health"
+	nhttp "github.com/CodeSyncr/nimbus/http"
+	"github.com/CodeSyncr/nimbus/locale"
 	"github.com/CodeSyncr/nimbus/router"
 	"github.com/CodeSyncr/nimbus/schedule"
 )
@@ -35,7 +38,7 @@ type Provider interface {
 type App struct {
 	Config          *config.Config
 	Router          *router.Router
-	Server          *http.Server
+	Server          *stdhttp.Server
 	Container       *container.Container
 	Events          *events.Dispatcher
 	Scheduler       *schedule.Scheduler
@@ -54,7 +57,9 @@ type App struct {
 // New creates a new Nimbus application with default config.
 func New() *App {
 	cfg := config.Load()
+	locale.BootFromEnv()
 	r := router.New()
+	r.Fallback(errors.NotFoundHandler())
 	app := &App{
 		Config:          cfg,
 		Router:          r,
@@ -62,12 +67,40 @@ func New() *App {
 		Events:          events.New(),
 		Scheduler:       schedule.New(),
 		Health:          health.New(),
-		Server:          &http.Server{Addr: ":" + cfg.App.Port, Handler: r},
+		Server:          &stdhttp.Server{Addr: ":" + cfg.App.Port, Handler: r},
 		pluginIndex:     make(map[string]Plugin),
 		namedMiddleware: make(map[string]router.Middleware),
 		pluginConfigs:   make(map[string]map[string]any),
 	}
+	app.registerDefaultHealthRoutes()
 	return app
+}
+
+func (a *App) registerDefaultHealthRoutes() {
+	// Liveness: process is up.
+	a.Router.Get("/livez", func(c *nhttp.Context) error {
+		return c.JSON(stdhttp.StatusOK, map[string]string{"status": "ok"})
+	})
+
+	// Readiness: dependencies registered in app.Health are healthy.
+	a.Router.Get("/readyz", func(c *nhttp.Context) error {
+		result := a.Health.Run(c.Ctx())
+		code := stdhttp.StatusOK
+		if result.Status != "ok" {
+			code = stdhttp.StatusServiceUnavailable
+		}
+		return c.JSON(code, result)
+	})
+
+	// Keep legacy /health as readiness-compatible endpoint.
+	a.Router.Get("/health", func(c *nhttp.Context) error {
+		result := a.Health.Run(c.Ctx())
+		code := stdhttp.StatusOK
+		if result.Status != "ok" {
+			code = stdhttp.StatusServiceUnavailable
+		}
+		return c.JSON(code, result)
+	})
 }
 
 // ---------------------------------------------------------------------------
@@ -299,8 +332,10 @@ func (a *App) Run() error {
 	a.Events.Dispatch(events.AppStarted, port)
 
 	// Start scheduler if tasks were registered.
+	schedulerCtx, schedulerCancel := context.WithCancel(context.Background())
+	defer schedulerCancel()
 	if a.Scheduler.Count() > 0 {
-		a.Scheduler.Start(context.Background())
+		a.Scheduler.Start(schedulerCtx)
 	}
 
 	quit := make(chan os.Signal, 1)
@@ -324,6 +359,7 @@ func (a *App) Run() error {
 		_ = a.Shutdown()
 		return nil
 	case err := <-serveErr:
+		a.Scheduler.Stop()
 		return err
 	}
 }
@@ -345,6 +381,13 @@ func (a *App) RunTLS(certFile, keyFile string) error {
 	for _, fn := range a.startHooks {
 		fn(a)
 	}
+	a.Events.Dispatch(events.AppStarted, port)
+
+	schedulerCtx, schedulerCancel := context.WithCancel(context.Background())
+	defer schedulerCancel()
+	if a.Scheduler.Count() > 0 {
+		a.Scheduler.Start(schedulerCtx)
+	}
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
@@ -356,15 +399,18 @@ func (a *App) RunTLS(certFile, keyFile string) error {
 
 	select {
 	case sig := <-quit:
+		a.Events.Dispatch(events.AppShutdown, sig)
 		fmt.Printf("\n  \033[33m⚠\033[0m  Received %v, shutting down...\n", sig)
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := a.Server.Shutdown(ctx); err != nil {
 			return fmt.Errorf("server shutdown: %w", err)
 		}
+		a.Scheduler.Stop()
 		_ = a.Shutdown()
 		return nil
 	case err := <-serveErr:
+		a.Scheduler.Stop()
 		return err
 	}
 }
@@ -453,7 +499,7 @@ func startPprofIfEnabled() {
 	}
 	go func() {
 		log.Printf("[nimbus] pprof server listening on %s (set NIMBUS_PPROF=off to disable)\n", addr)
-		if err := http.ListenAndServe(addr, nil); err != nil && err != http.ErrServerClosed {
+		if err := stdhttp.ListenAndServe(addr, nil); err != nil && err != stdhttp.ErrServerClosed {
 			log.Printf("[nimbus] pprof server error: %v\n", err)
 		}
 	}()

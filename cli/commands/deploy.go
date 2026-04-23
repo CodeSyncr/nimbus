@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,6 +13,7 @@ import (
 	"time"
 
 	"github.com/CodeSyncr/nimbus/cli"
+	"github.com/CodeSyncr/nimbus/cli/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -50,7 +49,7 @@ func (c *DeployCommand) Aliases() []string { return []string{"forge"} }
 func (c *DeployCommand) Args() int         { return -1 }
 
 func (c *DeployCommand) Flags(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&c.target, "target", "", "Deploy target: fly, railway, docker, render, aws, gcp")
+	cmd.Flags().StringVar(&c.target, "target", "", "Deploy target: fly, railway, docker, render, aws, gcp, netlify")
 	cmd.Flags().StringVar(&c.region, "region", "", "Deployment region")
 	cmd.Flags().StringVar(&c.app, "app", "", "Application name")
 	cmd.Flags().BoolVar(&c.skipBuild, "skip-build", false, "Skip build step")
@@ -73,7 +72,7 @@ func (c *DeployInitCommand) Description() string { return "Initialize deployment
 func (c *DeployInitCommand) Args() int           { return -1 }
 
 func (c *DeployInitCommand) Flags(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&c.target, "target", "", "Deploy target: fly, railway, docker, render")
+	cmd.Flags().StringVar(&c.target, "target", "", "Deploy target: fly, railway, docker, render, netlify")
 }
 
 func (c *DeployInitCommand) Run(ctx *cli.Context) error {
@@ -213,7 +212,12 @@ type ForgeService struct {
 func runDeployInit(cmd *cobra.Command, args []string) error {
 	target, _ := cmd.Flags().GetString("target")
 	if target == "" {
-		target = "docker"
+		prompt := ui.NewUI(os.Stdin, os.Stdout, os.Stderr)
+		selected, err := prompt.AskSelect("Select deploy target:", []string{"fly", "render", "railway", "netlify", "docker", "aws", "gcp"}, "docker")
+		if err != nil {
+			return err
+		}
+		target = selected
 	}
 
 	appName := filepath.Base(mustGetwd())
@@ -227,7 +231,7 @@ func runDeployInit(cmd *cobra.Command, args []string) error {
 		Environment: "production",
 		Env:         map[string]string{},
 		Build: ForgeBuild{
-			Command: "go build -o ./bin/server ./cmd/server",
+			Command: "go build -o ./bin/server .",
 			Output:  "./bin/server",
 			LDFlags: "-s -w",
 		},
@@ -289,6 +293,15 @@ func runDeployInit(cmd *cobra.Command, args []string) error {
 			return err
 		}
 		fmt.Println("✓ Created railway.toml")
+	case "netlify":
+		if err := generateNetlifyToml(cfg); err != nil {
+			return err
+		}
+		fmt.Println("✓ Created netlify.toml")
+		fmt.Println("")
+		fmt.Println("  ⚠  Netlify deploys static files only.")
+		fmt.Println("     Place your built HTML/CSS/JS in the 'public/' directory.")
+		fmt.Println("     For full-stack Nimbus apps, use: fly, railway, or render.")
 	}
 
 	fmt.Printf("\n🚀 Deployment initialized for %s target: %s\n", appName, target)
@@ -340,7 +353,10 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		if cfg.Hooks.PostBuild != "" {
 			steps = append(steps, deployStep{name: "Post-build hook", fn: func() error { return runHook(cfg.Hooks.PostBuild) }})
 		}
-		steps = append(steps, deployStep{name: "Building Docker image", fn: func() error { return buildDockerImage(cfg, tag) }})
+		needsDocker := cfg.Target == "docker" || cfg.Target == "aws" || cfg.Target == "gcp"
+		if needsDocker {
+			steps = append(steps, deployStep{name: "Building Docker image", fn: func() error { return buildDockerImage(cfg, tag) }})
+		}
 	}
 
 	switch cfg.Target {
@@ -356,6 +372,8 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		steps = append(steps, deployStep{name: "Deploying to AWS", fn: func() error { return deployToAWS(cfg, tag) }})
 	case "gcp":
 		steps = append(steps, deployStep{name: "Deploying to GCP", fn: func() error { return deployToGCP(cfg, tag) }})
+	case "netlify":
+		steps = append(steps, deployStep{name: "Deploying to Netlify", fn: func() error { return deployToNetlify(cfg) }})
 	default:
 		return fmt.Errorf("unsupported target: %s", cfg.Target)
 	}
@@ -423,6 +441,31 @@ func preflight(cfg *ForgeConfig) error {
 		if _, err := exec.LookPath("gcloud"); err != nil {
 			return fmt.Errorf("gcloud not found — install from: https://cloud.google.com/sdk/")
 		}
+	case "netlify":
+		if _, err := exec.LookPath("netlify"); err != nil {
+			return fmt.Errorf("netlify CLI not found — install with: npm i -g netlify-cli")
+		}
+	case "render":
+		if _, err := exec.LookPath("render"); err != nil {
+			fmt.Println("  ℹ Render CLI not found — installing via Homebrew...")
+			// Tap and install.
+			if _, brewErr := exec.LookPath("brew"); brewErr != nil {
+				return fmt.Errorf("render CLI not found and Homebrew is not installed — install from: https://brew.sh then run: brew tap render-oss/render && brew install render")
+			}
+			tap := exec.Command("brew", "tap", "render-oss/render")
+			tap.Stdout = os.Stdout
+			tap.Stderr = os.Stderr
+			if err := tap.Run(); err != nil {
+				return fmt.Errorf("failed to tap render-oss/render: %w", err)
+			}
+			install := exec.Command("brew", "install", "render")
+			install.Stdout = os.Stdout
+			install.Stderr = os.Stderr
+			if err := install.Run(); err != nil {
+				return fmt.Errorf("failed to install render CLI: %w", err)
+			}
+			fmt.Println("  ✓ Render CLI installed")
+		}
 	}
 
 	return nil
@@ -440,11 +483,24 @@ func buildApp(cfg *ForgeConfig) error {
 	}
 
 	cmdParts := strings.Fields(cfg.Build.Command)
-	if cfg.Build.LDFlags != "" {
-		cmdParts = append(cmdParts, "-ldflags", cfg.Build.LDFlags)
-	}
-	for _, tag := range cfg.Build.Tags {
-		cmdParts = append(cmdParts, "-tags", tag)
+	if len(cmdParts) >= 2 && cmdParts[0] == "go" && cmdParts[1] == "build" {
+		var newParts []string
+		newParts = append(newParts, "go", "build")
+		if cfg.Build.LDFlags != "" {
+			newParts = append(newParts, "-ldflags", cfg.Build.LDFlags)
+		}
+		for _, tag := range cfg.Build.Tags {
+			newParts = append(newParts, "-tags", tag)
+		}
+		newParts = append(newParts, cmdParts[2:]...)
+		cmdParts = newParts
+	} else {
+		if cfg.Build.LDFlags != "" {
+			cmdParts = append(cmdParts, "-ldflags", cfg.Build.LDFlags)
+		}
+		for _, tag := range cfg.Build.Tags {
+			cmdParts = append(cmdParts, "-tags", tag)
+		}
 	}
 
 	c := exec.Command(cmdParts[0], cmdParts[1:]...)
@@ -493,28 +549,59 @@ func deployToRailway(cfg *ForgeConfig) error {
 }
 
 func deployToRender(cfg *ForgeConfig) error {
-	// Render deploys via push — trigger a deploy via API if key is set.
-	apiKey := os.Getenv("RENDER_API_KEY")
-	serviceID := os.Getenv("RENDER_SERVICE_ID")
-	if apiKey == "" || serviceID == "" {
-		return fmt.Errorf("set RENDER_API_KEY and RENDER_SERVICE_ID env vars")
+	// 1. Check if user is logged in; if not, trigger interactive login.
+	if err := exec.Command("render", "workspaces", "-o", "json").Run(); err != nil {
+		fmt.Println("\n  ℹ Not logged in to Render — opening login flow...")
+		login := exec.Command("render", "login")
+		login.Stdin = os.Stdin
+		login.Stdout = os.Stdout
+		login.Stderr = os.Stderr
+		if err := login.Run(); err != nil {
+			return fmt.Errorf("render login failed: %w", err)
+		}
 	}
 
-	url := fmt.Sprintf("https://api.render.com/v1/services/%s/deploys", serviceID)
-	req, _ := http.NewRequest("POST", url, bytes.NewBuffer([]byte("{}")))
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
+	// 2. Ensure render.yaml exists (Render Blueprint for the service).
+	if _, err := os.Stat("render.yaml"); os.IsNotExist(err) {
+		fmt.Println("  ℹ No render.yaml found — generating...")
+		if err := generateRenderYaml(*cfg); err != nil {
+			return fmt.Errorf("failed to generate render.yaml: %w", err)
+		}
+		fmt.Println("  ✓ Created render.yaml")
 	}
-	defer resp.Body.Close()
 
-	if resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("render deploy failed (%d): %s", resp.StatusCode, string(body))
+	// 3. Check if we have an existing service by listing services.
+	listOut, err := exec.Command("render", "services", "-o", "json").Output()
+	hasServices := err == nil && len(listOut) > 5 && string(listOut) != "[]"
+
+	if hasServices {
+		// Existing service found — trigger a deploy via interactive service selection.
+		fmt.Println("  ℹ Triggering deploy on existing service...")
+		deploy := exec.Command("render", "deploys", "create")
+		deploy.Stdin = os.Stdin
+		deploy.Stdout = os.Stdout
+		deploy.Stderr = os.Stderr
+		return deploy.Run()
 	}
+
+	// 4. No services yet — guide the user to create one via Blueprint.
+	fmt.Println("")
+	fmt.Println("  ┌─────────────────────────────────────────────────────────┐")
+	fmt.Println("  │  No Render services found. First-time setup required:  │")
+	fmt.Println("  │                                                        │")
+	fmt.Println("  │  1. Push your code to GitHub/GitLab                    │")
+	fmt.Println("  │  2. Go to: https://dashboard.render.com/blueprints    │")
+	fmt.Println("  │  3. Click 'New Blueprint Instance'                     │")
+	fmt.Println("  │  4. Select your repo — Render will use render.yaml     │")
+	fmt.Println("  │                                                        │")
+	fmt.Println("  │  After setup, run `nimbus deploy` again to trigger     │")
+	fmt.Println("  │  deploys directly from the CLI.                        │")
+	fmt.Println("  └─────────────────────────────────────────────────────────┘")
+	fmt.Println("")
+
+	// Open the Render Blueprint page in the browser.
+	exec.Command("open", "https://dashboard.render.com/blueprints").Run()
+
 	return nil
 }
 
@@ -612,6 +699,59 @@ func deployToGCP(cfg *ForgeConfig, tag string) error {
 	return deployCmd.Run()
 }
 
+func deployToNetlify(cfg *ForgeConfig) error {
+	// 1. Check if user is logged in; if not, trigger interactive login.
+	if err := exec.Command("netlify", "status").Run(); err != nil {
+		fmt.Println("\n  ℹ Not logged in to Netlify — opening login flow...")
+		login := exec.Command("netlify", "login")
+		login.Stdin = os.Stdin
+		login.Stdout = os.Stdout
+		login.Stderr = os.Stderr
+		if err := login.Run(); err != nil {
+			return fmt.Errorf("netlify login failed: %w", err)
+		}
+	}
+
+	// 2. Check if site is linked; if not, create one (no Git hooks).
+	if _, err := os.Stat(".netlify/state.json"); os.IsNotExist(err) {
+		fmt.Println("  ℹ No Netlify site linked — creating site...")
+
+		// Create a new site without Git integration.
+		create := exec.Command("netlify", "sites:create", "--name", cfg.App, "--manual")
+		create.Stdin = os.Stdin
+		create.Stdout = os.Stdout
+		create.Stderr = os.Stderr
+		if err := create.Run(); err != nil {
+			// Name may be taken — create with random name instead.
+			fmt.Println("  ℹ Name taken, creating with auto-generated name...")
+			create = exec.Command("netlify", "sites:create", "--manual")
+			create.Stdin = os.Stdin
+			create.Stdout = os.Stdout
+			create.Stderr = os.Stderr
+			if err := create.Run(); err != nil {
+				return fmt.Errorf("netlify site creation failed: %w", err)
+			}
+		}
+
+		// Link the current directory to the newly created site.
+		link := exec.Command("netlify", "link")
+		link.Stdin = os.Stdin
+		link.Stdout = os.Stdout
+		link.Stderr = os.Stderr
+		if err := link.Run(); err != nil {
+			return fmt.Errorf("netlify link failed: %w", err)
+		}
+	}
+
+	// 3. Direct deploy — upload the publish directory only (static files).
+	//    No Git required, no functions — pure static file upload.
+	deploy := exec.Command("netlify", "deploy", "--prod", "--dir", "public")
+	deploy.Stdin = os.Stdin
+	deploy.Stdout = os.Stdout
+	deploy.Stderr = os.Stderr
+	return deploy.Run()
+}
+
 // ---------------------------------------------------------------------------
 // Deploy Status / Logs / Env / Rollback
 // ---------------------------------------------------------------------------
@@ -638,6 +778,17 @@ func runDeployStatus(cmd *cobra.Command, args []string) error {
 		return c.Run()
 	case "railway":
 		c := exec.Command("railway", "status")
+		c.Stdout = os.Stdout
+		c.Stderr = os.Stderr
+		return c.Run()
+	case "netlify":
+		c := exec.Command("netlify", "status")
+		c.Stdout = os.Stdout
+		c.Stderr = os.Stderr
+		return c.Run()
+	case "render":
+		c := exec.Command("render", "services")
+		c.Stdin = os.Stdin
 		c.Stdout = os.Stdout
 		c.Stderr = os.Stderr
 		return c.Run()
@@ -798,10 +949,12 @@ WORKDIR /app
 
 # Cache dependencies.
 COPY go.mod go.sum ./
-RUN go mod download
+# Strip local replace directives for Docker builds.
+RUN sed -i '/replace.*=>.*\.\.\//d' go.mod && go mod download
 
 # Copy source and build.
 COPY . .
+RUN sed -i '/replace.*=>.*\.\.\//d' go.mod && go mod tidy
 {{- if .Build.CGOEnabled }}
 RUN CGO_ENABLED=1 go build {{if .Build.LDFlags}}-ldflags "{{.Build.LDFlags}}"{{end}} -o /app/server {{.BuildTarget}}
 {{- else }}
@@ -865,7 +1018,7 @@ node_modules/
 coverage/
 .idea/
 .vscode/
-bin/
+bin/server
 nimbus.deploy.json
 `
 	return os.WriteFile(".dockerignore", []byte(content), 0644)
@@ -919,19 +1072,27 @@ kill_timeout = "5s"
 }
 
 func generateRenderYaml(cfg ForgeConfig) error {
+	region := cfg.Region
+	if region == "" || region == "auto" {
+		region = "oregon"
+	}
+
 	content := fmt.Sprintf(`# Nimbus Forge — Render Configuration
 services:
   - type: web
     name: %s
-    env: docker
+    runtime: docker
     plan: starter
+    region: %s
+    dockerfilePath: ./Dockerfile
     healthCheckPath: %s
+    autoDeploy: false
     envVars:
       - key: PORT
         value: "%d"
       - key: APP_ENV
         value: production
-`, cfg.App, cfg.Health.Path, cfg.Port)
+`, cfg.App, region, cfg.Health.Path, cfg.Port)
 
 	for _, svc := range cfg.Services {
 		content += fmt.Sprintf(`
@@ -960,6 +1121,23 @@ func generateRailwayToml(cfg ForgeConfig) error {
 `, cfg.Health.Path, cfg.Health.Timeout)
 
 	return os.WriteFile("railway.toml", []byte(content), 0644)
+}
+
+func generateNetlifyToml(cfg ForgeConfig) error {
+	content := fmt.Sprintf(`# Nimbus Forge — Netlify Configuration
+# Netlify serves static files only. Place built HTML/CSS/JS in public/.
+# For full-stack Nimbus apps, use: nimbus deploy:init --target fly
+
+[build]
+  publish = "public"
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Cache-Control = "public, max-age=3600"
+`)
+
+	return os.WriteFile("netlify.toml", []byte(content), 0644)
 }
 
 // ---------------------------------------------------------------------------

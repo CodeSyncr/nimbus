@@ -12,10 +12,13 @@ package pulse
 
 import (
 	"encoding/json"
+	"html"
 	"math"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/CodeSyncr/nimbus/database"
 	nhttp "github.com/CodeSyncr/nimbus/http"
 	"github.com/CodeSyncr/nimbus/router"
 )
@@ -64,6 +67,26 @@ type Entry struct {
 	Timestamp time.Time      `json:"timestamp"`
 	Duration  time.Duration  `json:"duration_ms"`
 	Data      map[string]any `json:"data"`
+}
+
+// Y2038Audit summarizes schema timestamp risk for MySQL.
+type Y2038Audit struct {
+	Driver           string              `json:"driver"`
+	TimestampColumns []MySQLTimestampCol `json:"timestamp_columns"`
+	OK               bool                `json:"ok"`
+	// Error is set when the audit query failed (e.g. permissions) or DB was unavailable.
+	Error string `json:"error,omitempty"`
+	// Skipped explains non-MySQL drivers or missing DB (informational).
+	Skipped string `json:"skipped,omitempty"`
+}
+
+type MySQLTimestampCol struct {
+	Table      string  `json:"table"`
+	Column     string  `json:"column"`
+	ColumnType string  `json:"column_type"`
+	IsNullable bool    `json:"is_nullable"`
+	Default    *string `json:"default,omitempty"`
+	Extra      string  `json:"extra,omitempty"`
 }
 
 // ── Aggregated Stats ────────────────────────────────────────────
@@ -202,6 +225,9 @@ type Pulse struct {
 	jobsTotalTime float64
 
 	startTime time.Time
+
+	y2038Mu sync.RWMutex
+	y2038   Y2038Audit
 }
 
 type pathCounter struct {
@@ -224,7 +250,81 @@ func New(cfg Config) *Pulse {
 		statusCounts: make(map[int]int64),
 		pathStats:    make(map[string]*pathCounter),
 		startTime:    time.Now(),
+		y2038:        Y2038Audit{OK: true},
 	}
+}
+
+// AuditY2038 inspects the connected MySQL schema and records any TIMESTAMP columns.
+// Best-effort; it never panics.
+func (p *Pulse) AuditY2038() {
+	db := database.Get()
+	if db == nil || db.Dialector == nil {
+		p.y2038Mu.Lock()
+		p.y2038 = Y2038Audit{OK: true, Skipped: "database not connected"}
+		p.y2038Mu.Unlock()
+		return
+	}
+
+	driver := db.Dialector.Name()
+	audit := Y2038Audit{Driver: driver, OK: true}
+	if driver != "mysql" {
+		audit.Skipped = "Y2038 column audit applies to MySQL only (use TIMESTAMPTZ on Postgres)"
+		p.y2038Mu.Lock()
+		p.y2038 = audit
+		p.y2038Mu.Unlock()
+		return
+	}
+
+	type row struct {
+		TableName     string
+		ColumnName    string
+		ColumnType    string
+		IsNullable    string
+		ColumnDefault *string
+		Extra         string
+	}
+
+	var rows []row
+	err := db.Raw(`
+SELECT
+  table_name,
+  column_name,
+  column_type,
+  is_nullable,
+  column_default,
+  extra
+FROM information_schema.columns
+WHERE table_schema = DATABASE()
+  AND data_type = 'timestamp'
+ORDER BY table_name, ordinal_position
+`).Scan(&rows).Error
+
+	if err != nil {
+		audit.OK = false
+		audit.Error = err.Error()
+	} else {
+		for _, r := range rows {
+			audit.TimestampColumns = append(audit.TimestampColumns, MySQLTimestampCol{
+				Table:      r.TableName,
+				Column:     r.ColumnName,
+				ColumnType: r.ColumnType,
+				IsNullable: strings.EqualFold(r.IsNullable, "YES"),
+				Default:    r.ColumnDefault,
+				Extra:      r.Extra,
+			})
+		}
+		audit.OK = len(audit.TimestampColumns) == 0
+	}
+
+	p.y2038Mu.Lock()
+	p.y2038 = audit
+	p.y2038Mu.Unlock()
+}
+
+func (p *Pulse) y2038Snapshot() Y2038Audit {
+	p.y2038Mu.RLock()
+	defer p.y2038Mu.RUnlock()
+	return p.y2038
 }
 
 // ── Recording methods ───────────────────────────────────────────
@@ -555,9 +655,13 @@ func (w *statusWriter) Write(b []byte) (int, error) {
 // ── Dashboard Handler ───────────────────────────────────────────
 
 // DashboardHandler returns a handler that serves the Pulse monitoring dashboard
-// as a JSON API. Frontend dashboards can consume this.
+// as JSON (default) or a small HTML page when Accept prefers text/html.
 func (p *Pulse) DashboardHandler() router.HandlerFunc {
 	return func(c *nhttp.Context) error {
+		// Refresh Y2038 audit when the dashboard is opened (DB may connect after plugin Boot).
+		p.AuditY2038()
+
+		y := p.y2038Snapshot()
 		data := map[string]any{
 			"requests":     p.GetRequestStats(),
 			"cache":        p.GetCacheStats(),
@@ -565,13 +669,75 @@ func (p *Pulse) DashboardHandler() router.HandlerFunc {
 			"exceptions":   p.RecentExceptions(20),
 			"slow_queries": p.RecentSlowQueries(20),
 			"uptime":       time.Since(p.startTime).String(),
+			"y2038":        y,
 		}
+
+		accept := c.Request.Header.Get("Accept")
+		if strings.Contains(accept, "text/html") && !strings.Contains(accept, "application/json") {
+			c.Response.Header().Set("Content-Type", "text/html; charset=utf-8")
+			c.Response.WriteHeader(200)
+			_, err := c.Response.Write([]byte(pulseDashboardHTML(data, y)))
+			return err
+		}
+
 		out, _ := json.MarshalIndent(data, "", "  ")
 		c.Response.Header().Set("Content-Type", "application/json")
 		c.Response.WriteHeader(200)
 		_, err := c.Response.Write(out)
 		return err
 	}
+}
+
+func pulseDashboardHTML(data map[string]any, y Y2038Audit) string {
+	var b strings.Builder
+	b.WriteString("<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Pulse</title>")
+	b.WriteString("<style>body{font-family:system-ui,sans-serif;margin:24px;max-width:960px;background:#0f1419;color:#e6edf3}")
+	b.WriteString(".warn{background:#3d2914;border:1px solid #a35;color:#fdb;padding:12px;border-radius:8px;margin:16px 0}")
+	b.WriteString(".ok{background:#14231a;border:1px solid #2a6;color:#9f9;padding:12px;border-radius:8px;margin:16px 0}")
+	b.WriteString("table{border-collapse:collapse;width:100%;font-size:14px}")
+	b.WriteString("th,td{border:1px solid #30363d;padding:8px;text-align:left}")
+	b.WriteString("th{background:#161b22} code{font-size:12px}</style></head><body>")
+	b.WriteString("<h1>Pulse</h1>")
+	uptime := ""
+	if u, ok := data["uptime"].(string); ok {
+		uptime = u
+	}
+	b.WriteString("<p>uptime: <strong>")
+	b.WriteString(html.EscapeString(uptime))
+	b.WriteString("</strong></p>")
+
+	b.WriteString("<h2>Y2038 — MySQL TIMESTAMP audit</h2>")
+	if y.Skipped != "" {
+		b.WriteString("<p class=\"ok\">")
+		b.WriteString(html.EscapeString(y.Skipped))
+		b.WriteString("</p>")
+	}
+	if y.Driver == "mysql" {
+		if y.Error != "" {
+			b.WriteString("<div class=\"warn\"><strong>Audit failed:</strong> ")
+			b.WriteString(html.EscapeString(y.Error))
+			b.WriteString("</div>")
+		} else if len(y.TimestampColumns) > 0 {
+			b.WriteString("<div class=\"warn\"><p><strong>Warning:</strong> Found MySQL <code>TIMESTAMP</code> columns (Y2038 risk in some deployments). Prefer <code>DATETIME(6)</code> for application times, or run <code>nimbus make:migration fix_y2038 --auto-detect</code>.</p>")
+			b.WriteString("<table><thead><tr><th>Table</th><th>Column</th><th>Type</th></tr></thead><tbody>")
+			for _, col := range y.TimestampColumns {
+				b.WriteString("<tr><td>")
+				b.WriteString(html.EscapeString(col.Table))
+				b.WriteString("</td><td>")
+				b.WriteString(html.EscapeString(col.Column))
+				b.WriteString("</td><td><code>")
+				b.WriteString(html.EscapeString(col.ColumnType))
+				b.WriteString("</code></td></tr>")
+			}
+			b.WriteString("</tbody></table></div>")
+		} else {
+			b.WriteString("<div class=\"ok\">No <code>TIMESTAMP</code> columns in this schema. Nimbus migrations use <code>DATETIME(6)</code> for MySQL.</div>")
+		}
+	}
+
+	b.WriteString("<p><small>JSON: same URL with <code>Accept: application/json</code> or omit <code>text/html</code> from Accept.</small></p>")
+	b.WriteString("</body></html>")
+	return b.String()
 }
 
 // ── Helpers ─────────────────────────────────────────────────────

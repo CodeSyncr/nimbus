@@ -1,6 +1,8 @@
 package cli
 
-import "github.com/spf13/cobra"
+import (
+	"github.com/spf13/cobra"
+)
 
 // Root wraps the Cobra root command for the Nimbus CLI.
 type Root struct {
@@ -41,5 +43,9 @@ func (r *Root) Execute() error {
 
 		r.AddCommand(cmd)
 	}
+	for _, attach := range rootAttach {
+		attach(r.Command)
+	}
+	instrumentCommandTree(r.Command)
 	return r.Command.Execute()
 }

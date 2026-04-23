@@ -16,7 +16,7 @@ import (
 	"os"
 	"sync"
 
-	"github.com/redis/go-redis/v9"
+	"github.com/CodeSyncr/nimbus/redis"
 )
 
 const defaultRedisChannel = "transmit::broadcast"

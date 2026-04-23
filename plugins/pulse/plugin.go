@@ -2,6 +2,7 @@ package pulse
 
 import (
 	"github.com/CodeSyncr/nimbus"
+	"github.com/CodeSyncr/nimbus/database"
 	"github.com/CodeSyncr/nimbus/router"
 )
 
@@ -43,6 +44,11 @@ func (p *PulsePlugin) Register(app *nimbus.App) error {
 
 // Boot is a no-op for Pulse.
 func (p *PulsePlugin) Boot(app *nimbus.App) error {
+	_ = app
+	// Best-effort schema audit (only meaningful for MySQL).
+	if database.Get() != nil {
+		p.Pulse.AuditY2038()
+	}
 	return nil
 }
 

@@ -8,7 +8,8 @@ const socialiteServerInsert = `	app.Use(socialite.NewPlugin(socialite.Config{
 		// Example:
 		//   dbUser, _ := findOrCreateUser(user)
 		//   guard.Login(c.Request.Context(), dbUser)
-		return c.Redirect(nhttp.StatusSeeOther, "/dashboard")
+		c.Redirect(nhttp.StatusSeeOther, "/dashboard")
+		return nil
 	}))
 `
 
