@@ -4,9 +4,15 @@ All notable changes to Nimbus are documented in this file.
 
 This project follows Semantic Versioning.
 
-## [Unreleased]
+## [1.0.1] - 2026-05-08
 
-(nothing yet)
+### Fixed
+- **Security:** Resolved SQL injection vulnerability in Tenancy schema scoping.
+- **Security:** Renamed `EncryptDeterministic` to `EncryptDeterministicUNSAFE` to highlight cryptographic risks.
+- **Security:** Fixed WebSocket origin checker incorrectly rejecting all connections by default.
+- **Concurrency:** Fixed data races and TOCTOU bugs in `logger` channels, `ai` provider registry, `presence` channels, and `cache` locks.
+- **Middleware:** Implemented full logic for `RequireVerifiedEmail` and fixed HTTP spec violations in `ratelimit_redis` (correctly handles `Retry-After`).
+- **Optimization:** Moved regex compilation in `shield` out of the hot path.
 
 ## [1.0.0] - 2026-03-23
 
