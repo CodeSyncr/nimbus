@@ -167,9 +167,12 @@ func decodeKey(key string) ([]byte, error) {
 
 // ── Hash helpers (deterministic, for comparison — NOT for passwords) ──
 
-// EncryptDeterministic encrypts with a zero nonce (same input → same output).
-// DO NOT use for general-purpose encryption; only for searchable columns.
-func (e *Encrypter) EncryptDeterministic(plaintext []byte) ([]byte, error) {
+// EncryptDeterministicUNSAFE encrypts with a zero nonce (same input → same output).
+// SECURITY WARNING: Using AES-GCM with a zero nonce is cryptographically unsafe
+// as it leaks information about identical plaintexts and enables key recovery attacks.
+// DO NOT use for general-purpose encryption; only use when deterministic ciphertexts
+// are strictly required (e.g. for exact match queries on searchable columns).
+func (e *Encrypter) EncryptDeterministicUNSAFE(plaintext []byte) ([]byte, error) {
 	block, err := aes.NewCipher(e.key)
 	if err != nil {
 		return nil, fmt.Errorf("encryption: %w", err)

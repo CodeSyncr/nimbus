@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"time"
 
+	nhttp "github.com/CodeSyncr/nimbus/http"
 	"github.com/CodeSyncr/nimbus/mail"
+	"github.com/CodeSyncr/nimbus/router"
 )
 
 // ── Email Verification ──────────────────────────────────────────
@@ -101,18 +103,18 @@ func (v *EmailVerifier) Cleanup() {
 
 // RequireVerifiedEmail middleware rejects requests from unverified users.
 // Must be used after RequireAuth middleware.
-func RequireVerifiedEmail(redirectTo string) func(next func(*MustVerifyEmail)) {
-	// This is a conceptual middleware; apps should use it with their HandlerFunc.
-	// The actual middleware is provided as a pattern:
-	//
-	//   func VerifiedMiddleware(next router.HandlerFunc) router.HandlerFunc {
-	//       return func(c *http.Context) error {
-	//           user := auth.UserFromContext(c.Request.Context())
-	//           if u, ok := user.(auth.MustVerifyEmail); ok && !u.HasVerifiedEmail() {
-	//               return c.Redirect(http.StatusFound, "/verify-email")
-	//           }
-	//           return next(c)
-	//       }
-	//   }
-	return nil
+func RequireVerifiedEmail(redirectTo string) router.Middleware {
+	return func(next router.HandlerFunc) router.HandlerFunc {
+		return func(c *nhttp.Context) error {
+			user := UserFromContext(c.Request.Context())
+			if u, ok := user.(MustVerifyEmail); ok && !u.HasVerifiedEmail() {
+				if c.Request.Header.Get("Accept") == "application/json" {
+					return c.JSON(403, map[string]string{"error": "Email verification required"})
+				}
+				c.Redirect(302, redirectTo)
+				return nil
+			}
+			return next(c)
+		}
+	}
 }

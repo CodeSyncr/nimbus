@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -15,7 +16,10 @@ import (
 var Log *zap.SugaredLogger
 
 // channelLoggers holds named channel loggers.
-var channelLoggers = map[string]*zap.SugaredLogger{}
+var (
+	channelLoggers   = map[string]*zap.SugaredLogger{}
+	channelLoggersMu sync.RWMutex
+)
 
 func init() {
 	cfg := zap.NewProductionConfig()
@@ -89,7 +93,9 @@ func Configure(cfg Config) error {
 		if err != nil {
 			return fmt.Errorf("logger: channel %q: %w", name, err)
 		}
+		channelLoggersMu.Lock()
 		channelLoggers[name] = cl
+		channelLoggersMu.Unlock()
 	}
 
 	return nil
@@ -219,7 +225,10 @@ func SetLevel(level string) {
 
 // Channel returns a named channel logger. Falls back to the global logger.
 func Channel(name string) *zap.SugaredLogger {
-	if cl, ok := channelLoggers[name]; ok {
+	channelLoggersMu.RLock()
+	cl, ok := channelLoggers[name]
+	channelLoggersMu.RUnlock()
+	if ok {
 		return cl
 	}
 	return Log.Named(name)
@@ -274,6 +283,8 @@ func Sync() {
 	if Log != nil {
 		_ = Log.Sync()
 	}
+	channelLoggersMu.RLock()
+	defer channelLoggersMu.RUnlock()
 	for _, cl := range channelLoggers {
 		_ = cl.Sync()
 	}

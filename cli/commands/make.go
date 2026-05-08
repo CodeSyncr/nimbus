@@ -113,7 +113,7 @@ func (c *MakeMigration) Run(ctx *cli.Context) error {
 			return err
 		}
 		if warn != "" {
-			ctx.UI.Warnf(warn)
+			ctx.UI.Warnf("%s", warn)
 		}
 		data := generators.Data{
 			"SchemaName":    pascal,

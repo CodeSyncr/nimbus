@@ -30,13 +30,20 @@ func RateLimitRedis(rdb *redis.Client, limit int, window time.Duration, keyFn fu
 				return next(c)
 			}
 			count := incr.Val()
+			remaining := int64(limit) - count
+			if remaining < 0 {
+				remaining = 0
+			}
+			c.Response.Header().Set("X-RateLimit-Limit", strconv.Itoa(limit))
+			c.Response.Header().Set("X-RateLimit-Remaining", strconv.FormatInt(remaining, 10))
+
 			if count > int64(limit) {
+				// Set Retry-After header only on 429
+				if ttl, err := rdb.TTL(ctx, rkey).Result(); err == nil && ttl > 0 {
+					c.Response.Header().Set("Retry-After", strconv.Itoa(int(ttl.Seconds())))
+				}
 				c.JSON(http.StatusTooManyRequests, map[string]string{"error": "rate limit exceeded"})
 				return nil
-			}
-			// Set Retry-After header
-			if ttl, err := rdb.TTL(ctx, rkey).Result(); err == nil && ttl > 0 {
-				c.Response.Header().Set("Retry-After", strconv.Itoa(int(ttl.Seconds())))
 			}
 			return next(c)
 		}

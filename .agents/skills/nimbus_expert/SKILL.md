@@ -22,6 +22,7 @@ Use this skill when:
 ### Core Framework
 - [Framework Overview](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/framework_overview.md): Core architecture and lifecycle.
 - [Configuration](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/configuration.md): Layered config and `.env` loading.
+- [Routing & Controllers](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/routing_controllers.md): Route groups, params, resources, controllers.
 - [Validation](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/validation.md): Chainable rules and Form Requests.
 - [Views & Templates](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/views_templates.md): `.nimbus` engine, layouts, and components.
 - [CLI](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/cli.md): Scaffolding and generator commands.
@@ -33,17 +34,29 @@ Use this skill when:
 - [CORS & Security](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/cors.md): Middleware for security.
 - [Advanced Features](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/advanced_features.md): Health checks, Shield, and Service Container.
 
-### Services & AI
-- [AI SDK](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/ai_plugin_deep_dive.md): Advanced AI orchestration.
-- [MCP Integration](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/mcp_integration.md): Model Context Protocol support.
+### Services
 - [Queue & Jobs](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/queue_jobs.md): Background job processing.
 - [Cache](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/cache.md): Multi-driver caching and locks.
 - [Mail](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/mail.md): Unified mail API.
 - [Scheduler](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/scheduler.md): Recurring task management.
+- [Notification](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/notification.md): Multi-channel notifications.
+- [Search](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/search.md): Full-text search (Meilisearch, Typesense, PostgreSQL).
+- [WebSocket](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/websocket.md): WebSocket server and channels.
+
+### AI & Integration
+- [AI SDK](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/ai_plugin_deep_dive.md): Advanced AI orchestration.
+- [MCP Integration](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/mcp_integration.md): Model Context Protocol support.
+
+### Plugins
+- [Plugin System](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/plugin.md): Extensibility and plugin development.
+- [Drive](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/drive_plugin.md): File storage (Local, S3, GCS, R2, Spaces, Supabase).
+- [Transmit](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/transmit_plugin.md): SSE real-time push.
+- [Horizon](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/horizon_plugin.md): Queue dashboard.
+- [Inertia](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/inertia_plugin.md): Vue/React/Svelte SPA adapter.
+- [Reverb](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/reverb_plugin.md): WebSocket broadcasting.
 
 ### Development
 - [Testing](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/testing.md): HTTP helpers and AI test generation.
-- [Plugin System](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/plugin.md): Extensibility and plugin development.
 - [Best Practices](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/usage_best_practices.md): Development guidelines.
 
 ## Instructions

@@ -18,7 +18,10 @@
 
 package ai
 
-import "context"
+import (
+	"context"
+	"sync"
+)
 
 // ---------------------------------------------------------------------------
 // Core provider interface
@@ -59,22 +62,31 @@ type ImageProvider interface {
 // ProviderFactory creates a Provider from a Config.
 type ProviderFactory func(cfg *Config) (Provider, error)
 
-var providerRegistry = map[string]ProviderFactory{}
+var (
+	providerRegistry   = map[string]ProviderFactory{}
+	providerRegistryMu sync.RWMutex
+)
 
 // RegisterProvider makes a provider available by name.
 // Call from init() in each provider file (e.g. openai.go, ollama.go).
 func RegisterProvider(name string, factory ProviderFactory) {
+	providerRegistryMu.Lock()
+	defer providerRegistryMu.Unlock()
 	providerRegistry[name] = factory
 }
 
 // GetProviderFactory returns the factory for the named provider.
 func GetProviderFactory(name string) (ProviderFactory, bool) {
+	providerRegistryMu.RLock()
+	defer providerRegistryMu.RUnlock()
 	f, ok := providerRegistry[name]
 	return f, ok
 }
 
 // AllProviders returns all registered provider names.
 func AllProviders() []string {
+	providerRegistryMu.RLock()
+	defer providerRegistryMu.RUnlock()
 	names := make([]string, 0, len(providerRegistry))
 	for n := range providerRegistry {
 		names = append(names, n)

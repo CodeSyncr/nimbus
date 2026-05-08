@@ -667,6 +667,8 @@ func scanAndContinue(c *http.Context, next router.HandlerFunc, text string, thre
 }
 
 // structuralAnalysis checks for structural patterns that may indicate injection.
+var base64Pattern = regexp.MustCompile(`[A-Za-z0-9+/]{40,}={0,2}`)
+
 func structuralAnalysis(text string) int {
 	score := 0
 
@@ -698,7 +700,6 @@ func structuralAnalysis(text string) int {
 	}
 
 	// Base64-encoded content (potential obfuscation).
-	base64Pattern := regexp.MustCompile(`[A-Za-z0-9+/]{40,}={0,2}`)
 	if base64Pattern.MatchString(text) && len(text) > 100 {
 		score += 15
 	}
