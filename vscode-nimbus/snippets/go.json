@@ -1,0 +1,108 @@
+{
+  "Nimbus Controller": {
+    "prefix": "nim-controller",
+    "body": [
+      "package controllers",
+      "",
+      "import (",
+      "\t\"github.com/CodeSyncr/nimbus/http\"",
+      ")",
+      "",
+      "type ${1:HomeController} struct{}",
+      "",
+      "func (c *${1:HomeController}) ${2:Index}(ctx *http.Context) error {",
+      "\treturn ctx.View(\"${3:home}\", map[string]any{",
+      "\t\t\"title\": \"${4:Welcome}\",",
+      "\t})",
+      "}"
+    ],
+    "description": "Scaffold a new Nimbus Controller"
+  },
+  "Nimbus Model": {
+    "prefix": "nim-model",
+    "body": [
+      "package models",
+      "",
+      "import (",
+      "\t\"github.com/CodeSyncr/nimbus\"",
+      ")",
+      "",
+      "type ${1:User} struct {",
+      "\tnimbus.Model",
+      "\tName  string `gorm:\"type:varchar(255);not null\" json:\"name\"`",
+      "\tEmail string `gorm:\"type:varchar(255);uniqueIndex;not null\" json:\"email\"`",
+      "}"
+    ],
+    "description": "Scaffold a new GORM Model embedding nimbus.Model"
+  },
+  "Nimbus Middleware": {
+    "prefix": "nim-middleware",
+    "body": [
+      "package middleware",
+      "",
+      "import (",
+      "\t\"github.com/CodeSyncr/nimbus/http\"",
+      ")",
+      "",
+      "func ${1:AuthMiddleware}() http.HandlerFunc {",
+      "\treturn func(ctx *http.Context) error {",
+      "\t\t// Perform checks, e.g., inspect token",
+      "\t\t${2:// ctx.Response.Header().Set(\"X-Custom\", \"Value\")}",
+      "\t\treturn ctx.Next()",
+      "\t}",
+      "}"
+    ],
+    "description": "Scaffold a new HTTP middleware handler"
+  },
+  "Nimbus CLI Command": {
+    "prefix": "nim-command",
+    "body": [
+      "package commands",
+      "",
+      "import (",
+      "\t\"github.com/CodeSyncr/nimbus/cli\"",
+      ")",
+      "",
+      "func init() {",
+      "\tcli.RegisterCommand(&${1:CustomCommand}{})",
+      "}",
+      "",
+      "type ${1:CustomCommand} struct{}",
+      "",
+      "func (c *${1:CustomCommand}) Name() string        { return \"${2:custom:run}\" }",
+      "func (c *${1:CustomCommand}) Description() string { return \"${3:Command description}\" }",
+      "func (c *${1:CustomCommand}) Args() int           { return ${4:0} }",
+      "",
+      "func (c *${1:CustomCommand}) Run(ctx *cli.Context) error {",
+      "\tctx.UI.Infof(\"Running custom command...\")",
+      "\t${5:// command logic}",
+      "\tctx.UI.Successf(\"Custom command finished successfully!\")",
+      "\treturn nil",
+      "}"
+    ],
+    "description": "Scaffold a custom artisan-style CLI command"
+  },
+  "Nimbus Service Provider": {
+    "prefix": "nim-provider",
+    "body": [
+      "package providers",
+      "",
+      "import (",
+      "\t\"github.com/CodeSyncr/nimbus\"",
+      ")",
+      "",
+      "type ${1:CustomServiceProvider} struct{}",
+      "",
+      "func (p *${1:CustomServiceProvider}) Register(app *nimbus.App) error {",
+      "\t// Bind services to the IoC container",
+      "\treturn nil",
+      "}",
+      "",
+      "func (p *${1:CustomServiceProvider}) Boot(app *nimbus.App) error {",
+      "\t// Perform post-boot operations",
+      "\treturn nil",
+      "}"
+    ],
+    "description": "Scaffold a new Service Provider"
+  }
+}

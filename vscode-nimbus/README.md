@@ -5,10 +5,15 @@ Adds **syntax highlighting** and **editor support** for `.nimbus` template files
 ## Features
 
 - **Syntax highlighting** for Nimbus directives and expressions:
-  - `@layout('name')` – layout directive
-  - `@if(condition)` … `@else` … `@endif` – conditionals
-  - `@each(list)` … `@endeach` – loops
-  - `{{ variable }}` – output expressions
+  - `@layout('name')` / `@include('name')` – layout and partial directives
+  - `@if(condition)` … `@else if(...)` … `@else` … `@endif` – conditionals
+  - `@each(item in list)` … `@endeach` – loops
+  - `@component(...)` / `@!component(...)` – component block and self-closing tags
+  - `{{ variable }}` / `{{{ raw_html }}}` – escaped and raw output expressions
+  - `{{-- comment --}}` – template comments
+- **Code Snippets** for rapid scaffolding:
+  - **Go Code**: Controllers (`nim-controller`), GORM Models (`nim-model`), Middleware (`nim-middleware`), CLI commands (`nim-command`), and Service Providers (`nim-provider`).
+  - **Nimbus Templates**: Layouts (`nim-layout`), Loops (`nim-each`), Conditionals (`nim-if`/`nim-ifelse`), Components (`nim-component`/`nim-component-self`), Props API (`nim-props-merge`), Context API (`nim-context-provide`/`nim-context-inject`), and comments (`nim-comment`).
 - **HTML highlighting** inside `.nimbus` files (embedded HTML grammar)
 - **Language configuration**: bracket matching, auto-closing pairs for `{{ }}`, quotes, and tags
 

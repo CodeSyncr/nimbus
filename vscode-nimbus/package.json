@@ -35,6 +35,16 @@
         "scopeName": "source.nimbus",
         "path": "./syntaxes/nimbus.tmLanguage.json"
       }
+    ],
+    "snippets": [
+      {
+        "language": "go",
+        "path": "./snippets/go.json"
+      },
+      {
+        "language": "nimbus",
+        "path": "./snippets/nimbus.json"
+      }
     ]
   }
 }

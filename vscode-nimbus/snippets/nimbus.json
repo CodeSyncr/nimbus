@@ -1,0 +1,103 @@
+{
+  "Nimbus Layout": {
+    "prefix": "nim-layout",
+    "body": [
+      "@layout('${1:layouts/main}')"
+    ],
+    "description": "Declare a parent layout template"
+  },
+  "Nimbus Include": {
+    "prefix": "nim-include",
+    "body": [
+      "@include('${1:partials/nav}')"
+    ],
+    "description": "Include a partial view template"
+  },
+  "Nimbus If Condition": {
+    "prefix": "nim-if",
+    "body": [
+      "@if(${1:condition})",
+      "\t$2",
+      "@endif"
+    ],
+    "description": "Nimbus template @if directive"
+  },
+  "Nimbus If-Else Condition": {
+    "prefix": "nim-ifelse",
+    "body": [
+      "@if(${1:condition})",
+      "\t$2",
+      "@else",
+      "\t$3",
+      "@endif"
+    ],
+    "description": "Nimbus template @if / @else directive"
+  },
+  "Nimbus Loop Each": {
+    "prefix": "nim-each",
+    "body": [
+      "@each(${1:item} in ${2:items})",
+      "\t$3",
+      "@endeach"
+    ],
+    "description": "Nimbus template loop directive"
+  },
+  "Nimbus Component Block": {
+    "prefix": "nim-component",
+    "body": [
+      "@${1:button}(${2:{ type: \"submit\" \\}})",
+      "\t$3",
+      "@end"
+    ],
+    "description": "Renders a template component with children"
+  },
+  "Nimbus Component Self-Closing": {
+    "prefix": "nim-component-self",
+    "body": [
+      "@!${1:input}(${2:{ name: \"email\" \\}})"
+    ],
+    "description": "Renders a self-closing component without slots"
+  },
+  "Nimbus Props Merge": {
+    "prefix": "nim-props-merge",
+    "body": [
+      "{{{ \\$props.merge({ ${1:class: \"btn-primary\"} }).toAttrs() }}}"
+    ],
+    "description": "Merge properties with default attributes in a component"
+  },
+  "Nimbus Props Except": {
+    "prefix": "nim-props-except",
+    "body": [
+      "{{{ \\$props.except([${1:\"class\"}]).toAttrs() }}}"
+    ],
+    "description": "Filter out specific properties before rendering attributes"
+  },
+  "Nimbus Context Provide": {
+    "prefix": "nim-context-provide",
+    "body": [
+      "{{ \\$context.Provide(\"${1:key}\", ${2:value}) }}"
+    ],
+    "description": "Provide context key/value to nested child components"
+  },
+  "Nimbus Context Inject": {
+    "prefix": "nim-context-inject",
+    "body": [
+      "{{ const ${1:val} = \\$context.Inject(\"${2:key}\") }}"
+    ],
+    "description": "Inject shared context from parent component"
+  },
+  "Nimbus CSRF Field": {
+    "prefix": "nim-csrf",
+    "body": [
+      "{{{ .csrfField }}}"
+    ],
+    "description": "Render a hidden input containing Shield's CSRF token"
+  },
+  "Nimbus Comment Block": {
+    "prefix": "nim-comment",
+    "body": [
+      "{{-- $1 --}}"
+    ],
+    "description": "Insert a Nimbus comment block"
+  }
+}
