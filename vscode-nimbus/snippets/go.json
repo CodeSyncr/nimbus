@@ -104,5 +104,382 @@
       "}"
     ],
     "description": "Scaffold a new Service Provider"
+  },
+  "Create GET route": {
+    "prefix": "ro:get",
+    "body": [
+      "app.Router.Get(\"${1:/}\", ${2:handler})"
+    ],
+    "description": "Create GET route"
+  },
+  "Create POST route": {
+    "prefix": "ro:post",
+    "body": [
+      "app.Router.Post(\"${1:/}\", ${2:handler})"
+    ],
+    "description": "Create POST route"
+  },
+  "Create PUT route": {
+    "prefix": "ro:put",
+    "body": [
+      "app.Router.Put(\"${1:/}\", ${2:handler})"
+    ],
+    "description": "Create PUT route"
+  },
+  "Create PATCH route": {
+    "prefix": "ro:patch",
+    "body": [
+      "app.Router.Patch(\"${1:/}\", ${2:handler})"
+    ],
+    "description": "Create PATCH route"
+  },
+  "Create DELETE route": {
+    "prefix": "ro:delete",
+    "body": [
+      "app.Router.Delete(\"${1:/}\", ${2:handler})"
+    ],
+    "description": "Create DELETE route"
+  },
+  "Create route resource": {
+    "prefix": "ro:resource",
+    "body": [
+      "app.Router.Resource(\"${1:resourceName}\", ${2:controller})"
+    ],
+    "description": "Create route resource"
+  },
+  "Create route group": {
+    "prefix": "ro:group",
+    "body": [
+      "${1:group} := app.Router.Group(\"${2:/prefix}\")",
+      "${1:group}.Get(\"${3:/}\", ${4:handler})"
+    ],
+    "description": "Create route group"
+  },
+  "Define controller method": {
+    "prefix": "co:method",
+    "body": [
+      "func (c *${1:Controller}) ${2:Method}(ctx *http.Context) error {",
+      "\t$3",
+      "\treturn nil",
+      "}"
+    ],
+    "description": "Define controller method"
+  },
+  "Define model column": {
+    "prefix": "mo:col",
+    "body": [
+      "${1:Name} ${2:string}"
+    ],
+    "description": "Define model column"
+  },
+  "Define date model column": {
+    "prefix": "mo:date",
+    "body": [
+      "${1:Name} time.Time"
+    ],
+    "description": "Define date model column"
+  },
+  "Define datetime model column": {
+    "prefix": "mo:datetime",
+    "body": [
+      "${1:Name} time.Time"
+    ],
+    "description": "Define datetime model column"
+  },
+  "Define belongsTo model relation": {
+    "prefix": "mo:belongsTo",
+    "body": [
+      "${1:UserID} uint",
+      "${2:User}   *${3:User}"
+    ],
+    "description": "Define belongsTo model relation"
+  },
+  "Define hasMany model relation": {
+    "prefix": "mo:hasMany",
+    "body": [
+      "${1:Posts} []${2:Post}"
+    ],
+    "description": "Define hasMany model relation"
+  },
+  "Define hasOne model relation": {
+    "prefix": "mo:hasOne",
+    "body": [
+      "${1:Profile} *${2:Profile}"
+    ],
+    "description": "Define hasOne model relation"
+  },
+  "Define manyToMany model relation": {
+    "prefix": "mo:manyToMany",
+    "body": [
+      "${1:Teams} []${2:Team}"
+    ],
+    "description": "Define manyToMany model relation"
+  },
+  "Define hasManyThrough model relation": {
+    "prefix": "mo:hasManyThrough",
+    "body": [
+      "${1:Records} []${2:Record} `gorm:\"many2many:${3:pivot_table}\"`"
+    ],
+    "description": "Define hasManyThrough model relation"
+  },
+  "Define beforeSave model hook": {
+    "prefix": "mo:beforeSave",
+    "body": [
+      "BeforeSave: func(db *gorm.DB) {",
+      "\tif ${1:model}, ok := db.Statement.Dest.(*${2:Model}); ok {",
+      "\t\t$3",
+      "\t}",
+      "}"
+    ],
+    "description": "Define beforeSave model hook"
+  },
+  "Define beforeCreate model hook": {
+    "prefix": "mo:beforeCreate",
+    "body": [
+      "BeforeCreate: func(db *gorm.DB) {",
+      "\tif ${1:model}, ok := db.Statement.Dest.(*${2:Model}); ok {",
+      "\t\t$3",
+      "\t}",
+      "}"
+    ],
+    "description": "Define beforeCreate model hook"
+  },
+  "Define beforeUpdate model hook": {
+    "prefix": "mo:beforeUpdate",
+    "body": [
+      "BeforeUpdate: func(db *gorm.DB) {",
+      "\tif ${1:model}, ok := db.Statement.Dest.(*${2:Model}); ok {",
+      "\t\t$3",
+      "\t}",
+      "}"
+    ],
+    "description": "Define beforeUpdate model hook"
+  },
+  "Define beforeDelete model hook": {
+    "prefix": "mo:beforeDelete",
+    "body": [
+      "BeforeDelete: func(db *gorm.DB) {",
+      "\tif ${1:model}, ok := db.Statement.Dest.(*${2:Model}); ok {",
+      "\t\t$3",
+      "\t}",
+      "}"
+    ],
+    "description": "Define beforeDelete model hook"
+  },
+  "Define VineJS validator": {
+    "prefix": "vi:validator",
+    "body": [
+      "func (r *${1:Request}) Rules() validation.Schema {",
+      "\treturn validation.Schema{",
+      "\t\t\"${2:field}\": validation.${3|String,Number,Boolean|}().Required().$4,",
+      "\t}",
+      "}"
+    ],
+    "description": "Define Nimbus validator (VineJS-inspired schema rules)"
+  },
+  "Send email": {
+    "prefix": "ma:send",
+    "body": [
+      "err := mail.Send(&mail.Message{",
+      "\tFrom:    \"${1:noreply@example.com}\",",
+      "\tTo:      []string{\"${2:recipient@example.com}\"},",
+      "\tSubject: \"${3:Subject}\",",
+      "\tBody:    \"${4:Body}\",",
+      "\tHTML:    ${5:false},",
+      "})"
+    ],
+    "description": "Send email"
+  },
+  "Queue email": {
+    "prefix": "ma:queue",
+    "body": [
+      "queue.Dispatch(&${1:JobName}{${2:Field: value}}).Dispatch(ctx)"
+    ],
+    "description": "Queue email"
+  },
+  "Define bouncer ability": {
+    "prefix": "bo:ability",
+    "body": [
+      "auth.DefineAbility(\"${1:ability-name}\", func(ctx context.Context, user auth.User, resource any) bool {",
+      "\t${2:post} := resource.(*models.${3:Post})",
+      "\treturn ${4:user.GetID() == fmt.Sprintf(\"%d\", post.UserID)}",
+      "})"
+    ],
+    "description": "Define bouncer ability (Gate)"
+  },
+  "Define bouncer policy": {
+    "prefix": "bo:policy",
+    "body": [
+      "type ${1:Post}Policy struct{}",
+      "",
+      "func (p *${1:Post}Policy) Allow(ctx context.Context, user auth.User, action string, resource any) bool {",
+      "\t${2:post} := resource.(*models.${1:Post})",
+      "\tswitch action {",
+      "\tcase \"${3:view}\":",
+      "\t\treturn ${4:true}",
+      "\tcase \"${5:update}\":",
+      "\t\treturn ${6:user.GetID() == fmt.Sprintf(\"%d\", post.UserID)}",
+      "\t}",
+      "\treturn false",
+      "}"
+    ],
+    "description": "Define bouncer policy class"
+  },
+  "Define bouncer policy action": {
+    "prefix": "po:action",
+    "body": [
+      "case \"${1:action}\":",
+      "\treturn ${2:false}"
+    ],
+    "description": "Define bouncer policy action"
+  },
+  "Listen for emitter event": {
+    "prefix": "em:listen",
+    "body": [
+      "events.Listen(\"${1:event.name}\", func(payload any) error {",
+      "\t${2:model} := payload.(*models.${3:Model})",
+      "\t$4",
+      "\treturn nil",
+      "})"
+    ],
+    "description": "Listen for emitter event"
+  },
+  "Listen for emitter event once": {
+    "prefix": "em:listen:once",
+    "body": [
+      "// Note: events package registers listeners globally on Dispatch/DispatchAsync",
+      "events.Listen(\"${1:event.name}\", func(payload any) error {",
+      "\t${2:model} := payload.(*models.${3:Model})",
+      "\t$4",
+      "\treturn nil",
+      "})"
+    ],
+    "description": "Listen for emitter event once"
+  },
+  "Define CLI argument": {
+    "prefix": "cm:arg",
+    "body": [
+      "ctx.Arg(${1:0})"
+    ],
+    "description": "Define CLI command argument"
+  },
+  "Define boolean command flag": {
+    "prefix": "cm:flag:boolean",
+    "body": [
+      ".BoolFlag(\"${1:name}\", \"${2:shorthand}\", ${3:false}, \"${4:usage}\")"
+    ],
+    "description": "Define boolean command flag"
+  },
+  "Define string command flag": {
+    "prefix": "cm:flag:string",
+    "body": [
+      ".StringFlag(\"${1:name}\", \"${2:shorthand}\", \"${3:default}\", \"${4:usage}\")"
+    ],
+    "description": "Define string command flag"
+  },
+  "Define number command flag": {
+    "prefix": "cm:flag:number",
+    "body": [
+      ".IntFlag(\"${1:name}\", \"${2:shorthand}\", ${3:0}, \"${4:usage}\")"
+    ],
+    "description": "Define number command flag"
+  },
+  "Get boolean command flag": {
+    "prefix": "cm:get:boolean",
+    "body": [
+      "ctx.Bool(\"${1:flagName}\")"
+    ],
+    "description": "Get boolean command flag"
+  },
+  "Get string command flag": {
+    "prefix": "cm:get:string",
+    "body": [
+      "ctx.String(\"${1:flagName}\")"
+    ],
+    "description": "Get string command flag"
+  },
+  "Get number command flag": {
+    "prefix": "cm:get:number",
+    "body": [
+      "ctx.Int(\"${1:flagName}\")"
+    ],
+    "description": "Get number command flag"
+  },
+  "Define increments column": {
+    "prefix": "mi:increments",
+    "body": [
+      "t.Increments(\"${1:id}\")"
+    ],
+    "description": "Define increments column"
+  },
+  "Define integer column": {
+    "prefix": "mi:integer",
+    "body": [
+      "t.Integer(\"${1:column_name}\")"
+    ],
+    "description": "Define integer column"
+  },
+  "Define bigInteger column": {
+    "prefix": "mi:bigInteger",
+    "body": [
+      "t.BigInteger(\"${1:column_name}\")"
+    ],
+    "description": "Define bigInteger column"
+  },
+  "Define text column": {
+    "prefix": "mi:text",
+    "body": [
+      "t.Text(\"${1:column_name}\")"
+    ],
+    "description": "Define text column"
+  },
+  "Define string column": {
+    "prefix": "mi:string",
+    "body": [
+      "t.String(\"${1:column_name}\", ${2:255})"
+    ],
+    "description": "Define string column"
+  },
+  "Define boolean column": {
+    "prefix": "mi:boolean",
+    "body": [
+      "t.Boolean(\"${1:column_name}\")"
+    ],
+    "description": "Define boolean column"
+  },
+  "Define date column": {
+    "prefix": "mi:date",
+    "body": [
+      "t.Timestamp(\"${1:column_name}\")"
+    ],
+    "description": "Define date/timestamp column"
+  },
+  "Define dateTime column": {
+    "prefix": "mi:dateTime",
+    "body": [
+      "t.Timestamp(\"${1:column_name}\")"
+    ],
+    "description": "Define dateTime column"
+  },
+  "Define timestamp column": {
+    "prefix": "mi:timestamp",
+    "body": [
+      "t.Timestamp(\"${1:column_name}\")"
+    ],
+    "description": "Define timestamp column"
+  },
+  "Define unique column": {
+    "prefix": "mi:unique",
+    "body": [
+      "t.String(\"${1:column_name}\", ${2:255}).Unique()"
+    ],
+    "description": "Define unique column"
+  },
+  "Define foreign key column": {
+    "prefix": "mi:fk",
+    "body": [
+      "t.ForeignId(\"${1:user_id}\", \"${2:users.id}\")"
+    ],
+    "description": "Define foreign key column"
   }
 }
