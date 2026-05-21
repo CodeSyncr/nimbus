@@ -29,8 +29,8 @@
       "",
       "type ${1:User} struct {",
       "\tnimbus.Model",
-      "\tName  string `gorm:\"type:varchar(255);not null\" json:\"name\"`",
-      "\tEmail string `gorm:\"type:varchar(255);uniqueIndex;not null\" json:\"email\"`",
+      "\tName  string",
+      "\tEmail string",
       "}"
     ],
     "description": "Scaffold a new GORM Model embedding nimbus.Model"
