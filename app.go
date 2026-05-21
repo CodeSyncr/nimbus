@@ -67,11 +67,12 @@ func New() *App {
 		Events:          events.New(),
 		Scheduler:       schedule.New(),
 		Health:          health.New(),
-		Server:          &stdhttp.Server{Addr: ":" + cfg.App.Port, Handler: r},
 		pluginIndex:     make(map[string]Plugin),
 		namedMiddleware: make(map[string]router.Middleware),
 		pluginConfigs:   make(map[string]map[string]any),
 	}
+	app.Router.Container = app.Container
+	app.Server = &stdhttp.Server{Addr: ":" + cfg.App.Port, Handler: r}
 	app.registerDefaultHealthRoutes()
 	return app
 }

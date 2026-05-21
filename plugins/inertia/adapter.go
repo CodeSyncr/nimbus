@@ -40,6 +40,10 @@ func (a *petakiAdapter) Render(w, r interface{}, component string, props map[str
 	return a.inner.Render(respW, req, component, props)
 }
 
+func (a *petakiAdapter) Share(key string, value any) {
+	a.inner.Share(key, value)
+}
+
 // createManager builds the Inertia manager from plugin config.
 func (p *Plugin) createManager() (Manager, error) {
 	url := p.config.URL

@@ -21,10 +21,14 @@ func (g *Group) Use(m ...Middleware) {
 func (g *Group) fullPath(path string) string {
 	base := strings.TrimSuffix(g.prefix, "/")
 	path = strings.TrimPrefix(path, "/")
-	if path == "" {
-		return base
+	full := base + "/" + path
+	if len(full) > 1 && strings.HasSuffix(full, "/") {
+		full = full[:len(full)-1]
 	}
-	return base + "/" + path
+	if !strings.HasPrefix(full, "/") {
+		full = "/" + full
+	}
+	return full
 }
 
 // Get registers GET path (prefixed).

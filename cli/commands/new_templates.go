@@ -837,6 +837,18 @@ func buildDatabaseDSN() {
 		}
 		Database.DSN = fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True",
 			Database.User, Database.Password, Database.Host, Database.Port, Database.Database)
+	case "supabase":
+		// Supabase: use SUPABASE_DB_URL directly if available.
+		if v := env("SUPABASE_DB_URL", ""); v != "" {
+			Database.DSN = v
+		} else {
+			// Fallback: construct from standard DB_ vars.
+			if Database.Port == "" {
+				Database.Port = "5432"
+			}
+			Database.DSN = fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
+				Database.Host, Database.Port, Database.User, Database.Password, Database.Database)
+		}
 	default:
 		Database.DSN = "database.sqlite"
 	}
@@ -2542,3 +2554,43 @@ func patchGoModForNimbusLivewire(dir string) error {
 	s = strings.Replace(s, "replace github.com/CodeSyncr/nimbus => ../nimbus\n", "replace github.com/CodeSyncr/nimbus => ../nimbus\nreplace github.com/CodeSyncr/nimbus-livewire => ../nimbus-livewire\n", 1)
 	return os.WriteFile(path, []byte(s), 0644)
 }
+
+// ── config/supabase.go ────────────────────────────────────────────
+const supabaseConfigFile = `/*
+|--------------------------------------------------------------------------
+| Supabase Configuration
+|--------------------------------------------------------------------------
+|
+| Supabase project credentials and database connection settings.
+| These values are loaded from environment variables. You can find
+| them in your Supabase Dashboard → Settings → API.
+|
+*/
+
+package config
+
+var Supabase SupabaseConfig
+
+type SupabaseConfig struct {
+	// URL is the Supabase project URL (e.g. https://xyz.supabase.co).
+	URL string
+	// AnonKey is the public API key for client-side access.
+	AnonKey string
+	// ServiceRoleKey is the server-side key with full access (bypasses RLS).
+	ServiceRoleKey string
+	// JWTSecret is the JWT secret for verifying access tokens.
+	JWTSecret string
+	// DatabaseURL is the direct Postgres connection string.
+	DatabaseURL string
+}
+
+func loadSupabase() {
+	Supabase = SupabaseConfig{
+		URL:            env("SUPABASE_URL", ""),
+		AnonKey:        env("SUPABASE_ANON_KEY", ""),
+		ServiceRoleKey: env("SUPABASE_SERVICE_ROLE_KEY", ""),
+		JWTSecret:      env("SUPABASE_JWT_SECRET", ""),
+		DatabaseURL:    env("SUPABASE_DB_URL", ""),
+	}
+}
+`

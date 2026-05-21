@@ -54,6 +54,7 @@ Use this skill when:
 - [Horizon](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/horizon_plugin.md): Queue dashboard.
 - [Inertia](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/inertia_plugin.md): Vue/React/Svelte SPA adapter.
 - [Reverb](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/reverb_plugin.md): WebSocket broadcasting.
+- [Supabase](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/supabase_plugin.md): Supabase services integration.
 
 ### Development
 - [Testing](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/testing.md): HTTP helpers and AI test generation.

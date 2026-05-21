@@ -23,6 +23,7 @@ type Middleware func(HandlerFunc) HandlerFunc
 type Router struct {
 	chi             chi.Router
 	middlewares     []Middleware
+	Container       http.Container
 	namedRoutes     map[string]*Route
 	allRoutes       []*Route
 	fallbackHandler HandlerFunc
@@ -130,7 +131,7 @@ func (r *Router) remountFallback() {
 	for i := len(r.middlewares) - 1; i >= 0; i-- {
 		chain = r.middlewares[i](chain)
 	}
-	r.chi.NotFound(toHandler(chain))
+	r.chi.NotFound(r.toHandler(chain))
 }
 
 // URL generates a URL for a named route, substituting params.
@@ -195,7 +196,7 @@ func (r *Router) addRoute(method, path string, handler HandlerFunc, groupMiddlew
 	for i := len(r.middlewares) - 1; i >= 0; i-- {
 		chain = r.middlewares[i](chain)
 	}
-	h := toHandler(chain)
+	h := r.toHandler(chain)
 	switch method {
 	case http.MethodGet:
 		r.chi.Get(chiPath, h)
@@ -248,7 +249,7 @@ func (r *Router) Routes() []*Route {
 	return r.allRoutes
 }
 
-func toHandler(fn HandlerFunc) http.StdHandlerFunc {
+func (r *Router) toHandler(fn HandlerFunc) http.StdHandlerFunc {
 	return func(w http.ResponseWriter, req *http.Request) {
 		params := make(map[string]string)
 		if rc := chi.RouteContext(req.Context()); rc != nil {
@@ -259,14 +260,13 @@ func toHandler(fn HandlerFunc) http.StdHandlerFunc {
 			}
 		}
 		ctx := http.New(w, req, params)
+		ctx.Container = r.Container
 		if err := fn(ctx); err != nil {
-			// Fallback safety net when no global error middleware is installed.
-			// For richer behavior (HTTPError, custom JSON), install errors.Handler.
 			if ve, ok := err.(validation.ValidationErrors); ok {
 				_ = ctx.JSON(http.StatusUnprocessableEntity, ve.ToMap())
 				return
 			}
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			ctx.String(http.StatusInternalServerError, err.Error())
 		}
 	}
 }

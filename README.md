@@ -1,5 +1,5 @@
 # Nimbus
-
+https://agentrouter.org/register?aff=iHLj
 **Laravel-inspired web framework for Go.** Convention over configuration, clear structure, and a pleasant DX.
 
 **Repository:** [github.com/CodeSyncr/nimbus](https://github.com/CodeSyncr/nimbus)

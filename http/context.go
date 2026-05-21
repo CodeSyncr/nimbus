@@ -7,19 +7,56 @@ import (
 	"fmt"
 	"html"
 	"html/template"
-	"net/http"
 	stdlib "net/http"
 
 	"github.com/CodeSyncr/nimbus/view"
 )
 
+type Container interface {
+	Make(key string) (any, error)
+	MustMake(key string) any
+}
+
+type Session interface {
+	Get(key string) any
+	Set(key string, val any)
+	Delete(key string)
+	GetFlash(key string) any
+	SetFlash(key string, val any)
+	Regenerate()
+}
+
+// Authenticator provides AdonisJS-style auth access on the context.
+// Implemented by auth.Accessor so controllers can write c.Auth().User()
+// instead of container.MustMake("auth.guard").(auth.Guard).
+type Authenticator interface {
+	User() (any, error)
+	Login(user any) error
+	Logout() error
+	Check() bool
+}
+
 // Context wraps an HTTP request and response with AdonisJS-style helpers.
 type Context struct {
-	Request  *http.Request
-	Response http.ResponseWriter
-	Params   map[string]string
-	status   int
-	store    map[string]any
+	Request   *Request
+	Response  ResponseWriter
+	Session   Session
+	Container Container
+	Params    map[string]string
+	status    int
+	store     map[string]any
+	auth      Authenticator
+}
+
+// Auth returns the AdonisJS-style auth accessor for this request.
+// Usage: user, err := c.Auth().User()
+func (c *Context) Auth() Authenticator {
+	return c.auth
+}
+
+// SetAuth sets the auth accessor (called by auth.Init middleware).
+func (c *Context) SetAuth(a Authenticator) {
+	c.auth = a
 }
 
 // Ctx returns the request's context.Context.
@@ -99,7 +136,7 @@ func (c *Context) Require(key string) (any, error) {
 }
 
 // New creates a new request context.
-func New(w stdlib.ResponseWriter, r *stdlib.Request, params map[string]string) *Context {
+func New(w ResponseWriter, r *Request, params map[string]string) *Context {
 	return &Context{
 		Request:  r,
 		Response: w,
@@ -126,10 +163,11 @@ func (c *Context) Param(name string) string {
 	return c.Params[name]
 }
 
-// Status sets the HTTP status code.
+// Status sets the HTTP status code for the next response write.
+// Does NOT flush headers immediately — the actual WriteHeader call
+// happens when JSON/View/String/HTML writes the response body.
 func (c *Context) Status(code int) *Context {
 	c.status = code
-	c.Response.WriteHeader(code)
 	return c
 }
 

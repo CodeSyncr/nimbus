@@ -35,6 +35,53 @@ Reusable UI blocks with slots for dynamic content.
 @button() Click Me @end
 ```
 
+### Nested Components
+Components placed in subdirectories under `components/` can be accessed using dot notation:
+```html
+{{-- components/field/root.nimbus --}}
+<div>{{{ .slots.main }}}</div>
+
+{{-- usage --}}
+@field.root() Content @end
+```
+
+### Props API
+The `$props` helper provides an AdonisJS Edge-style API to manipulate and output HTML attributes:
+- **`$props.merge(dict)`**: Merges incoming attributes with defaults.
+- **`$props.mergeIf(cond, dict)`**: Merges attributes conditionally.
+- **`$props.mergeUnless(cond, dict)`**: Merges attributes unless condition is met.
+- **`$props.except(keys...)`**: Returns all attributes except the specified ones.
+- **`$props.only(keys...)`**: Returns only the specified attributes.
+- **`$props.has(key)`**: Checks if an attribute exists.
+- **`$props.get(key)`**: Retrieves the value of an attribute.
+- **`$props.toAttrs()`**: Converts properties to a safe HTML attributes string (bypasses auto-escaping).
+
+Example:
+```html
+{{-- components/button.nimbus --}}
+<button {{{ $props.merge({ class: "btn-primary" }).except("title").toAttrs() }}}>
+  {{{ .slots.main }}}
+</button>
+```
+
+### Provide / Inject Context API
+The `$context` helper enables parent components to share state down the render tree to deeply nested child components.
+- **`$context.provide(key, value)`**: Shares state with children.
+- **`$context.inject(key)`**: Accesses state shared by parents.
+
+Example:
+```html
+{{-- components/form.nimbus (Parent) --}}
+{{ $context.provide("theme", "dark") }}
+<form>
+  {{{ .slots.main }}}
+</form>
+
+{{-- components/button.nimbus (Deeply nested Child) --}}
+{{ const t = $context.inject("theme") }}
+<button class="btn btn-{{ $t }}">Submit</button>
+```
+
 ## Global Variables
 
 -   **CSRF**: `{{{ .csrfField }}}` is auto-injected into views when using the Shield plugin.

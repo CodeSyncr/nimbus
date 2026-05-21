@@ -73,6 +73,13 @@ func GetClient() *Client {
 	return globalClient
 }
 
+// IsConfigured returns true if the global client is set.
+func IsConfigured() bool {
+	clientMu.RLock()
+	defer clientMu.RUnlock()
+	return globalClient != nil
+}
+
 // ---------------------------------------------------------------------------
 // Generate
 // ---------------------------------------------------------------------------
@@ -162,11 +169,21 @@ func (c *Client) Stream(ctx context.Context, prompt string, opts ...GenerateOpti
 		}
 		for chunk := range sr.Chunks {
 			if chunk.Text != "" {
-				textCh <- chunk.Text
+				select {
+				case textCh <- chunk.Text:
+				case <-ctx.Done():
+					errCh <- ctx.Err()
+					return
+				}
 			}
 		}
-		if e := <-sr.Err; e != nil {
-			errCh <- e
+		select {
+		case e, ok := <-sr.Err:
+			if ok && e != nil {
+				errCh <- e
+			}
+		case <-ctx.Done():
+			errCh <- ctx.Err()
 		}
 	}()
 

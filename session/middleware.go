@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/CodeSyncr/nimbus/http"
@@ -59,6 +60,7 @@ func Middleware(cfg Config) router.Middleware {
 			}
 			ctx := context.WithValue(c.Request.Context(), sessionKey, sd)
 			c.Request = c.Request.WithContext(ctx)
+			c.Session = &Session{sd: sd}
 
 			// Wrap the response writer so the session cookie is added
 			// BEFORE Go's WriteHeader sends response headers on the wire.
@@ -99,18 +101,29 @@ func (sw *sessionWriter) persistSession() {
 		return
 	}
 	sw.saved = true
-	if sw.sd == nil || !sw.sd.dirty {
+	sw.sd.mu.Lock()
+	dirty := sw.sd.dirty
+	data := sw.sd.data
+	id := sw.sd.id
+	sw.sd.mu.Unlock()
+	if !dirty {
 		return
 	}
-	newID, _ := sw.sd.config.Store.Set(
-		context.Background(), sw.sd.id, sw.sd.data, sw.sd.config.MaxAge,
+	newID, err := sw.sd.config.Store.Set(
+		context.Background(), id, data, sw.sd.config.MaxAge,
 	)
+	if err != nil {
+		return
+	}
 	if newID != "" {
+		sw.sd.mu.Lock()
 		sw.sd.id = newID
+		id = newID
+		sw.sd.mu.Unlock()
 	}
 	http.SetCookie(sw.ResponseWriter, &http.Cookie{
 		Name:     sw.cfg.CookieName,
-		Value:    sw.sd.id,
+		Value:    id,
 		Path:     "/",
 		MaxAge:   int(sw.cfg.MaxAge.Seconds()),
 		HttpOnly: sw.cfg.HttpOnly,
@@ -130,6 +143,7 @@ func (sw *sessionWriter) Write(b []byte) (int, error) {
 }
 
 type sessionData struct {
+	mu     sync.Mutex
 	id     string
 	data   map[string]any
 	store  Store
@@ -157,6 +171,8 @@ func (s *Session) Get(key string) any {
 	if s == nil || s.sd == nil {
 		return nil
 	}
+	s.sd.mu.Lock()
+	defer s.sd.mu.Unlock()
 	return s.sd.data[key]
 }
 
@@ -165,6 +181,8 @@ func (s *Session) Set(key string, val any) {
 	if s == nil || s.sd == nil {
 		return
 	}
+	s.sd.mu.Lock()
+	defer s.sd.mu.Unlock()
 	s.sd.data[key] = val
 	s.sd.dirty = true
 }
@@ -174,6 +192,8 @@ func (s *Session) Delete(key string) {
 	if s == nil || s.sd == nil {
 		return
 	}
+	s.sd.mu.Lock()
+	defer s.sd.mu.Unlock()
 	delete(s.sd.data, key)
 	s.sd.dirty = true
 }
@@ -183,6 +203,41 @@ func (s *Session) Regenerate() {
 	if s == nil || s.sd == nil {
 		return
 	}
+	s.sd.mu.Lock()
+	defer s.sd.mu.Unlock()
 	s.sd.id = ""
+	s.sd.dirty = true
+}
+
+// GetFlash retrieves a value from the session and deletes it immediately.
+func (s *Session) GetFlash(key string) any {
+	if s == nil || s.sd == nil {
+		return nil
+	}
+	s.sd.mu.Lock()
+	defer s.sd.mu.Unlock()
+	flash, ok := s.sd.data["_flash"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	val := flash[key]
+	delete(flash, key)
+	s.sd.dirty = true
+	return val
+}
+
+// SetFlash stores a value in the session that will be deleted after the next GetFlash.
+func (s *Session) SetFlash(key string, val any) {
+	if s == nil || s.sd == nil {
+		return
+	}
+	s.sd.mu.Lock()
+	defer s.sd.mu.Unlock()
+	flash, ok := s.sd.data["_flash"].(map[string]any)
+	if !ok {
+		flash = make(map[string]any)
+		s.sd.data["_flash"] = flash
+	}
+	flash[key] = val
 	s.sd.dirty = true
 }

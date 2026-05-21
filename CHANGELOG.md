@@ -4,6 +4,20 @@ All notable changes to Nimbus are documented in this file.
 
 This project follows Semantic Versioning.
 
+## [1.1.0] - 2026-05-21
+
+### Added
+- **Supabase Plugin:** Added first-class integration with Supabase services (`plugins/supabase`), including:
+  - Auth client (`GoTrue`) for signing up, signing in, and managing user sessions.
+  - Database client (`PostgREST`) for calling database RPC functions.
+  - Realtime client for subscribing to channels and listening for database change events.
+  - Verification middleware (`VerifySupabaseJWT`) to authenticate incoming API requests.
+- **Template Engine:** Added support for Nested Components (dot notation subdirectory mapping, e.g. `@field.root(...)`).
+- **Template Engine:** Finalized the Props and Provide/Inject Context APIs in the `.nimbus` rendering engine. Added lazy slot rendering to resolve parent-child rendering evaluation order.
+
+### Fixed
+- **Template Engine:** Changed the return type of `$props.toAttrs()` to `template.HTMLAttr`, bypassing Go's default context-aware auto-escaping and resolving `ZgotmplZ` errors.
+
 ## [1.0.1] - 2026-05-08
 
 ### Fixed

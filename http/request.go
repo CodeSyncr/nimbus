@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -244,20 +245,25 @@ func (c *Context) ClearCookie(name, path, domain string) {
 
 // ── Request Metadata ────────────────────────────────────────────
 
-// IP returns the client's IP address, checking X-Forwarded-For and X-Real-IP headers.
+// IP returns the client's IP address from forwarding headers or RemoteAddr.
+// This method trusts X-Forwarded-For and X-Real-IP headers. For this to be
+// safe in production, use middleware.TrustedProxies to strip these headers
+// from untrusted sources before they reach your handlers.
 func (c *Context) IP() string {
 	if xff := c.Request.Header.Get("X-Forwarded-For"); xff != "" {
 		parts := strings.SplitN(xff, ",", 2)
-		return strings.TrimSpace(parts[0])
+		if ip := strings.TrimSpace(parts[0]); ip != "" {
+			return ip
+		}
 	}
-	if xri := c.Request.Header.Get("X-Real-IP"); xri != "" {
+	if xri := strings.TrimSpace(c.Request.Header.Get("X-Real-IP")); xri != "" {
 		return xri
 	}
-	addr := c.Request.RemoteAddr
-	if idx := strings.LastIndex(addr, ":"); idx >= 0 {
-		return addr[:idx]
+	host, _, err := net.SplitHostPort(c.Request.RemoteAddr)
+	if err != nil {
+		return c.Request.RemoteAddr
 	}
-	return addr
+	return host
 }
 
 // UserAgent returns the User-Agent header.
@@ -287,6 +293,8 @@ func (c *Context) Path() string {
 }
 
 // FullURL returns the full request URL including scheme and host.
+// Trusts X-Forwarded-Proto for scheme detection — use middleware.TrustedProxies
+// to strip this header from untrusted sources.
 func (c *Context) FullURL() string {
 	scheme := "http"
 	if c.Request.TLS != nil {
@@ -378,14 +386,14 @@ func (c *Context) Data(code int, contentType string, data []byte) {
 
 // Download sends a file as an attachment with the given filename.
 func (c *Context) Download(filePath, fileName string) error {
-	c.Response.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", fileName))
+	c.Response.Header().Set("Content-Disposition", contentDisposition("attachment", fileName))
 	http.ServeFile(c.Response, c.Request, filePath)
 	return nil
 }
 
 // Inline sends a file to be displayed inline (e.g. PDF in browser).
 func (c *Context) Inline(filePath, fileName string) error {
-	c.Response.Header().Set("Content-Disposition", fmt.Sprintf("inline; filename=\"%s\"", fileName))
+	c.Response.Header().Set("Content-Disposition", contentDisposition("inline", fileName))
 	http.ServeFile(c.Response, c.Request, filePath)
 	return nil
 }
@@ -424,7 +432,7 @@ func (c *Context) SendFile(dir, file string) {
 
 // Attachment sets the Content-Disposition header to "attachment".
 func (c *Context) Attachment(filename string) {
-	c.Response.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
+	c.Response.Header().Set("Content-Disposition", contentDisposition("attachment", filename))
 }
 
 // ContentType sets the Content-Type response header.
@@ -481,6 +489,19 @@ func (c *Context) Flush() {
 }
 
 // ── Error Attachment ────────────────────────────────────────────
+
+// contentDisposition builds a safe Content-Disposition header value,
+// stripping characters that could enable CRLF header injection.
+func contentDisposition(disposition, filename string) string {
+	filename = strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\r' || r == '\x00' {
+			return -1
+		}
+		return r
+	}, filename)
+	filename = strings.ReplaceAll(filename, `"`, `\"`)
+	return fmt.Sprintf(`%s; filename="%s"`, disposition, filename)
+}
 
 // Abort writes the given status code with no body and returns a generic error.
 func (c *Context) Abort(code int) error {

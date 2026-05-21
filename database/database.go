@@ -34,7 +34,7 @@ func Connect(driver, dsn string) (*lucid.DB, error) {
 func openConnection(cfg ConnectConfig) (*lucid.DB, error) {
 	var dialector lucid.Dialector
 	switch cfg.Driver {
-	case "postgres", "pg":
+	case "postgres", "pg", "supabase":
 		dialector = postgres.Open(cfg.DSN)
 	case "mysql":
 		dialector = mysql.Open(cfg.DSN)

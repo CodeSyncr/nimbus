@@ -96,7 +96,7 @@ func (c *NewCommand) Run(ctx *cli.Context) error {
 			}
 		}
 
-		dbAns, err := ctx.UI.AskSelect("Select database", []string{"SQLite (default)", "Postgres", "MySQL"}, "SQLite (default)")
+		dbAns, err := ctx.UI.AskSelect("Select database", []string{"SQLite (default)", "Postgres", "MySQL", "Supabase (Postgres)"}, "SQLite (default)")
 		if err != nil {
 			return err
 		}
@@ -105,15 +105,23 @@ func (c *NewCommand) Run(ctx *cli.Context) error {
 			dbDriver = "postgres"
 		case "MySQL":
 			dbDriver = "mysql"
+		case "Supabase (Postgres)":
+			dbDriver = "supabase"
+			// Auto-add supabase plugin and auto-select supabase auth guard.
+			authGuard = "supabase"
+			if !containsPlugin(selectedPlugins, "supabase") {
+				selectedPlugins = append(selectedPlugins, "supabase")
+			}
 		default:
 			dbDriver = "sqlite"
 		}
 
 		// ── Authentication Guard ────────────────────────────────
 		// Starter kits include session-based auth by default.
+		// Supabase DB auto-selects supabase auth (handled above).
 		if starter != "none" {
 			authGuard = "session"
-		} else {
+		} else if authGuard != "supabase" {
 			wantAuth, err := ctx.UI.AskConfirm("Would you like to add authentication?", true)
 			if err != nil {
 				return err
@@ -482,6 +490,15 @@ func createInertiaKit(dir, name, kit string) error {
 	return nil
 }
 
+func containsPlugin(plugins []string, name string) bool {
+	for _, p := range plugins {
+		if p == name {
+			return true
+		}
+	}
+	return false
+}
+
 func updateEnvDB(dir, appName, driver string) error {
 	update := func(path string) error {
 		data, err := os.ReadFile(path)
@@ -503,6 +520,15 @@ func updateEnvDB(dir, appName, driver string) error {
 			port = "3306"
 			user = "root"
 			password = "password"
+		case "supabase":
+			// Supabase uses its own env vars (SUPABASE_DB_URL etc).
+			// Set the driver so Nimbus knows to use postgres dialector.
+			for i, line := range lines {
+				if strings.HasPrefix(line, "DB_DRIVER=") {
+					lines[i] = "DB_DRIVER=supabase"
+				}
+			}
+			return os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0644)
 		default:
 			dbName = appName
 		}

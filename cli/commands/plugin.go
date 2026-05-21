@@ -267,6 +267,29 @@ var pluginRegistry = map[string]PluginDef{
 			"config/socialite.go": socialiteConfigFile,
 		},
 	},
+	"supabase": {
+		Name:         "supabase",
+		ImportPath:   "github.com/CodeSyncr/nimbus/plugins/supabase",
+		PackageName:  "supabase",
+		Description:  "Supabase integration (DB, Auth, Storage, Edge Functions, Realtime)",
+		ServerInsert: "\tapp.Use(supabase.New(nil))\n",
+		ConfigFiles: map[string]string{
+			"config/supabase.go": supabaseConfigFile,
+		},
+		ConfigLoaderInsert: "loadSupabase()",
+		EnvVars: []string{
+			"SUPABASE_URL=",
+			"SUPABASE_ANON_KEY=",
+			"SUPABASE_SERVICE_ROLE_KEY=",
+			"SUPABASE_JWT_SECRET=",
+			"SUPABASE_DB_URL=",
+			"SUPABASE_STORAGE_BUCKET=",
+			"SUPABASE_STORAGE_REGION=",
+			"SUPABASE_STORAGE_KEY=",
+			"SUPABASE_STORAGE_SECRET=",
+			"SUPABASE_ENDPOINT=",
+		},
+	},
 }
 
 var defaultPlugins = []string{"drive", "redis", "transmit"}

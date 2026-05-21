@@ -52,11 +52,24 @@ func Recover() router.Middleware {
 	})
 }
 
-// CORS sets basic CORS headers (configurable in real apps via config).
-func CORS(origin string) router.Middleware {
+// CORS sets basic CORS headers. Accepts one or more allowed origins.
+// When multiple origins are given, the middleware validates the request's
+// Origin header against the list and only reflects a matching origin.
+func CORS(origins ...string) router.Middleware {
+	allowed := make(map[string]bool, len(origins))
+	for _, o := range origins {
+		allowed[o] = true
+	}
+	single := len(origins) == 1
 	return func(next router.HandlerFunc) router.HandlerFunc {
 		return func(c *http.Context) error {
-			c.Response.Header().Set("Access-Control-Allow-Origin", origin)
+			origin := c.Request.Header.Get("Origin")
+			if single {
+				c.Response.Header().Set("Access-Control-Allow-Origin", origins[0])
+			} else if allowed[origin] {
+				c.Response.Header().Set("Access-Control-Allow-Origin", origin)
+				c.Response.Header().Set("Vary", "Origin")
+			}
 			c.Response.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 			c.Response.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 			if c.Request.Method == http.MethodOptions {
@@ -118,7 +131,9 @@ func (m *MemoryCSRFStore) Valid(ctx context.Context, token string) bool {
 
 func (m *MemoryCSRFStore) Create() string {
 	b := make([]byte, 16)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		panic("nimbus: csrf: crypto/rand failed: " + err.Error())
+	}
 	token := hex.EncodeToString(b)
 	m.mu.Lock()
 	m.tokens[token] = struct{}{}
@@ -129,7 +144,9 @@ func (m *MemoryCSRFStore) Create() string {
 // GenerateCSRFToken returns a new token (store in session and put in form/header).
 func GenerateCSRFToken() string {
 	b := make([]byte, 16)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		panic("nimbus: csrf: crypto/rand failed: " + err.Error())
+	}
 	return hex.EncodeToString(b)
 }
 

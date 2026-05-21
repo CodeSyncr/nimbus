@@ -51,6 +51,8 @@ type Manager interface {
 	Middleware(next interface{}) interface{}
 	// Render writes an Inertia page response to the response writer.
 	Render(w interface{}, r interface{}, component string, props map[string]any) error
+	// Share shares a prop globally for all responses.
+	Share(key string, value any)
 }
 
 // New creates a new Inertia plugin with the given config.
