@@ -127,6 +127,12 @@ func (a *Agent) Prompt(ctx context.Context, userMessage string, opts ...Generate
 	}
 	msgs = append(msgs, Message{Role: RoleUser, Content: userMessage})
 
+	// Move any per-call images (WithImages) onto the current user message so
+	// vision-capable providers can serialize them as multimodal content.
+	if imgs := imagesFromOpts(opts); len(imgs) > 0 {
+		msgs[len(msgs)-1].Images = imgs
+	}
+
 	toolSpecs := a.resolveToolSpecs()
 
 	for step := 0; step < a.maxSteps; step++ {
@@ -321,4 +327,15 @@ func (a *Agent) fireHooks(step int, msg Message) {
 	for _, h := range a.hooks {
 		h(step, msg)
 	}
+}
+
+// imagesFromOpts applies the given options to a throwaway request purely to
+// extract any images set via WithImages, without disturbing the per-step
+// request configuration.
+func imagesFromOpts(opts []GenerateOption) []string {
+	probe := &GenerateRequest{}
+	for _, opt := range opts {
+		opt(probe)
+	}
+	return probe.Images
 }

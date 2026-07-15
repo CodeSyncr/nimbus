@@ -4,10 +4,13 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -44,7 +47,13 @@ type geminiContent struct {
 }
 
 type geminiPart struct {
-	Text string `json:"text"`
+	Text       string            `json:"text,omitempty"`
+	InlineData *geminiInlineData `json:"inlineData,omitempty"`
+}
+
+type geminiInlineData struct {
+	MimeType string `json:"mimeType"`
+	Data     string `json:"data"`
 }
 
 type geminiGenerationConfig struct {
@@ -220,9 +229,34 @@ func (p *geminiProvider) buildRequest(req *GenerateRequest) *geminiRequest {
 		if msg.Role == RoleAssistant {
 			role = "model"
 		}
+		parts := []geminiPart{{Text: msg.Content}}
+		for _, imgPath := range msg.Images {
+			cleanPath := strings.TrimPrefix(imgPath, "/")
+			data, err := os.ReadFile(cleanPath)
+			if err != nil {
+				continue
+			}
+			mimeType := "image/jpeg"
+			ext := strings.ToLower(filepath.Ext(cleanPath))
+			switch ext {
+			case ".png":
+				mimeType = "image/png"
+			case ".gif":
+				mimeType = "image/gif"
+			case ".webp":
+				mimeType = "image/webp"
+			}
+			base64Data := base64.StdEncoding.EncodeToString(data)
+			parts = append(parts, geminiPart{
+				InlineData: &geminiInlineData{
+					MimeType: mimeType,
+					Data:     base64Data,
+				},
+			})
+		}
 		gr.Contents = append(gr.Contents, geminiContent{
 			Role:  role,
-			Parts: []geminiPart{{Text: msg.Content}},
+			Parts: parts,
 		})
 	}
 

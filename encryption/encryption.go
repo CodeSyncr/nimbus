@@ -147,7 +147,12 @@ func GenerateKey256() (string, error) {
 
 // ── Helpers ─────────────────────────────────────────────────────
 
-// decodeKey tries hex then base64, otherwise returns raw bytes.
+// decodeKey tries hex then base64, otherwise returns the raw string bytes.
+//
+// SECURITY: the raw-bytes fallback means a 16/24/32-character passphrase is
+// used verbatim as the AES key with no stretching. Always supply a
+// high-entropy key — 32 random bytes, hex- or base64-encoded (see
+// GenerateKey256) — rather than a human-chosen passphrase.
 func decodeKey(key string) ([]byte, error) {
 	// Try hex
 	if b, err := hex.DecodeString(key); err == nil && len(key)%2 == 0 {
@@ -161,7 +166,7 @@ func decodeKey(key string) ([]byte, error) {
 		}
 	}
 
-	// Raw bytes
+	// Raw bytes (see security note above).
 	return []byte(key), nil
 }
 

@@ -266,9 +266,28 @@ func (r *Router) toHandler(fn HandlerFunc) http.StdHandlerFunc {
 				_ = ctx.JSON(http.StatusUnprocessableEntity, ve.ToMap())
 				return
 			}
+			// Safety net for apps that don't wire errors.Handler(): honor the
+			// status carried by typed errors (e.g. the NotFound fallback's
+			// HTTPError) instead of collapsing everything to 500. Apps that do
+			// wire errors.Handler() never reach here — that middleware handles
+			// the error and returns nil, and additionally renders the styled
+			// HTML/JSON page via content negotiation. The router cannot do the
+			// latter without importing the errors package (import cycle).
+			if se, ok := err.(StatusError); ok {
+				ctx.String(se.HTTPStatus(), err.Error())
+				return
+			}
 			ctx.String(http.StatusInternalServerError, err.Error())
 		}
 	}
+}
+
+// StatusError is implemented by errors that carry an HTTP status code, letting
+// the router honor that status without importing the errors package. Both
+// errors.HTTPError and errors.AppError satisfy it.
+type StatusError interface {
+	error
+	HTTPStatus() int
 }
 
 // ServeHTTP implements http.Handler.

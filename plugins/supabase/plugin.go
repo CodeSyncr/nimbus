@@ -2,9 +2,13 @@ package supabase
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
+	"net/url"
 	"os"
+	"strings"
 
 	"github.com/CodeSyncr/nimbus"
 	"github.com/CodeSyncr/nimbus/container"
@@ -14,11 +18,11 @@ import (
 )
 
 var (
-	_ nimbus.Plugin         = (*Plugin)(nil)
-	_ nimbus.HasBindings    = (*Plugin)(nil)
-	_ nimbus.HasMiddleware  = (*Plugin)(nil)
+	_ nimbus.Plugin          = (*Plugin)(nil)
+	_ nimbus.HasBindings     = (*Plugin)(nil)
+	_ nimbus.HasMiddleware   = (*Plugin)(nil)
 	_ nimbus.HasHealthChecks = (*Plugin)(nil)
-	_ nimbus.HasShutdown    = (*Plugin)(nil)
+	_ nimbus.HasShutdown     = (*Plugin)(nil)
 )
 
 // Config holds Supabase plugin configuration.
@@ -136,6 +140,20 @@ func (p *Plugin) Boot(app *nimbus.App) error {
 		return nil
 	}
 
+	// Validate the project URL scheme/host to avoid SSRF and plaintext key
+	// transport when the URL comes from less-trusted configuration.
+	if err := validateSupabaseURL(p.config.URL); err != nil {
+		return fmt.Errorf("supabase: %w", err)
+	}
+
+	// Surface a misconfiguration that would otherwise silently degrade auth:
+	// without a JWT secret, AuthMiddleware rejects every request and
+	// OptionalAuthMiddleware treats every caller as anonymous.
+	if p.config.JWTSecret == "" {
+		log.Println("[supabase] WARNING: SUPABASE_JWT_SECRET is not set — " +
+			"token verification is disabled; protected routes will reject all requests")
+	}
+
 	p.client = NewClient(p.config)
 	SetGlobal(p.client)
 
@@ -160,6 +178,39 @@ func (p *Plugin) Boot(app *nimbus.App) error {
 	return nil
 }
 
+// validateSupabaseURL enforces an https:// project URL (http:// is permitted
+// only for localhost during development), guarding against SSRF and plaintext
+// transport of API keys when the URL is sourced from config.
+func validateSupabaseURL(raw string) error {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return fmt.Errorf("invalid URL %q: %w", raw, err)
+	}
+	host := u.Hostname()
+	if host == "" {
+		return fmt.Errorf("URL %q has no host", raw)
+	}
+	switch u.Scheme {
+	case "https":
+		return nil
+	case "http":
+		if isLocalHost(host) {
+			return nil
+		}
+		return fmt.Errorf("insecure http:// URL is only allowed for localhost, got %q", raw)
+	default:
+		return fmt.Errorf("unsupported URL scheme %q (expected https)", u.Scheme)
+	}
+}
+
+func isLocalHost(host string) bool {
+	switch host {
+	case "localhost", "127.0.0.1", "::1":
+		return true
+	}
+	return false
+}
+
 func (p *Plugin) Shutdown() error {
 	c := GetClient()
 	if c != nil && c.Realtime != nil {
@@ -176,25 +227,35 @@ func (p *Plugin) Shutdown() error {
 //	app.Router.Get("/supabase/health", supabase.HealthHandler())
 func HealthHandler() func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
 		c := GetClient()
 		if c == nil {
 			w.WriteHeader(503)
-			fmt.Fprint(w, `{"status":"unavailable","error":"client not initialized"}`)
+			json.NewEncoder(w).Encode(map[string]string{
+				"status": "unavailable", "error": "client not initialized",
+			})
 			return
 		}
 		resp, err := c.do("GET", c.url+"/rest/v1/", nil, nil)
 		if err != nil {
+			// Log the detailed error server-side; return a generic status so we
+			// don't leak upstream host/network details to unauthenticated callers.
+			log.Printf("[supabase] health check failed: %v", err)
 			w.WriteHeader(503)
-			fmt.Fprintf(w, `{"status":"unavailable","error":"%s"}`, err.Error())
+			json.NewEncoder(w).Encode(map[string]string{
+				"status": "unavailable",
+			})
 			return
 		}
 		defer resp.Body.Close()
 		if resp.StatusCode >= 500 {
 			w.WriteHeader(503)
-			fmt.Fprintf(w, `{"status":"degraded","upstream_status":%d}`, resp.StatusCode)
+			json.NewEncoder(w).Encode(map[string]any{
+				"status": "degraded", "upstream_status": resp.StatusCode,
+			})
 			return
 		}
 		w.WriteHeader(200)
-		fmt.Fprint(w, `{"status":"healthy"}`)
+		json.NewEncoder(w).Encode(map[string]string{"status": "healthy"})
 	}
 }

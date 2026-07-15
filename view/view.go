@@ -574,7 +574,7 @@ func (e *Engine) convertNimbusToGoInternal(s string, slotDefs *[]string) string 
 			return m
 		}
 		expr = translateJSMethodCalls(expr)
-		if regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`).MatchString(expr) && !goKeywords[expr] {
+		if regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`).MatchString(expr) && !goKeywords[expr] && e.funcs[expr] == nil {
 			expr = "." + expr
 		}
 		return "{{ " + expr + " }}"

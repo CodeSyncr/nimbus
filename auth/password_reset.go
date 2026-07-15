@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"time"
 
 	"github.com/CodeSyncr/nimbus/mail"
@@ -63,10 +64,15 @@ func (b *PasswordResetBroker) SendResetLink(ctx context.Context, email string) e
 		return err
 	}
 
-	link := fmt.Sprintf("%s?token=%s&email=%s", b.resetURL, token, email)
+	// Use the resolved canonical address and URL-encode both query params so a
+	// crafted email value cannot inject/override query parameters or corrupt
+	// the link, and the mail is delivered to the verified address only.
+	addr := user.GetEmail()
+	link := fmt.Sprintf("%s?token=%s&email=%s",
+		b.resetURL, url.QueryEscape(token), url.QueryEscape(addr))
 	msg := &mail.Message{
 		From:    b.fromAddr,
-		To:      []string{email},
+		To:      []string{addr},
 		Subject: "Reset Your Password",
 		HTML:    true,
 		Body: fmt.Sprintf(`

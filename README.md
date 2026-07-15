@@ -23,7 +23,6 @@ These packages are intended as stable building blocks for applications:
 ### Not in v1
 
 - **OAuth / first-party API tokens** (Laravel Sanctum/Passport-class) — Not shipped in v1; plan your own bearer tokens or wait for a future release (see `CHANGELOG.md`).
-- **Default HTML 404/500 pages** — Applications should use `router.Fallback` and custom handlers; the core error stack focuses on structured JSON/API responses.
 
 ### Requirements
 
@@ -37,6 +36,7 @@ Release checklist: **[V1_RELEASE.md](./V1_RELEASE.md)** · History: **[CHANGELOG
 - **Context** – Request/response helpers: `JSON()`, `Param()`, `Redirect()`
 - **Config** – Environment-based config (`.env` + `config/`)
 - **Middleware** – Global and per-route middleware (Logger, Recover, CORS)
+- **Error pages** – Built-in, content-negotiated 404/500 pages: a styled HTML page for browsers and structured JSON for API clients (based on the `Accept` header), with a tracking `error_id`. Override via `router.Fallback` and custom handlers.
 - **Validation** – Struct validation with [go-playground/validator](https://github.com/go-playground/validator)
 - **Database** – GORM-based models with `database.Model` (ID, timestamps), migrations support
 - **CLI** – `nimbus new`, `make:model`, `make:migration` (Ace-style)

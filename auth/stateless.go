@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"time"
@@ -62,11 +63,27 @@ type PasetoDriver struct {
 	key paseto.V4SymmetricKey
 }
 
+// NewPasetoDriver builds a PASETO v4.local driver from keyStr. For strong
+// security keyStr should be 32 random bytes encoded as 64 hex characters.
+//
+// If keyStr is not valid hex, a raw 32-byte key is accepted as-is; any other
+// input is hashed with SHA-256 to a deterministic 32-byte key. This guarantees
+// a valid, input-derived key is always used — the previous implementation
+// silently discarded the error and could fall back to a zero/garbage key,
+// weakening every token without any signal.
 func NewPasetoDriver(keyStr string) *PasetoDriver {
 	key, err := paseto.V4SymmetricKeyFromHex(keyStr)
 	if err != nil {
-		// If not hex, try from bytes (requires 32 bytes)
-		key, _ = paseto.V4SymmetricKeyFromBytes([]byte(keyStr))
+		raw := []byte(keyStr)
+		if len(raw) != 32 {
+			sum := sha256.Sum256(raw)
+			raw = sum[:]
+		}
+		key, err = paseto.V4SymmetricKeyFromBytes(raw)
+		if err != nil {
+			// Unreachable: raw is always exactly 32 bytes here.
+			panic(fmt.Sprintf("auth: invalid PASETO key: %v", err))
+		}
 	}
 	return &PasetoDriver{key: key}
 }

@@ -72,7 +72,17 @@ func New() *App {
 		pluginConfigs:   make(map[string]map[string]any),
 	}
 	app.Router.Container = app.Container
-	app.Server = &stdhttp.Server{Addr: ":" + cfg.App.Port, Handler: r}
+	app.Server = &stdhttp.Server{
+		Addr:    ":" + cfg.App.Port,
+		Handler: r,
+		// Production-safe timeouts guard against slow/malicious clients
+		// (Slowloris). Tunable via SERVER_*_TIMEOUT env vars; see config.AppConfig.
+		ReadTimeout:       cfg.App.ReadTimeout,
+		ReadHeaderTimeout: cfg.App.ReadHeaderTimeout,
+		WriteTimeout:      cfg.App.WriteTimeout,
+		IdleTimeout:       cfg.App.IdleTimeout,
+		MaxHeaderBytes:    cfg.App.MaxHeaderBytes,
+	}
 	app.registerDefaultHealthRoutes()
 	return app
 }
@@ -175,6 +185,16 @@ func (a *App) OnStart(fn func(*App)) {
 	a.startHooks = append(a.startHooks, fn)
 }
 
+// shutdownTimeout is the grace period given to in-flight requests during a
+// graceful shutdown. Configurable via SERVER_SHUTDOWN_TIMEOUT; falls back to
+// 10s if unset (e.g. an App constructed without config.Load).
+func (a *App) shutdownTimeout() time.Duration {
+	if a.Config != nil && a.Config.App.ShutdownTimeout > 0 {
+		return a.Config.App.ShutdownTimeout
+	}
+	return 10 * time.Second
+}
+
 // OnShutdown registers a callback that runs during graceful shutdown, before
 // plugin HasShutdown hooks are executed.
 func (a *App) OnShutdown(fn func(*App)) {
@@ -197,6 +217,18 @@ func (a *App) OnShutdown(fn func(*App)) {
 //  5. Plugin Boot (all)
 //  6. Plugin capabilities applied (routes, middleware, views)
 func (a *App) Boot() error {
+	// Pass 0 — Fail-closed config validation. Refuse to boot in production
+	// with a missing/weak APP_KEY; warn (don't block) in development.
+	if a.Config != nil {
+		warnings, err := a.Config.Validate()
+		if err != nil {
+			return err
+		}
+		for _, w := range warnings {
+			fmt.Fprintf(os.Stderr, "  \033[33m⚠\033[0m  config: %s\n", w)
+		}
+	}
+
 	// Pass 1 — Provider.Register
 	for _, p := range a.providers {
 		if err := p.Register(a); err != nil {
@@ -314,10 +346,37 @@ func (a *App) Shutdown() error {
 // Run boots providers and plugins, then starts the HTTP server.
 // If the configured port is busy, it automatically picks a free port.
 // Listens for SIGINT/SIGTERM and gracefully shuts down to release the port.
+// dumpRoutesIfRequested writes the route manifest and reports done=true when
+// NIMBUS_DUMP_ROUTES is set, so the caller skips serving. The output directory
+// defaults to ".nimbus-client" and can be overridden with NIMBUS_CLIENT_OUT.
+//
+//	NIMBUS_DUMP_ROUTES=1 go run .
+//	nimbus gen:client
+func (a *App) dumpRoutesIfRequested() (bool, error) {
+	if os.Getenv("NIMBUS_DUMP_ROUTES") == "" {
+		return false, nil
+	}
+	outDir := os.Getenv("NIMBUS_CLIENT_OUT")
+	if outDir == "" {
+		outDir = ".nimbus-client"
+	}
+	if err := router.WriteManifest(a.Router, outDir); err != nil {
+		return true, fmt.Errorf("nimbus: dump routes: %w", err)
+	}
+	fmt.Printf("Wrote %s/%s (%d routes). Now run: nimbus gen:client\n",
+		outDir, router.ManifestFileName, len(a.Router.Routes()))
+	return true, nil
+}
+
 func (a *App) Run() error {
 	configureGOGCFromEnv()
 	startPprofIfEnabled()
 	if err := a.Boot(); err != nil {
+		return err
+	}
+	// NIMBUS_DUMP_ROUTES=1 writes the route manifest (consumed by
+	// `nimbus gen:client`) and exits without serving.
+	if done, err := a.dumpRoutesIfRequested(); done || err != nil {
 		return err
 	}
 	ln, port, err := a.listen()
@@ -351,7 +410,7 @@ func (a *App) Run() error {
 	case sig := <-quit:
 		a.Events.Dispatch(events.AppShutdown, sig)
 		fmt.Printf("\n  \033[33m⚠\033[0m  Received %v, shutting down...\n", sig)
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), a.shutdownTimeout())
 		defer cancel()
 		if err := a.Server.Shutdown(ctx); err != nil {
 			return fmt.Errorf("server shutdown: %w", err)
@@ -402,7 +461,7 @@ func (a *App) RunTLS(certFile, keyFile string) error {
 	case sig := <-quit:
 		a.Events.Dispatch(events.AppShutdown, sig)
 		fmt.Printf("\n  \033[33m⚠\033[0m  Received %v, shutting down...\n", sig)
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), a.shutdownTimeout())
 		defer cancel()
 		if err := a.Server.Shutdown(ctx); err != nil {
 			return fmt.Errorf("server shutdown: %w", err)

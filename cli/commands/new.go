@@ -8,6 +8,7 @@ import (
 	"text/template"
 
 	"github.com/CodeSyncr/nimbus/cli"
+	"github.com/CodeSyncr/nimbus/encryption"
 	"github.com/CodeSyncr/nimbus/internal/version"
 	"github.com/spf13/cobra"
 )
@@ -334,7 +335,16 @@ func (c *NewCommand) Run(ctx *cli.Context) error {
 		}
 	}
 
-	envContent := "PORT=3333\nAPP_ENV=development\nAPP_NAME=" + name + "\nDB_DRIVER=sqlite\nDB_DSN=database.sqlite\nQUEUE_DRIVER=sync\n"
+	// Generate a strong APP_KEY up front so the scaffolded app boots with
+	// secure session encryption and token signing out of the box (same key
+	// `nimbus key:generate` would produce). Failing here is non-fatal: fall
+	// back to an empty key that the user can populate later.
+	appKey, keyErr := encryption.GenerateKey256()
+	if keyErr != nil {
+		appKey = ""
+		ctx.UI.Warnf("could not generate APP_KEY (%v); run 'nimbus key:generate' after setup", keyErr)
+	}
+	envContent := "PORT=3333\nAPP_ENV=development\nAPP_NAME=" + name + "\nAPP_KEY=" + appKey + "\nDB_DRIVER=sqlite\nDB_DSN=database.sqlite\nQUEUE_DRIVER=sync\n"
 	if c.kit != "" {
 		envContent += "VITE_APP_NAME=" + name + "\n"
 	} else if !c.noDefaults {

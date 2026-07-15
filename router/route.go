@@ -1,5 +1,7 @@
 package router
 
+import "github.com/CodeSyncr/nimbus/validation"
+
 // Route represents a registered route and supports chaining (e.g. .As()).
 type Route struct {
 	router *Router
@@ -16,12 +18,14 @@ type RouteMeta struct {
 	Tags        []string          `json:"tags,omitempty"`
 	Deprecated  bool              `json:"deprecated,omitempty"`
 	RequestBody any               `json:"request_body,omitempty"` // struct type for body
+	BodySchema  validation.Schema `json:"body_schema,omitempty"` // typed schema for gen:client
 	Response    any               `json:"response,omitempty"`     // struct type for response
 	Responses   map[int]any       `json:"responses,omitempty"`    // status -> struct
 	Params      []ParamMeta       `json:"params,omitempty"`
 	Headers     map[string]string `json:"headers,omitempty"`
 	Security    []string          `json:"security,omitempty"`
 }
+
 
 // ParamMeta describes a route parameter.
 type ParamMeta struct {
@@ -61,6 +65,16 @@ func (rt *Route) Body(v any) *Route {
 	rt.Meta.RequestBody = v
 	return rt
 }
+
+// Schema registers a validation.Schema for this route so gen:client
+// can reflect the field types and generate TypeScript interfaces.
+//
+//	router.Post("/posts", handler).As("posts.store").Schema(postSchema)
+func (rt *Route) Schema(s validation.Schema) *Route {
+	rt.Meta.BodySchema = s
+	return rt
+}
+
 
 // Returns sets the expected response type for documentation.
 func (rt *Route) Returns(status int, v any) *Route {

@@ -1,0 +1,52 @@
+# ── macOS ──────────────────────────────────────────────────
+.DS_Store
+._*
+
+# ── Go build & test artifacts ──────────────────────────────
+# Compiled test binaries from `go test -c` (e.g. livewire.test)
+*.test
+# Compiled binaries
+*.exe
+*.dll
+*.so
+*.dylib
+# Coverage & profiling output
+*.out
+*.prof
+coverage.*
+# Go workspace files (machine-local)
+go.work
+go.work.sum
+
+# ── Node (Hive TypeScript client) ──────────────────────────
+node_modules/
+npm-debug.log*
+yarn-error.log*
+.npm/
+*.tgz
+
+# ── Tooling / analysis output ──────────────────────────────
+graphify-out/
+
+# ── Local env & secrets ────────────────────────────────────
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# ── Generated Hive client (produced per-app by gen:client) ─
+.nimbus-client/
+
+# ── Editor / IDE ───────────────────────────────────────────
+.idea/
+*.swp
+*.swo
+.vscode/*
+!.vscode/extensions.json
+
+# ── Runtime / local data ───────────────────────────────────
+tmp/
+*.log
+*.sqlite
+*.sqlite3
+*.db

@@ -131,7 +131,7 @@ func (t *Time) Scan(value any) error {
 }
 
 // GormDataType declares the generic data type for schema generation.
-func (Time) GormDataType() string { return "datetime" }
+func (Time) GormDataType() string { return "time" }
 
 // GormDBDataType selects driver-specific column types.
 func (Time) GormDBDataType(db *gorm.DB, _ *schema.Field) string {

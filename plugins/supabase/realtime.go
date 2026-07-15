@@ -61,9 +61,20 @@ type PresenceHandler func(payload PresencePayload)
 type RealtimeClient struct {
 	client   *Client
 	mu       sync.RWMutex
+	writeMu  sync.Mutex // protects WebSocket writes (gorilla/websocket requires exclusive writer)
 	channels map[string]*Channel
 	conn     *websocket.Conn
 	done     chan struct{}
+	closeOnce sync.Once
+
+	// Reconnection settings.
+	maxRetries int           // 0 = unlimited. Default: 0.
+	baseDelay  time.Duration // initial backoff delay. Default: 1s.
+	maxDelay   time.Duration // max backoff cap. Default: 30s.
+
+	// OnError is called when a connection or reconnection error occurs.
+	// Set this before calling Connect to observe errors.
+	OnError func(err error)
 }
 
 // Channel represents a subscription to a Supabase Realtime channel.
@@ -91,6 +102,30 @@ func (r *RealtimeClient) Connect() error {
 		return fmt.Errorf("supabase: realtime: client not configured")
 	}
 
+	// Set reconnection defaults if not configured.
+	if r.baseDelay == 0 {
+		r.baseDelay = 1 * time.Second
+	}
+	if r.maxDelay == 0 {
+		r.maxDelay = 30 * time.Second
+	}
+
+	if err := r.dial(); err != nil {
+		return err
+	}
+
+	r.mu.Lock()
+	r.done = make(chan struct{})
+	r.closeOnce = sync.Once{}
+	r.mu.Unlock()
+
+	go r.readLoop()
+	go r.heartbeat()
+	return nil
+}
+
+// dial creates the underlying WebSocket connection.
+func (r *RealtimeClient) dial() error {
 	wsURL := r.client.url
 	if len(wsURL) > 8 && wsURL[:8] == "https://" {
 		wsURL = "wss://" + wsURL[8:]
@@ -107,11 +142,7 @@ func (r *RealtimeClient) Connect() error {
 
 	r.mu.Lock()
 	r.conn = conn
-	r.done = make(chan struct{})
 	r.mu.Unlock()
-
-	go r.readLoop()
-	go r.heartbeat()
 	return nil
 }
 
@@ -132,16 +163,23 @@ func (r *RealtimeClient) Channel(topic string) *Channel {
 	return ch
 }
 
-// Close shuts down the realtime connection.
+// Close shuts down the realtime connection. Safe to call multiple times.
 func (r *RealtimeClient) Close() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.done != nil {
-		close(r.done)
-	}
+
+	// sync.Once ensures we never double-close the done channel.
+	r.closeOnce.Do(func() {
+		if r.done != nil {
+			close(r.done)
+		}
+	})
+
 	if r.conn != nil {
+		r.writeMu.Lock()
 		_ = r.conn.WriteMessage(websocket.CloseMessage,
 			websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+		r.writeMu.Unlock()
 		_ = r.conn.Close()
 		r.conn = nil
 	}
@@ -156,27 +194,106 @@ func (r *RealtimeClient) readLoop() {
 		}
 		r.mu.Unlock()
 	}()
+
 	for {
 		select {
 		case <-r.done:
 			return
 		default:
 		}
+
 		r.mu.RLock()
 		conn := r.conn
 		r.mu.RUnlock()
 		if conn == nil {
 			return
 		}
+
 		_, message, err := conn.ReadMessage()
 		if err != nil {
+			// Check if this is an intentional close.
+			select {
+			case <-r.done:
+				return
+			default:
+			}
+			// Connection lost — attempt to reconnect.
+			r.reconnect()
 			return
 		}
+
 		var msg realtimeMessage
 		if err := json.Unmarshal(message, &msg); err != nil {
 			continue
 		}
 		r.dispatch(msg)
+	}
+}
+
+// reconnect attempts to re-establish the WebSocket with exponential backoff.
+func (r *RealtimeClient) reconnect() {
+	delay := r.baseDelay
+	attempts := 0
+
+	for {
+		select {
+		case <-r.done:
+			return
+		default:
+		}
+
+		if r.maxRetries > 0 && attempts >= r.maxRetries {
+			if r.OnError != nil {
+				r.OnError(fmt.Errorf("supabase: realtime: max reconnect attempts (%d) reached", r.maxRetries))
+			}
+			return
+		}
+
+		attempts++
+		time.Sleep(delay)
+
+		if err := r.dial(); err != nil {
+			if r.OnError != nil {
+				r.OnError(fmt.Errorf("supabase: realtime reconnect attempt %d: %w", attempts, err))
+			}
+			// Exponential backoff with cap.
+			delay *= 2
+			if delay > r.maxDelay {
+				delay = r.maxDelay
+			}
+			continue
+		}
+
+		// Successfully reconnected — re-subscribe all joined channels.
+		r.resubscribeAll()
+
+		// Restart read and heartbeat loops.
+		go r.readLoop()
+		go r.heartbeat()
+		return
+	}
+}
+
+// resubscribeAll re-joins all channels that were previously subscribed.
+func (r *RealtimeClient) resubscribeAll() {
+	r.mu.RLock()
+	channels := make([]*Channel, 0, len(r.channels))
+	for _, ch := range r.channels {
+		channels = append(channels, ch)
+	}
+	r.mu.RUnlock()
+
+	for _, ch := range channels {
+		ch.mu.Lock()
+		wasJoined := ch.joined
+		ch.joined = false // reset so Subscribe() sends phx_join again
+		ch.mu.Unlock()
+
+		if wasJoined {
+			if err := ch.Subscribe(); err != nil && r.OnError != nil {
+				r.OnError(fmt.Errorf("supabase: realtime resubscribe %s: %w", ch.topic, err))
+			}
+		}
 	}
 }
 
@@ -197,7 +314,9 @@ func (r *RealtimeClient) heartbeat() {
 			b, _ := json.Marshal(realtimeMessage{
 				Topic: "phoenix", Event: "heartbeat", Payload: map[string]any{},
 			})
+			r.writeMu.Lock()
 			_ = conn.WriteMessage(websocket.TextMessage, b)
+			r.writeMu.Unlock()
 		}
 	}
 }
@@ -230,6 +349,8 @@ func (r *RealtimeClient) send(msg realtimeMessage) error {
 	if err != nil {
 		return err
 	}
+	r.writeMu.Lock()
+	defer r.writeMu.Unlock()
 	return conn.WriteMessage(websocket.TextMessage, b)
 }
 

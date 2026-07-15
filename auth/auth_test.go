@@ -340,6 +340,29 @@ func TestPersonalAccessToken_HasAbility(t *testing.T) {
 	}
 }
 
+func TestPersonalAccessToken_HasAnyAllAbilities(t *testing.T) {
+	pat := &PersonalAccessToken{Abilities: `["read:posts","write:posts"]`}
+
+	if !pat.HasAnyAbility("delete:posts", "read:posts") {
+		t.Error("HasAnyAbility should be true when one matches")
+	}
+	if pat.HasAnyAbility("delete:posts", "admin") {
+		t.Error("HasAnyAbility should be false when none match")
+	}
+	if !pat.HasAllAbilities("read:posts", "write:posts") {
+		t.Error("HasAllAbilities should be true when all match")
+	}
+	if pat.HasAllAbilities("read:posts", "delete:posts") {
+		t.Error("HasAllAbilities should be false when one is missing")
+	}
+
+	// Wildcard grants both.
+	wild := &PersonalAccessToken{Abilities: `["*"]`}
+	if !wild.HasAnyAbility("a") || !wild.HasAllAbilities("a", "b", "c") {
+		t.Error("wildcard token should satisfy any/all ability checks")
+	}
+}
+
 func TestPersonalAccessToken_IsExpired(t *testing.T) {
 	// Not expired (no expiry)
 	pat := &PersonalAccessToken{}

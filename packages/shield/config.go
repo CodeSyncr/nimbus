@@ -89,6 +89,13 @@ type CSRFConfig struct {
 	// CookieName is the name of the CSRF cookie (default: "__nimbus_csrf").
 	CookieName string
 
+	// SessionCookieName is the name of the session cookie the CSRF token is
+	// bound to (default: "nimbus_session"). Binding ties each token to the
+	// caller's session so a token issued for one session cannot be replayed
+	// against another (defends against cookie-injection / token fixation).
+	// Set to "-" to disable session binding.
+	SessionCookieName string
+
 	// HeaderName is the HTTP header checked for the token (default: "X-CSRF-Token").
 	HeaderName string
 

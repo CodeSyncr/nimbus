@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"time"
 
@@ -10,6 +11,12 @@ import (
 )
 
 // Config holds session middleware options.
+//
+// Cookie security attributes are secure-by-default: the session cookie is
+// always written with HttpOnly, and with SameSite=Lax unless overridden. The
+// Secure flag is set automatically whenever the request is served over HTTPS
+// (TLS or X-Forwarded-Proto: https); set Secure=true to force it on even
+// behind a proxy that does not forward the scheme.
 type Config struct {
 	Store      Store
 	CookieName string
@@ -39,6 +46,12 @@ func Middleware(cfg Config) router.Middleware {
 	}
 	if cfg.CookieName == "" {
 		cfg.CookieName = "nimbus_session"
+	}
+	// Secure-by-default attributes: a session id cookie is never meant to be
+	// read by JavaScript, and Lax SameSite blocks the common CSRF vectors.
+	cfg.HttpOnly = true
+	if cfg.SameSite == 0 {
+		cfg.SameSite = SameSiteLax
 	}
 	return func(next router.HandlerFunc) router.HandlerFunc {
 		return func(c *http.Context) error {
@@ -71,6 +84,7 @@ func Middleware(cfg Config) router.Middleware {
 				ResponseWriter: c.Response,
 				sd:             sd,
 				cfg:            cfg,
+				secure:         cfg.Secure || isHTTPS(c.Request),
 			}
 			c.Response = sw
 
@@ -89,9 +103,19 @@ func Middleware(cfg Config) router.Middleware {
 // be added to the response headers just before they are flushed to the wire.
 type sessionWriter struct {
 	http.ResponseWriter
-	sd    *sessionData
-	cfg   Config
-	saved bool
+	sd     *sessionData
+	cfg    Config
+	secure bool
+	saved  bool
+}
+
+// isHTTPS reports whether the request was served over TLS, either directly or
+// via a trusted proxy that set X-Forwarded-Proto.
+func isHTTPS(r *http.Request) bool {
+	if r.TLS != nil {
+		return true
+	}
+	return strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
 }
 
 // persistSession saves dirty session data to the store and adds the
@@ -105,6 +129,8 @@ func (sw *sessionWriter) persistSession() {
 	dirty := sw.sd.dirty
 	data := sw.sd.data
 	id := sw.sd.id
+	staleID := sw.sd.staleID
+	sw.sd.staleID = ""
 	sw.sd.mu.Unlock()
 	if !dirty {
 		return
@@ -121,13 +147,18 @@ func (sw *sessionWriter) persistSession() {
 		id = newID
 		sw.sd.mu.Unlock()
 	}
+	// Destroy the pre-regeneration session so a fixed/leaked old id cannot be
+	// replayed after login. Only destroy once we have a distinct new id.
+	if staleID != "" && staleID != id {
+		_ = sw.sd.config.Store.Destroy(context.Background(), staleID)
+	}
 	http.SetCookie(sw.ResponseWriter, &http.Cookie{
 		Name:     sw.cfg.CookieName,
 		Value:    id,
 		Path:     "/",
 		MaxAge:   int(sw.cfg.MaxAge.Seconds()),
 		HttpOnly: sw.cfg.HttpOnly,
-		Secure:   sw.cfg.Secure,
+		Secure:   sw.secure,
 		SameSite: sw.cfg.SameSite,
 	})
 }
@@ -143,12 +174,13 @@ func (sw *sessionWriter) Write(b []byte) (int, error) {
 }
 
 type sessionData struct {
-	mu     sync.Mutex
-	id     string
-	data   map[string]any
-	store  Store
-	config Config
-	dirty  bool
+	mu      sync.Mutex
+	id      string
+	staleID string // previous id pending destruction after Regenerate
+	data    map[string]any
+	store   Store
+	config  Config
+	dirty   bool
 }
 
 // FromContext returns the session data from the request context.
@@ -205,6 +237,11 @@ func (s *Session) Regenerate() {
 	}
 	s.sd.mu.Lock()
 	defer s.sd.mu.Unlock()
+	// Remember the current id so it can be destroyed in the store once the new
+	// id is issued, preventing session fixation via the pre-login id.
+	if s.sd.id != "" {
+		s.sd.staleID = s.sd.id
+	}
 	s.sd.id = ""
 	s.sd.dirty = true
 }

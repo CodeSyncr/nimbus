@@ -9,6 +9,16 @@ import (
 	"time"
 )
 
+// encodePath URL-encodes each segment of a storage path while
+// preserving the "/" separators between them.
+func encodePath(path string) string {
+	parts := strings.Split(path, "/")
+	for i, p := range parts {
+		parts[i] = url.PathEscape(p)
+	}
+	return strings.Join(parts, "/")
+}
+
 // StorageClient provides access to Supabase Storage buckets and objects.
 type StorageClient struct {
 	client *Client
@@ -90,7 +100,7 @@ func (b *BucketHandle) Upload(path string, body io.Reader, contentType ...string
 	if len(contentType) > 0 && contentType[0] != "" {
 		ct = contentType[0]
 	}
-	u := b.storage.url("/object/" + b.name + "/" + path)
+	u := b.storage.url("/object/" + b.name + "/" + encodePath(path))
 	resp, err := b.storage.client.do("POST", u, body, map[string]string{
 		"Content-Type": ct,
 	})
@@ -106,7 +116,7 @@ func (b *BucketHandle) Update(path string, body io.Reader, contentType ...string
 	if len(contentType) > 0 && contentType[0] != "" {
 		ct = contentType[0]
 	}
-	u := b.storage.url("/object/" + b.name + "/" + path)
+	u := b.storage.url("/object/" + b.name + "/" + encodePath(path))
 	resp, err := b.storage.client.do("PUT", u, body, map[string]string{
 		"Content-Type": ct,
 	})
@@ -118,7 +128,7 @@ func (b *BucketHandle) Update(path string, body io.Reader, contentType ...string
 
 // Download returns a reader for the file. Caller must close the returned ReadCloser.
 func (b *BucketHandle) Download(path string) (io.ReadCloser, error) {
-	u := b.storage.url("/object/" + b.name + "/" + path)
+	u := b.storage.url("/object/" + b.name + "/" + encodePath(path))
 	resp, err := b.storage.client.do("GET", u, nil, nil)
 	if err != nil {
 		return nil, err
@@ -163,12 +173,12 @@ func (b *BucketHandle) List(prefix string, opts ...ListOption) ([]StorageObject,
 
 // GetPublicURL returns the public URL for a file (bucket must be public).
 func (b *BucketHandle) GetPublicURL(path string) string {
-	return b.storage.client.url + "/storage/v1/object/public/" + b.name + "/" + path
+	return b.storage.client.url + "/storage/v1/object/public/" + b.name + "/" + encodePath(path)
 }
 
 // CreateSignedURL returns a time-limited signed URL for private access.
 func (b *BucketHandle) CreateSignedURL(path string, expiresIn time.Duration) (string, error) {
-	u := b.storage.url("/object/sign/" + b.name + "/" + path)
+	u := b.storage.url("/object/sign/" + b.name + "/" + encodePath(path))
 	resp, err := b.storage.client.doJSON("POST", u, map[string]any{
 		"expiresIn": int(expiresIn.Seconds()),
 	})
@@ -216,7 +226,7 @@ func (b *BucketHandle) Copy(from, to string) error {
 
 // GetDownloadURL returns a public download URL with download disposition.
 func (b *BucketHandle) GetDownloadURL(path string) string {
-	return b.storage.client.url + "/storage/v1/object/public/" + b.name + "/" + path + "?download="
+	return b.storage.client.url + "/storage/v1/object/public/" + b.name + "/" + encodePath(path) + "?download="
 }
 
 // GetTransformURL returns a URL for image transformations (Supabase Image Transformation).
@@ -237,7 +247,7 @@ func (b *BucketHandle) GetTransformURL(path string, opts TransformOptions) strin
 	if opts.Resize != "" {
 		params.Set("resize", string(opts.Resize))
 	}
-	return b.storage.client.url + "/storage/v1/render/image/public/" + b.name + "/" + path + "?" + params.Encode()
+	return b.storage.client.url + "/storage/v1/render/image/public/" + b.name + "/" + encodePath(path) + "?" + params.Encode()
 }
 
 // TransformOptions for Supabase image transformations.

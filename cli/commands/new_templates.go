@@ -230,12 +230,16 @@ import (
 )
 
 func RegisterMiddleware(app *nimbus.App) {
-	// Logger (outer) → errors.Handler → Recover (inner): panics become AppError
-	// inside Recover and are rendered by Handler (HTML/JSON).
+	// RequestID (outermost) tags every request/response with X-Request-Id so
+	// logs correlate. Logger → errors.Handler → Recover: panics become
+	// AppError inside Recover and are rendered by Handler (HTML/JSON).
+	// BodyLimit caps request bodies (default 10 MiB) to prevent memory abuse.
 	app.Router.Use(
+		middleware.RequestID(),
 		middleware.Logger(),
 		errors.Handler(),
 		middleware.Recover(),
+		middleware.BodyLimit(10<<20),
 	)
 
 	// ── Named Middleware ──────────────────────────────────
@@ -1335,6 +1339,10 @@ func loadShield() {
 const envExample = `PORT=3333
 APP_ENV=development
 APP_NAME={{.AppName}}
+# Secret backing session encryption and token signing. Generate with:
+#   nimbus key:generate
+# Required in production (the app refuses to boot without a strong key).
+APP_KEY=
 
 DB_DRIVER=sqlite
 DB_HOST=localhost
@@ -1469,9 +1477,11 @@ func RegisterMiddleware(app *nimbus.App) {
 	}
 
 	app.Router.Use(
+		middleware.RequestID(),
 		middleware.Logger(),
 		errors.Handler(),
 		middleware.Recover(),
+		middleware.BodyLimit(10<<20),
 		shield.Guard(shieldCfg),
 		shield.CSRFGuard(shieldCfg.CSRF),
 		session.Middleware(session.Config{
@@ -1519,9 +1529,11 @@ func RegisterMiddleware(app *nimbus.App) {
 	}
 
 	app.Router.Use(
+		middleware.RequestID(),
 		middleware.Logger(),
 		errors.Handler(),
 		middleware.Recover(),
+		middleware.BodyLimit(10<<20),
 		shield.Guard(shieldCfg),
 		shield.CSRFGuard(shieldCfg.CSRF),
 		session.Middleware(session.Config{

@@ -1,0 +1,40 @@
+{{-- Razorpay Checkout launcher. Pass: keyId, orderId, amount (paise),
+     currency, name, email, callbackUrl. Stripe/PayU redirect instead and
+     don't need a template. --}}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Checkout</title>
+</head>
+<body>
+  <p>Opening secure checkout…</p>
+  <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+  <script>
+    var options = {
+      key: "{{ .keyId }}",
+      order_id: "{{ .orderId }}",
+      amount: "{{ .amount }}",
+      currency: "{{ .currency }}",
+      name: "{{ .name }}",
+      prefill: { email: "{{ .email }}" },
+      handler: function (response) {
+        // Post {order_id, payment_id, signature} back to your server to verify.
+        var f = document.createElement("form");
+        f.method = "POST";
+        f.action = "{{ .callbackUrl }}";
+        [["razorpay_order_id", response.razorpay_order_id],
+         ["razorpay_payment_id", response.razorpay_payment_id],
+         ["razorpay_signature", response.razorpay_signature]].forEach(function (p) {
+          var i = document.createElement("input");
+          i.type = "hidden"; i.name = p[0]; i.value = p[1];
+          f.appendChild(i);
+        });
+        document.body.appendChild(f); f.submit();
+      }
+    };
+    new Razorpay(options).open();
+  </script>
+</body>
+</html>

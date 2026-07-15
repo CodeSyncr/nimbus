@@ -1,0 +1,57 @@
+@layout('admin/layout')
+<div class="flex items-center justify-between mb-5">
+  <p class="text-sm text-slate-500 dark:text-slate-400">{{ .total }} record(s)</p>
+  <a href="{{ .prefix }}/{{ .slug }}/create" class="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 transition">
+    <span class="text-lg leading-none">+</span> New {{ .singular }}
+  </a>
+</div>
+
+<div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+  <div class="overflow-x-auto">
+    <table class="min-w-full text-sm">
+      <thead class="bg-slate-50 dark:bg-slate-900/40 text-left">
+        <tr>
+          <th class="px-4 py-3 font-semibold text-slate-500 w-16">ID</th>
+          @each(.columns)
+          <th class="px-4 py-3 font-semibold text-slate-500">{{ . }}</th>
+          @endeach
+          <th class="px-4 py-3 font-semibold text-slate-500 text-right">Actions</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-100 dark:divide-slate-700">
+        @each(.rows)
+        <tr class="hover:bg-slate-50 dark:hover:bg-slate-700/40">
+          <td class="px-4 py-3 text-slate-400 font-mono">{{ index . "id" }}</td>
+          @each(.cells)
+          <td class="px-4 py-3 text-slate-700 dark:text-slate-200">{{ . }}</td>
+          @endeach
+          <td class="px-4 py-3 text-right whitespace-nowrap">
+            <a href="{{ $.prefix }}/{{ $.slug }}/{{ index . "id" }}/edit" class="text-indigo-600 hover:underline font-medium">Edit</a>
+            <form method="POST" action="{{ $.prefix }}/{{ $.slug }}/{{ index . "id" }}/delete" class="inline ml-3" onsubmit="return confirm('Delete this record?')">
+              {{ $.csrfField }}
+              <button type="submit" class="text-red-600 hover:underline font-medium">Delete</button>
+            </form>
+          </td>
+        </tr>
+        @endeach
+      </tbody>
+    </table>
+  </div>
+  @if(!.rows)
+  <div class="text-center py-16 text-slate-400">No records yet.</div>
+  @endif
+</div>
+
+<div class="flex items-center justify-between mt-4 text-sm">
+  <div>
+    @if(.hasPrev)
+    <a href="{{ .prefix }}/{{ .slug }}?page={{ .prevPage }}" class="px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700">← Prev</a>
+    @endif
+  </div>
+  <span class="text-slate-400">Page {{ .page }}</span>
+  <div>
+    @if(.hasNext)
+    <a href="{{ .prefix }}/{{ .slug }}?page={{ .nextPage }}" class="px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700">Next →</a>
+    @endif
+  </div>
+</div>

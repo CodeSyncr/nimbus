@@ -95,6 +95,58 @@ func RequireAbility(ability string) router.Middleware {
 	}
 }
 
+// RequireAnyAbility returns middleware that passes when the current token has
+// at least ONE of the given abilities (OR semantics). Must be used after
+// RequireToken. Mirrors Laravel Sanctum's `abilities:a,b` middleware.
+//
+// Example:
+//
+//	api.Use(auth.RequireAnyAbility("read:projects", "admin"))
+func RequireAnyAbility(abilities ...string) router.Middleware {
+	return func(next router.HandlerFunc) router.HandlerFunc {
+		return func(c *http.Context) error {
+			pat := CurrentToken(c.Request.Context())
+			if pat == nil {
+				return c.JSON(http.StatusForbidden, map[string]string{
+					"error": "No token found in request context",
+				})
+			}
+			if !pat.HasAnyAbility(abilities...) {
+				return c.JSON(http.StatusForbidden, map[string]string{
+					"error": "Token requires any of the abilities: " + strings.Join(abilities, ", "),
+				})
+			}
+			return next(c)
+		}
+	}
+}
+
+// RequireAllAbilities returns middleware that passes only when the current
+// token has EVERY one of the given abilities (AND semantics). Must be used
+// after RequireToken. Mirrors Laravel Sanctum's `ability:a,b` middleware.
+//
+// Example:
+//
+//	api.Use(auth.RequireAllAbilities("read:projects", "write:projects"))
+func RequireAllAbilities(abilities ...string) router.Middleware {
+	return func(next router.HandlerFunc) router.HandlerFunc {
+		return func(c *http.Context) error {
+			pat := CurrentToken(c.Request.Context())
+			if pat == nil {
+				return c.JSON(http.StatusForbidden, map[string]string{
+					"error": "No token found in request context",
+				})
+			}
+			if !pat.HasAllAbilities(abilities...) {
+				return c.JSON(http.StatusForbidden, map[string]string{
+					"error": "Token requires all of the abilities: " + strings.Join(abilities, ", "),
+				})
+			}
+			return next(c)
+		}
+	}
+}
+
 // OptionalToken is like RequireToken but does not return 401 when no token
 // is present. It simply passes through. Useful for endpoints that work for
 // both authenticated and unauthenticated users.

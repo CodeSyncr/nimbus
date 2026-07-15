@@ -96,36 +96,21 @@ import (
 )
 
 type ` + goName + ` struct {
-	// TODO: add state fields (public properties)
-}
-
-func (c *` + goName + `) Name() string { return "` + raw + `" }
-
-func (c *` + goName + `) State() map[string]any {
-	return map[string]any{}
-}
-
-func (c *` + goName + `) SetState(state map[string]any) {
-	_ = state
-}
-
-func (c *` + goName + `) Call(action string, params map[string]any) error {
-	_ = params
-	switch action {
-	case "__sync":
-		return nil
-	default:
-		// TODO: implement actions (wire:click, wire:submit)
-		return nil
-	}
+	// Add state fields (public fields, e.g. Count int ` + "`json:\"count\"`" + `)
 }
 
 func (c *` + goName + `) Render() (template.HTML, error) {
 	return lw.RenderView("` + viewName + `", map[string]any{"title": "` + raw + `"})
 }
 
+// Optional: Add action methods or lifecycle hooks
+//
+// func (c *` + goName + `) Increment() {
+// 	c.Count++
+// }
+
 func init() {
-	lw.Register("` + raw + `", func() lw.Component { return &` + goName + `{} })
+	lw.Register("` + raw + `", func() *` + goName + ` { return &` + goName + `{} })
 }
 `
 	if err := os.WriteFile(goFile, []byte(goStub), 0644); err != nil {

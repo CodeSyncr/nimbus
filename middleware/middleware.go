@@ -15,21 +15,41 @@ import (
 	"github.com/CodeSyncr/nimbus/router"
 )
 
-// Logger logs each request using the Nimbus
-// structured logger package. Applications can override the underlying logger
-// via logger.Set for custom formatting or destinations.
+// Logger logs each request using the Nimbus structured logger package.
+//
+// It emits one structured line per request with keyed fields (method, path,
+// status, duration_ms, remote_addr) and — when the RequestID middleware runs
+// earlier in the chain — a correlating request_id, so log lines can be joined
+// to the X-Request-Id response header. The log level is chosen from the status
+// code: 5xx → error, 4xx → warn, else info.
+//
+// Applications can override the underlying logger via logger.Set for custom
+// formatting or destinations.
 func Logger() router.Middleware {
 	return router.NameMiddleware("logger", func(next router.HandlerFunc) router.HandlerFunc {
 		return func(c *http.Context) error {
 			start := time.Now()
 			err := next(c)
 			duration := time.Since(start)
-			logger.Infof("%s %s %d in %v",
-				c.Request.Method,
-				c.Request.URL.Path,
-				c.StatusCode(),
-				duration,
-			)
+
+			status := c.StatusCode()
+			log := logger.ForRequest(c)
+			fields := []any{
+				"method", c.Request.Method,
+				"path", c.Request.URL.Path,
+				"status", status,
+				"duration_ms", float64(duration.Microseconds()) / 1000.0,
+				"remote_addr", c.Request.RemoteAddr,
+			}
+
+			switch {
+			case status >= 500:
+				log.Errorw("request", fields...)
+			case status >= 400:
+				log.Warnw("request", fields...)
+			default:
+				log.Infow("request", fields...)
+			}
 			return err
 		}
 	})
@@ -112,7 +132,11 @@ type CSRFStore interface {
 	Valid(ctx context.Context, token string) bool
 }
 
-// MemoryCSRFStore keeps valid tokens in memory (single-node only).
+// MemoryCSRFStore keeps valid tokens in a process-global set (single-node
+// only). It is a minimal helper: tokens are NOT bound to a session (any valid
+// token authorizes any caller) and the set is not pruned, so it can grow
+// unbounded. For production CSRF protection prefer shield.CSRFGuard, which
+// uses a signed, session-bound double-submit cookie.
 type MemoryCSRFStore struct {
 	mu     sync.RWMutex
 	tokens map[string]struct{}

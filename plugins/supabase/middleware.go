@@ -2,16 +2,13 @@ package supabase
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/base64"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	nhttp "github.com/CodeSyncr/nimbus/http"
 	"github.com/CodeSyncr/nimbus/router"
+	"github.com/golang-jwt/jwt/v5"
 )
 
 // ═══════════════════════════════════════════════════════════════════
@@ -55,22 +52,18 @@ func AuthMiddleware() router.Middleware {
 				})
 			}
 
-			// Determine the secret for JWT verification.
+			// Require JWT secret for verification — anonKey is NOT a signing secret.
 			secret := client.jwtSecret
 			if secret == "" {
-				secret = client.anonKey
-			}
-
-			claims, err := verifySupabaseJWT(token, secret)
-			if err != nil {
-				return ctx.JSON(401, map[string]string{
-					"error": fmt.Sprintf("invalid token: %v", err),
+				return ctx.JSON(500, map[string]string{
+					"error": "supabase: SUPABASE_JWT_SECRET is not configured",
 				})
 			}
 
-			if claims.IsExpired() {
+			claims, err := verifySupabaseJWT(token, secret, client.url+"/auth/v1")
+			if err != nil {
 				return ctx.JSON(401, map[string]string{
-					"error": "token expired",
+					"error": fmt.Sprintf("invalid token: %v", err),
 				})
 			}
 
@@ -105,11 +98,12 @@ func OptionalAuthMiddleware() router.Middleware {
 
 			secret := client.jwtSecret
 			if secret == "" {
-				secret = client.anonKey
+				// No JWT secret configured — can't verify, skip auth.
+				return next(ctx)
 			}
 
-			claims, err := verifySupabaseJWT(token, secret)
-			if err != nil || claims.IsExpired() {
+			claims, err := verifySupabaseJWT(token, secret, client.url+"/auth/v1")
+			if err != nil {
 				return next(ctx)
 			}
 
@@ -147,58 +141,80 @@ func GetUserID(ctx *nhttp.Context) string {
 
 // ── JWT Verification ────────────────────────────────────────────
 
-// verifySupabaseJWT verifies a Supabase JWT token using HS256.
-func verifySupabaseJWT(tokenString, jwtSecret string) (*JWTClaims, error) {
-	parts := strings.Split(tokenString, ".")
-	if len(parts) != 3 {
-		return nil, fmt.Errorf("invalid JWT format")
-	}
-
-	// Decode the payload (middle part).
-	payload, err := base64URLDecode(parts[1])
-	if err != nil {
-		return nil, fmt.Errorf("decode payload: %w", err)
-	}
-
-	var claims JWTClaims
-	if err := json.Unmarshal(payload, &claims); err != nil {
-		return nil, fmt.Errorf("unmarshal claims: %w", err)
-	}
-
-	// Verify HMAC-SHA256 signature if we have a secret.
-	if jwtSecret != "" {
-		signingInput := parts[0] + "." + parts[1]
-		expectedSig, err := base64URLDecode(parts[2])
-		if err != nil {
-			return nil, fmt.Errorf("decode signature: %w", err)
-		}
-
-		mac := hmac.New(sha256.New, []byte(jwtSecret))
-		mac.Write([]byte(signingInput))
-		actualSig := mac.Sum(nil)
-
-		if !hmac.Equal(expectedSig, actualSig) {
-			// Signature mismatch — token is invalid or wrong secret.
-			// We still return claims for flexibility but flag it.
-			_ = actualSig
-		}
-	}
-
-	// Check expiry.
-	if claims.Exp > 0 && time.Now().Unix() > claims.Exp {
-		return nil, fmt.Errorf("token expired")
-	}
-
-	return &claims, nil
+// supabaseClaims is the internal claims type used during verification. It
+// embeds jwt.RegisteredClaims so the library validates exp/aud/iss/nbf, while
+// carrying the Supabase-specific fields we expose to handlers.
+type supabaseClaims struct {
+	Email        string         `json:"email"`
+	Phone        string         `json:"phone,omitempty"`
+	Role         string         `json:"role"`
+	AppMetadata  map[string]any `json:"app_metadata,omitempty"`
+	UserMetadata map[string]any `json:"user_metadata,omitempty"`
+	jwt.RegisteredClaims
 }
 
-// base64URLDecode decodes a base64url-encoded string (no padding).
-func base64URLDecode(s string) ([]byte, error) {
-	switch len(s) % 4 {
-	case 2:
-		s += "=="
-	case 3:
-		s += "="
+// verifySupabaseJWT verifies a Supabase access token. Security properties:
+//
+//   - Pins the signing algorithm to HS256, preventing alg-confusion and the
+//     "alg:none" bypass (the header is no longer trusted blindly).
+//   - Requires and validates expiry (no token without exp is accepted).
+//   - Requires the "authenticated" audience.
+//   - Enforces the issuer when expectedIss is provided (defense-in-depth).
+//   - Rejects the anon/service_role tokens: those Supabase API keys are JWTs
+//     signed with the same secret and must never authorize an end-user request.
+//
+// expectedIss may be empty to skip the issuer check (e.g. in unit tests).
+func verifySupabaseJWT(tokenString, jwtSecret, expectedIss string) (*JWTClaims, error) {
+	if jwtSecret == "" {
+		return nil, fmt.Errorf("jwt secret not configured")
 	}
-	return base64.URLEncoding.DecodeString(s)
+
+	opts := []jwt.ParserOption{
+		jwt.WithValidMethods([]string{"HS256"}),
+		jwt.WithExpirationRequired(),
+		jwt.WithAudience("authenticated"),
+	}
+	if expectedIss != "" {
+		opts = append(opts, jwt.WithIssuer(expectedIss))
+	}
+
+	var sc supabaseClaims
+	_, err := jwt.NewParser(opts...).ParseWithClaims(tokenString, &sc, func(t *jwt.Token) (any, error) {
+		return []byte(jwtSecret), nil
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, jwt.ErrTokenExpired):
+			return nil, fmt.Errorf("token expired")
+		case errors.Is(err, jwt.ErrTokenSignatureInvalid):
+			return nil, fmt.Errorf("signature verification failed")
+		default:
+			return nil, fmt.Errorf("invalid token: %w", err)
+		}
+	}
+
+	switch sc.Role {
+	case "anon", "service_role":
+		return nil, fmt.Errorf("non-user token role %q rejected", sc.Role)
+	}
+
+	claims := &JWTClaims{
+		Sub:          sc.Subject,
+		Email:        sc.Email,
+		Phone:        sc.Phone,
+		Role:         sc.Role,
+		Iss:          sc.Issuer,
+		AppMetadata:  sc.AppMetadata,
+		UserMetadata: sc.UserMetadata,
+	}
+	if len(sc.Audience) > 0 {
+		claims.Aud = sc.Audience[0]
+	}
+	if sc.ExpiresAt != nil {
+		claims.Exp = sc.ExpiresAt.Unix()
+	}
+	if sc.IssuedAt != nil {
+		claims.Iat = sc.IssuedAt.Unix()
+	}
+	return claims, nil
 }

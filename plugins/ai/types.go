@@ -34,6 +34,7 @@ const (
 type Message struct {
 	Role       string     `json:"role"`
 	Content    string     `json:"content"`
+	Images     []string   `json:"images,omitempty"`
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string     `json:"tool_call_id,omitempty"`
 }
@@ -61,6 +62,10 @@ type GenerateRequest struct {
 	Schema      json.RawMessage `json:"response_format,omitempty"` // JSON schema for structured output
 	Stop        []string        `json:"stop,omitempty"`
 	Stream      bool            `json:"stream,omitempty"`
+	// Images carries attachments for the current user turn (data URIs, http(s)
+	// URLs, or provider-resolvable paths). The Agent moves these onto the
+	// current user Message; providers serialize them as multimodal content.
+	Images []string `json:"-"`
 }
 
 // ToolSpec describes a tool the model may call. Mirrors the OpenAI
@@ -233,6 +238,13 @@ func WithMessages(msgs []Message) GenerateOption {
 // WithStop sets stop sequences.
 func WithStop(stop ...string) GenerateOption {
 	return func(r *GenerateRequest) { r.Stop = stop }
+}
+
+// WithImages attaches image references (data URIs, http(s) URLs, or
+// provider-resolvable paths) to the current user turn. Agent.Prompt moves
+// them onto the user Message so vision-capable providers can send them.
+func WithImages(images []string) GenerateOption {
+	return func(r *GenerateRequest) { r.Images = images }
 }
 
 // WithSchema sets the JSON schema for structured output.

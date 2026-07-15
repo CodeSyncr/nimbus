@@ -7,6 +7,8 @@ import (
 	"log"
 	"sync"
 	"time"
+
+	"github.com/CodeSyncr/nimbus/http"
 )
 
 // ---------- Error IDs -------------------------------------------------------
@@ -59,6 +61,15 @@ func (e *AppError) Error() string {
 // Unwrap returns the wrapped error.
 func (e *AppError) Unwrap() error {
 	return e.Internal
+}
+
+// HTTPStatus reports the HTTP status code, satisfying router.StatusError so the
+// router can honor it even when errors.Handler is not wired.
+func (e *AppError) HTTPStatus() int {
+	if e.Status == 0 {
+		return http.StatusInternalServerError
+	}
+	return e.Status
 }
 
 func generateErrorID() string {

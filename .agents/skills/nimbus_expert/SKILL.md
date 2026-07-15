@@ -26,6 +26,8 @@ Use this skill when:
 - [Validation](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/validation.md): Chainable rules and Form Requests.
 - [Views & Templates](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/views_templates.md): `.nimbus` engine, layouts, and components.
 - [CLI](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/cli.md): Scaffolding and generator commands.
+- [Type-Safe Client (Hive)](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/hive.md): End-to-end type safety with client proxies.
+
 
 ### Database & Security
 - [ORM (SQL)](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/orm.md): GORM-based database management.
@@ -37,7 +39,9 @@ Use this skill when:
 ### Services
 - [Queue & Jobs](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/queue_jobs.md): Background job processing.
 - [Cache](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/cache.md): Multi-driver caching and locks.
+- [Redis](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/redis.md): Direct Redis client — strings, hashes, lists, sets, pub/sub.
 - [Mail](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/mail.md): Unified mail API.
+
 - [Scheduler](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/scheduler.md): Recurring task management.
 - [Notification](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/notification.md): Multi-channel notifications.
 - [Search](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/search.md): Full-text search (Meilisearch, Typesense, PostgreSQL).
@@ -53,11 +57,16 @@ Use this skill when:
 - [Transmit](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/transmit_plugin.md): SSE real-time push.
 - [Horizon](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/horizon_plugin.md): Queue dashboard.
 - [Inertia](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/inertia_plugin.md): Vue/React/Svelte SPA adapter.
+- **Livewire** — server-driven reactive components. Its skill lives in its own repo: `nimbus-livewire/.agents/skills/livewire_expert/` (`SKILL.md` + topic files).
 - [Reverb](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/reverb_plugin.md): WebSocket broadcasting.
 - [Supabase](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/supabase_plugin.md): Supabase services integration.
+- [Cashier](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/cashier_plugin.md): Multi-gateway payments (Stripe, Razorpay, PayU) with default selection & paywall.
+- [Passport](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/passport_plugin.md): OAuth2 authorization server (authorization_code+PKCE, client_credentials, refresh) with introspection & scopes.
+- [Admin](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/admin_plugin.md): Nova/Filament-style reflection-driven CRUD admin panel over your models.
 
 ### Development
 - [Testing](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/testing.md): HTTP helpers and AI test generation.
+- [Browser Testing (Dusk)](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/browser_testing.md): In-process E2E browser — visit, forms, links, fluent assertions.
 - [Best Practices](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/usage_best_practices.md): Development guidelines.
 
 ## Instructions

@@ -202,6 +202,18 @@ func (p *Plugin) eventsHandler(c *http.Context) error {
 		emitDisconnect(uid)
 	}()
 
+	// Subscribe to channels passed on the query string before any events
+	// can flow, so clients don't lose broadcasts published in the window
+	// between connecting and a follow-up POST /subscribe round-trip.
+	for _, ch := range strings.Split(req.URL.Query().Get("channels"), ",") {
+		ch = strings.TrimSpace(ch)
+		if ch == "" || !CheckChannel(c, ch) {
+			continue
+		}
+		p.store.Subscribe(ch, uid)
+		emitSubscribe(uid, ch)
+	}
+
 	// Send UID to client
 	uidMsg := []byte("data: {\"uid\":\"" + uid + "\"}\n\n")
 	w.Write(uidMsg)

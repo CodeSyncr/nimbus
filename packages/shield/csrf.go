@@ -38,6 +38,9 @@ func CSRFGuard(cfg CSRFConfig) router.Middleware {
 	if cfg.CookieName == "" {
 		cfg.CookieName = "__nimbus_csrf"
 	}
+	if cfg.SessionCookieName == "" {
+		cfg.SessionCookieName = "nimbus_session"
+	}
 	if cfg.HeaderName == "" {
 		cfg.HeaderName = "X-CSRF-Token"
 	}
@@ -58,11 +61,12 @@ func CSRFGuard(cfg CSRFConfig) router.Middleware {
 
 	return func(next router.HandlerFunc) router.HandlerFunc {
 		return func(c *http.Context) error {
-			rawToken := tokenFromCookie(c, cfg.CookieName, secret)
+			sid := sessionID(c, cfg.SessionCookieName)
+			rawToken := tokenFromCookie(c, cfg.CookieName, sid, secret)
 
 			if rawToken == "" {
 				rawToken = mustRandom(tokenBytes)
-				setCSRFCookie(c, cfg, rawToken, secret)
+				setCSRFCookie(c, cfg, rawToken, sid, secret)
 			}
 
 			c.Set("_csrf_token", rawToken)
@@ -85,7 +89,7 @@ func CSRFGuard(cfg CSRFConfig) router.Middleware {
 
 			if cfg.RotateToken {
 				newToken := mustRandom(tokenBytes)
-				setCSRFCookie(c, cfg, newToken, secret)
+				setCSRFCookie(c, cfg, newToken, sid, secret)
 				c.Set("_csrf_token", newToken)
 			}
 
@@ -94,17 +98,46 @@ func CSRFGuard(cfg CSRFConfig) router.Middleware {
 	}
 }
 
+// sessionID reads the caller's session identifier straight from the request
+// cookie so CSRF binding works regardless of whether the session middleware
+// has run yet. Returns "" when binding is disabled (cookieName == "-") or no
+// session cookie is present (anonymous request).
+func sessionID(c *http.Context, cookieName string) string {
+	if cookieName == "" || cookieName == "-" {
+		return ""
+	}
+	ck, err := c.Request.Cookie(cookieName)
+	if err != nil || ck == nil {
+		return ""
+	}
+	return ck.Value
+}
+
+// requestIsHTTPS reports whether the request was served over TLS, directly or
+// via a trusted proxy that set X-Forwarded-Proto.
+func requestIsHTTPS(r *http.Request) bool {
+	if r.TLS != nil {
+		return true
+	}
+	return strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
+}
+
 // --------------------------------------------------------------------------
 // Token helpers
 // --------------------------------------------------------------------------
 
-func signToken(raw string, secret []byte) string {
+// signToken binds the token to the session id: the signature covers both the
+// random value and the session id, so a token minted for one session fails
+// validation under any other (or absent) session.
+func signToken(raw, sid string, secret []byte) string {
 	mac := hmac.New(sha256.New, secret)
 	mac.Write([]byte(raw))
+	mac.Write([]byte{0}) // domain separator between raw and sid
+	mac.Write([]byte(sid))
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
-func tokenFromCookie(c *http.Context, name string, secret []byte) string {
+func tokenFromCookie(c *http.Context, name, sid string, secret []byte) string {
 	cookie, err := c.Request.Cookie(name)
 	if err != nil || cookie.Value == "" {
 		return ""
@@ -114,22 +147,24 @@ func tokenFromCookie(c *http.Context, name string, secret []byte) string {
 		return ""
 	}
 	raw, sig := parts[0], parts[1]
-	expected := signToken(raw, secret)
+	expected := signToken(raw, sid, secret)
 	if !hmac.Equal([]byte(sig), []byte(expected)) {
 		return ""
 	}
 	return raw
 }
 
-func setCSRFCookie(c *http.Context, cfg CSRFConfig, raw string, secret []byte) {
-	sig := signToken(raw, secret)
+func setCSRFCookie(c *http.Context, cfg CSRFConfig, raw, sid string, secret []byte) {
+	sig := signToken(raw, sid, secret)
 	http.SetCookie(c.Response, &http.Cookie{
-		Name:     cfg.CookieName,
-		Value:    raw + separator + sig,
-		Path:     cfg.Path,
-		Domain:   cfg.Domain,
-		MaxAge:   cfg.MaxAge,
-		Secure:   cfg.Secure,
+		Name:   cfg.CookieName,
+		Value:  raw + separator + sig,
+		Path:   cfg.Path,
+		Domain: cfg.Domain,
+		MaxAge: cfg.MaxAge,
+		// Secure whenever the request is HTTPS, even if not explicitly
+		// configured — a plaintext CSRF cookie is trivially injectable.
+		Secure:   cfg.Secure || requestIsHTTPS(c.Request),
 		HttpOnly: cfg.HttpOnly,
 		SameSite: cfg.SameSite,
 	})
@@ -214,7 +249,12 @@ func VerifyOrigin(allowedHosts ...string) router.Middleware {
 				origin = c.Request.Header.Get("Referer")
 			}
 			if origin == "" {
-				return next(c)
+				// Fail closed: an unsafe request that supplies neither Origin
+				// nor Referer must not silently bypass origin verification.
+				c.Response.Header().Set("Content-Type", "application/json")
+				c.Response.WriteHeader(http.StatusForbidden)
+				_, _ = c.Response.Write([]byte(`{"error":"missing origin or referer"}`))
+				return nil
 			}
 
 			host := extractHost(origin)

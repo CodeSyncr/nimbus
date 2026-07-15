@@ -41,10 +41,17 @@ type StringRule struct {
 	existsOpts *ExistsOpts
 }
 
+// IsRequired reports whether this rule requires a non-empty value.
+func (r *StringRule) IsRequired() bool { return r.required }
+
+// TypeScriptType returns the TypeScript type string for this rule.
+func (r *StringRule) TypeScriptType() string { return "string" }
+
 // String creates a new StringRule.
 func String() *StringRule {
 	return &StringRule{}
 }
+
 
 // Required marks the field as required (non-empty).
 func (r *StringRule) Required() *StringRule {
@@ -217,10 +224,17 @@ type NumberRule struct {
 	positive bool
 }
 
+// IsRequired reports whether this rule requires a non-zero value.
+func (r *NumberRule) IsRequired() bool { return r.required }
+
+// TypeScriptType returns the TypeScript type string for this rule.
+func (r *NumberRule) TypeScriptType() string { return "number" }
+
 // Number creates a new NumberRule.
 func Number() *NumberRule {
 	return &NumberRule{}
 }
+
 
 func (r *NumberRule) Required() *NumberRule {
 	r.required = true
@@ -289,7 +303,14 @@ func (r *NumberRule) validate(field string, v reflect.Value, allFields reflect.V
 // BoolRule validates boolean fields.
 type BoolRule struct{}
 
+// IsRequired always returns false for BoolRule (presence is validated by type, not value).
+func (r *BoolRule) IsRequired() bool { return false }
+
+// TypeScriptType returns the TypeScript type string for this rule.
+func (r *BoolRule) TypeScriptType() string { return "boolean" }
+
 func Bool() *BoolRule { return &BoolRule{} }
+
 
 func (r *BoolRule) validate(field string, v reflect.Value, allFields reflect.Value, msgs map[string]string, out ValidationErrors) {
 	if v.Kind() != reflect.Bool {
@@ -304,7 +325,14 @@ type UIntRule struct {
 	required bool
 }
 
+// IsRequired reports whether this rule requires a non-zero value.
+func (r *UIntRule) IsRequired() bool { return r.required }
+
+// TypeScriptType returns the TypeScript type string for this rule.
+func (r *UIntRule) TypeScriptType() string { return "number" }
+
 func UInt() *UIntRule { return &UIntRule{} }
+
 
 func (r *UIntRule) Required() *UIntRule {
 	r.required = true
@@ -551,6 +579,13 @@ func Date() *DateRule {
 	return &DateRule{layout: time.RFC3339}
 }
 
+// IsRequired reports whether this rule requires a non-zero date.
+func (r *DateRule) IsRequired() bool { return r.required }
+
+// TypeScriptType returns the TypeScript type string for this rule (dates are strings in JSON).
+func (r *DateRule) TypeScriptType() string { return "string" }
+
+
 func (r *DateRule) Required() *DateRule {
 	r.required = true
 	return r
@@ -659,6 +694,13 @@ func Array() *ArrayRule {
 	return &ArrayRule{}
 }
 
+// IsRequired reports whether this rule requires a non-empty slice.
+func (r *ArrayRule) IsRequired() bool { return r.required }
+
+// TypeScriptType returns the TypeScript type string for this rule.
+func (r *ArrayRule) TypeScriptType() string { return "any[]" }
+
+
 func (r *ArrayRule) Required() *ArrayRule {
 	r.required = true
 	return r
@@ -728,6 +770,13 @@ type FileRule struct {
 func File() *FileRule {
 	return &FileRule{}
 }
+
+// IsRequired reports whether this rule requires a file to be present.
+func (r *FileRule) IsRequired() bool { return r.required }
+
+// TypeScriptType returns the TypeScript type string for this rule.
+func (r *FileRule) TypeScriptType() string { return "File" }
+
 
 func (r *FileRule) Required() *FileRule {
 	r.required = true
@@ -829,6 +878,13 @@ type MapRule struct {
 func Map() *MapRule {
 	return &MapRule{}
 }
+
+// IsRequired reports whether this rule requires a non-empty map.
+func (r *MapRule) IsRequired() bool { return r.required }
+
+// TypeScriptType returns the TypeScript type string for this rule.
+func (r *MapRule) TypeScriptType() string { return "Record<string, unknown>" }
+
 
 func (r *MapRule) Required() *MapRule {
 	r.required = true

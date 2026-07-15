@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Authorize {{ .client_name }}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="min-h-screen flex items-center justify-center bg-slate-100 dark:bg-slate-900 p-4">
+  <div class="w-full max-w-md bg-white dark:bg-slate-800 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 p-8">
+    <div class="text-center mb-6">
+      <div class="mx-auto w-12 h-12 rounded-xl bg-indigo-500/10 flex items-center justify-center mb-4">
+        <svg class="w-6 h-6 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+      </div>
+      <h1 class="text-xl font-bold text-slate-900 dark:text-white">Authorization Request</h1>
+      <p class="text-sm text-slate-500 dark:text-slate-400 mt-1">
+        <span class="font-semibold text-slate-700 dark:text-slate-200">{{ .client_name }}</span> is requesting access to your account.
+      </p>
+    </div>
+
+    <div class="mb-6">
+      <p class="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">This application will be able to</p>
+      <ul class="space-y-2">
+        @each(.scopes)
+        <li class="flex items-center text-sm text-slate-700 dark:text-slate-200">
+          <svg class="w-4 h-4 text-emerald-500 mr-2 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+          <span class="text-xs font-mono text-slate-600 dark:text-slate-300">{{ . }}</span>
+        </li>
+        @endeach
+      </ul>
+    </div>
+
+    <form method="POST" action="{{ .prefix }}/authorize" class="flex gap-3">
+      @each(.params)
+      <input type="hidden" name="{{ index . "name" }}" value="{{ index . "value" }}"/>
+      @endeach
+      <button type="submit" name="approve" value="0"
+        class="flex-1 py-2.5 rounded-lg border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200 font-medium hover:bg-slate-50 dark:hover:bg-slate-700 transition">
+        Deny
+      </button>
+      <button type="submit" name="approve" value="1"
+        class="flex-1 py-2.5 rounded-lg bg-indigo-600 text-white font-medium hover:bg-indigo-700 transition">
+        Authorize
+      </button>
+    </form>
+  </div>
+</body>
+</html>

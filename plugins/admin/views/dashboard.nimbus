@@ -1,0 +1,17 @@
+@layout('admin/layout')
+<p class="text-slate-500 dark:text-slate-400 mb-6">Manage your application's data. Select a resource to get started.</p>
+<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+  @each(.cards)
+  <a href="{{ $.prefix }}/{{ index . "slug" }}" class="block bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-6 hover:shadow-md hover:border-indigo-400 transition">
+    <div class="flex items-center justify-between">
+      <span class="text-sm font-semibold text-slate-500 dark:text-slate-400">{{ index . "label" }}</span>
+      <span class="w-9 h-9 rounded-lg bg-indigo-500/10 text-indigo-500 flex items-center justify-center text-sm">◆</span>
+    </div>
+    <div class="mt-3 text-3xl font-bold">{{ index . "count" }}</div>
+    <div class="mt-1 text-xs text-slate-400">total records</div>
+  </a>
+  @endeach
+</div>
+@if(!.cards)
+<div class="text-center py-16 text-slate-400">No resources registered yet. Call <code>panel.AddResource(...)</code>.</div>
+@endif

@@ -107,6 +107,15 @@ func (e HTTPError) Error() string {
 	return http.StatusText(e.Status)
 }
 
+// HTTPStatus reports the HTTP status code, satisfying router.StatusError so the
+// router can honor it even when errors.Handler is not wired.
+func (e HTTPError) HTTPStatus() int {
+	if e.Status == 0 {
+		return http.StatusInternalServerError
+	}
+	return e.Status
+}
+
 // WriteHTTPError renders an HTTPError to the response. It is used by both the
 // errors.Handler middleware and the router's fallback when no global handler
 // is installed.

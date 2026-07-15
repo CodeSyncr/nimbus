@@ -68,6 +68,30 @@ func (t *PersonalAccessToken) HasAbility(ability string) bool {
 	return false
 }
 
+// HasAnyAbility returns true if the token has at least one of the given
+// abilities. The wildcard "*" grants all. Mirrors Laravel Sanctum's
+// `abilities:a,b` route middleware (OR semantics).
+func (t *PersonalAccessToken) HasAnyAbility(abilities ...string) bool {
+	for _, a := range abilities {
+		if t.HasAbility(a) {
+			return true
+		}
+	}
+	return false
+}
+
+// HasAllAbilities returns true only if the token has every one of the given
+// abilities. The wildcard "*" grants all. Mirrors Laravel Sanctum's
+// `ability:a,b` route middleware (AND semantics).
+func (t *PersonalAccessToken) HasAllAbilities(abilities ...string) bool {
+	for _, a := range abilities {
+		if !t.HasAbility(a) {
+			return false
+		}
+	}
+	return true
+}
+
 // ── Token helpers ───────────────────────────────────────────────
 
 // generateToken creates a cryptographically random 40-byte hex token.

@@ -1,7 +1,10 @@
 package supabase
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"io"
 	"time"
 )
 
@@ -170,7 +173,11 @@ func (a *AuthClient) GetUser(accessToken string) (*AuthUser, error) {
 
 // UpdateUser updates the currently authenticated user.
 func (a *AuthClient) UpdateUser(accessToken string, req UpdateUserRequest) (*AuthUser, error) {
-	resp, err := a.client.do("PUT", a.authURL("/user"), nil, map[string]string{
+	b, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("supabase: auth update marshal: %w", err)
+	}
+	resp, err := a.client.do("PUT", a.authURL("/user"), bytes.NewReader(b), map[string]string{
 		"Authorization": "Bearer " + accessToken,
 		"Content-Type":  "application/json",
 	})
@@ -272,7 +279,14 @@ func (a *AuthClient) AdminDeleteUser(userID string) error {
 
 // InviteByEmail sends an invitation email (requires service role key).
 func (a *AuthClient) InviteByEmail(req InviteRequest) (*AuthUser, error) {
-	resp, err := a.client.doJSON("POST", a.authURL("/invite"), req)
+	b, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("supabase: auth invite marshal: %w", err)
+	}
+	resp, err := a.client.do("POST", a.authURL("/invite"), io.NopCloser(bytes.NewReader(b)), map[string]string{
+		"Authorization": "Bearer " + a.client.serviceRoleKey,
+		"Content-Type":  "application/json",
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -292,7 +306,14 @@ func (a *AuthClient) GenerateLink(linkType, email string, options map[string]any
 	for k, v := range options {
 		payload[k] = v
 	}
-	resp, err := a.client.doJSON("POST", a.authURL("/admin/generate_link"), payload)
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("supabase: auth generate link marshal: %w", err)
+	}
+	resp, err := a.client.do("POST", a.authURL("/admin/generate_link"), bytes.NewReader(b), map[string]string{
+		"Authorization": "Bearer " + a.client.serviceRoleKey,
+		"Content-Type":  "application/json",
+	})
 	if err != nil {
 		return nil, err
 	}
