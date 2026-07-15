@@ -1,8 +1,8 @@
 /**
- * @nimbus/echo — Real-time client SDK for Nimbus Transmit SSE
+ * @codesyncr/echo — Real-time client SDK for Nimbus Transmit SSE
  *
  * Usage:
- *   import { Echo } from '@nimbus/echo'
+ *   import { Echo } from '@codesyncr/echo'
  *
  *   const echo = new Echo({ baseURL: 'http://localhost:3333' })
  *
@@ -47,7 +47,7 @@ declare class Channel {
     listen(event: string, callback: EventCallback): this;
     /** Listen for all events on this channel */
     listenAll(callback: EventCallback): this;
-    /** Remove a listener */
+    /** Remove a listener. Omit `callback` to remove every listener for the event. */
     stopListening(event: string, callback?: EventCallback): this;
     /** Unsubscribe from this channel entirely */
     unsubscribe(): void;
@@ -114,6 +114,11 @@ declare class Echo {
     _unsubscribe(channel: string): void;
     /** @internal Register a listener for a channel event */
     _registerListener(channel: string, event: string, callback: EventCallback): void;
+    /**
+     * @internal Remove a listener for a channel event. When `callback` is
+     * omitted, every listener for that event is removed.
+     */
+    _unregisterListener(channel: string, event: string, callback?: EventCallback): void;
     /** @internal Dispatch an event to registered listeners */
     private dispatchEvent;
     /** @internal Send subscribe request to server */

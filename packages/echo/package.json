@@ -1,6 +1,6 @@
 {
   "name": "@codesyncr/echo",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Real-time client SDK for Nimbus Transmit (SSE channels)",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
@@ -12,14 +12,25 @@
       "require": "./dist/index.js"
     }
   },
-  "files": ["dist", "README.md"],
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsup src/index.ts --format cjs,esm --dts --clean",
     "dev": "tsup src/index.ts --format cjs,esm --dts --watch",
     "type-check": "tsc --noEmit",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "test": "node --test test/*.test.mjs"
   },
-  "keywords": ["nimbus", "sse", "realtime", "websocket", "transmit", "echo"],
+  "keywords": [
+    "nimbus",
+    "sse",
+    "realtime",
+    "websocket",
+    "transmit",
+    "echo"
+  ],
   "author": "CodeSyncr",
   "license": "MIT",
   "homepage": "https://github.com/CodeSyncr/nimbus/tree/main/packages/echo#readme",

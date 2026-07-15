@@ -18,13 +18,14 @@ var Channel = class {
   listenAll(callback) {
     return this.listen("*", callback);
   }
-  /** Remove a listener */
+  /** Remove a listener. Omit `callback` to remove every listener for the event. */
   stopListening(event, callback) {
     if (callback) {
       this.callbacks.get(event)?.delete(callback);
     } else {
       this.callbacks.delete(event);
     }
+    this.echo._unregisterListener(this.name, event, callback);
     return this;
   }
   /** Unsubscribe from this channel entirely */
@@ -241,6 +242,26 @@ var Echo = class {
       channelListeners.set(event, /* @__PURE__ */ new Set());
     }
     channelListeners.get(event).add(callback);
+  }
+  /**
+   * @internal Remove a listener for a channel event. When `callback` is
+   * omitted, every listener for that event is removed.
+   */
+  _unregisterListener(channel, event, callback) {
+    const channelListeners = this.listeners.get(channel);
+    if (!channelListeners) return;
+    if (callback) {
+      const eventListeners = channelListeners.get(event);
+      eventListeners?.delete(callback);
+      if (eventListeners && eventListeners.size === 0) {
+        channelListeners.delete(event);
+      }
+    } else {
+      channelListeners.delete(event);
+    }
+    if (channelListeners.size === 0) {
+      this.listeners.delete(channel);
+    }
   }
   /** @internal Dispatch an event to registered listeners */
   dispatchEvent(channel, event, data) {

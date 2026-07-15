@@ -40,7 +40,7 @@ This project follows Semantic Versioning.
 - **Errors:** Default HTML error pages, and zero-config 404s now render correctly.
 - **Middleware:** Structured request logging.
 
-### Hive TypeScript client (`@codesyncr/nimbus-hive`)
+### Hive TypeScript client (`@codesyncr/hive`)
 - **Added:** Automatic retries — configurable `limit`, `methods` (idempotent-only by default), `statusCodes`, exponential backoff with jitter capped at `backoffLimit`, `Retry-After` header support, and an `onRetry` hook. Previously `retry` existed in the config type but was **never implemented**.
 - **Added:** Per-request `timeout`, `signal`, and `retry` overrides.
 - **Fixed:** A caller-supplied `AbortSignal` was overwritten by the internal timeout signal; the two are now combined.

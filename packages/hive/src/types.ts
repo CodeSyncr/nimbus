@@ -1,5 +1,5 @@
 /**
- * @codesyncr/nimbus-hive — Type system
+ * @codesyncr/hive — Type system
  *
  * Provides all type utilities for Nimbus Hive's end-to-end type safety.
  */

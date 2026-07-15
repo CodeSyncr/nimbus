@@ -1,8 +1,8 @@
 /**
- * @nimbus/echo — Real-time client SDK for Nimbus Transmit SSE
+ * @codesyncr/echo — Real-time client SDK for Nimbus Transmit SSE
  *
  * Usage:
- *   import { Echo } from '@nimbus/echo'
+ *   import { Echo } from '@codesyncr/echo'
  *
  *   const echo = new Echo({ baseURL: 'http://localhost:3333' })
  *
@@ -75,13 +75,16 @@ export class Channel {
     return this.listen('*', callback)
   }
 
-  /** Remove a listener */
+  /** Remove a listener. Omit `callback` to remove every listener for the event. */
   stopListening(event: string, callback?: EventCallback): this {
     if (callback) {
       this.callbacks.get(event)?.delete(callback)
     } else {
       this.callbacks.delete(event)
     }
+    // Listeners are dispatched from Echo's registry, so they must be removed
+    // there too — otherwise the callback keeps firing.
+    this.echo._unregisterListener(this.name, event, callback)
     return this
   }
 
@@ -357,6 +360,29 @@ export class Echo {
       channelListeners.set(event, new Set())
     }
     channelListeners.get(event)!.add(callback)
+  }
+
+  /**
+   * @internal Remove a listener for a channel event. When `callback` is
+   * omitted, every listener for that event is removed.
+   */
+  _unregisterListener(channel: string, event: string, callback?: EventCallback): void {
+    const channelListeners = this.listeners.get(channel)
+    if (!channelListeners) return
+
+    if (callback) {
+      const eventListeners = channelListeners.get(event)
+      eventListeners?.delete(callback)
+      if (eventListeners && eventListeners.size === 0) {
+        channelListeners.delete(event)
+      }
+    } else {
+      channelListeners.delete(event)
+    }
+
+    if (channelListeners.size === 0) {
+      this.listeners.delete(channel)
+    }
   }
 
   /** @internal Dispatch an event to registered listeners */

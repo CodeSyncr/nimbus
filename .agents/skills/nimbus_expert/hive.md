@@ -28,7 +28,7 @@ func RegisterRoutes(app *nimbus.App) {
 ### 2. Emitting Route Manifest
 Dump routes registry to JSON format on server boot:
 ```bash
-NIMBUS_DUMP_ROUTES=1 go run ./bin/server.go
+NIMBUS_DUMP_ROUTES=1 go run .
 ```
 And generate the TypeScript files:
 ```bash
@@ -43,7 +43,7 @@ nimbus gen:client
 Because types are embedded directly inside the generated registry object, client setup requires zero manual type declarations or interface definitions:
 
 ```typescript
-import { createHive } from '@codesyncr/nimbus-hive';
+import { createHive } from '@codesyncr/hive';
 import { registry } from './.nimbus-client/registry';
 
 export const client = createHive({
@@ -68,7 +68,7 @@ You can expose the generated types cleanly by configuring the backend `package.j
 
 This lets other packages or frontend apps in the monorepo import the registry directly:
 ```typescript
-import { createHive } from '@codesyncr/nimbus-hive';
+import { createHive } from '@codesyncr/hive';
 import { registry } from '@my-app/backend/registry';
 
 export const client = createHive({
