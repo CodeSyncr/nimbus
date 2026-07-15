@@ -1,17 +1,17 @@
-# @nimbus/echo
+# @codesyncr/echo
 
 Real-time client SDK for Nimbus Transmit (SSE channels). Works with the Transmit SSE plugin on the server.
 
 ## Installation
 
 ```bash
-npm install @nimbus/echo
+npm install @codesyncr/echo
 ```
 
 ## Usage
 
 ```typescript
-import { Echo } from '@nimbus/echo'
+import { Echo } from '@codesyncr/echo'
 
 const echo = new Echo({
   baseURL: 'http://localhost:3333',
