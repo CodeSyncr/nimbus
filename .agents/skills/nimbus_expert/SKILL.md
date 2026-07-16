@@ -67,6 +67,7 @@ Use this skill when:
 ### Development
 - [Testing](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/testing.md): HTTP helpers and AI test generation.
 - [Browser Testing (Dusk)](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/browser_testing.md): In-process E2E browser — visit, forms, links, fluent assertions.
+- [Serverless / AWS Lambda](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/serverless.md): Run the app on Lambda via the `serverless` adapter; `make:lambda` / `new --lambda`.
 - [Best Practices](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/usage_best_practices.md): Development guidelines.
 
 ## Instructions

@@ -22,6 +22,7 @@ type NewCommand struct {
 	kit        string
 	starter    string
 	teams      bool
+	lambda     bool
 }
 
 func (c *NewCommand) Name() string        { return "new" }
@@ -34,6 +35,7 @@ func (c *NewCommand) Flags(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&c.starter, "starter", "none", "Starter kit for Basic apps: none, breeze, livewire, jetstream")
 	cmd.Flags().BoolVar(&c.teams, "teams", false, "Jetstream option: scaffold team features (only with --starter=jetstream)")
 	cmd.Flags().BoolVar(&c.noDefaults, "no-default-plugins", false, "Skip auto-registering default plugins")
+	cmd.Flags().BoolVar(&c.lambda, "lambda", false, "Add an AWS Lambda deployment target (serverless)")
 }
 
 func (c *NewCommand) Run(ctx *cli.Context) error {
@@ -182,6 +184,15 @@ func (c *NewCommand) Run(ctx *cli.Context) error {
 			} else if strings.Contains(o, "Unpoly") {
 				selectedPlugins = append(selectedPlugins, "unpoly")
 			}
+		}
+
+		// ── Deployment target ───────────────────────────────────
+		if !c.lambda {
+			wantLambda, err := ctx.UI.AskConfirm("Add an AWS Lambda deployment target (serverless)?", false)
+			if err != nil {
+				return err
+			}
+			c.lambda = wantLambda
 		}
 	} else {
 		if c.kit != "" && c.kit != "react" && c.kit != "vue" && c.kit != "svelte" {
@@ -400,6 +411,16 @@ func (c *NewCommand) Run(ctx *cli.Context) error {
 		}
 	}
 
+	// ── AWS Lambda deployment target ────────────────────────
+	if c.lambda {
+		created, _, lerr := writeLambdaFiles(dir, name)
+		if lerr != nil {
+			ctx.UI.Warnf("failed to scaffold Lambda target: %v", lerr)
+		} else {
+			ctx.UI.Successf("AWS Lambda target scaffolded (%s)", strings.Join(created, ", "))
+		}
+	}
+
 	ctx.UI.Successf("Project %s successfully created!", name)
 
 	msg := fmt.Sprintf("Selected DB: %s", dbDriver)
@@ -418,6 +439,12 @@ func (c *NewCommand) Run(ctx *cli.Context) error {
 		ctx.UI.Infof("  nimbus migrate   # required before auth tables exist (users, etc.)")
 	}
 	ctx.UI.Infof("  nimbus serve")
+	if c.lambda {
+		ctx.UI.Infof("")
+		ctx.UI.Infof("Deploy to AWS Lambda (after 'nimbus install'):")
+		ctx.UI.Infof("  sam build && sam deploy --guided")
+		ctx.UI.Infof("  # Use Postgres over a pooler; SQLite won't work on Lambda. See template.yaml.")
+	}
 
 	return nil
 }

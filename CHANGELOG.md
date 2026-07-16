@@ -4,6 +4,24 @@ All notable changes to Nimbus are documented in this file.
 
 This project follows Semantic Versioning.
 
+## [Unreleased]
+
+### Added
+- **Serverless / AWS Lambda deployment.** A new `serverless` package adapts any
+  `http.Handler` (e.g. `app.Router`) to the AWS Lambda proxy event model — no
+  AWS SDK dependency in the framework. Supports API Gateway / Function URL
+  payload v2.0 and v1.0 (REST API / ALB), including base64 request/response
+  bodies and correct `Set-Cookie` handling.
+  - `nimbus make:lambda` scaffolds a Lambda deployment target into any app:
+    `cmd/lambda/main.go` (serves the router via the adapter), a SAM
+    `template.yaml` (Function URL, `provided.al2023`, arm64), and a Makefile
+    build rule.
+  - `nimbus new --lambda` (and an interactive prompt) adds the same target when
+    scaffolding a new app.
+  - Docs note the serverless constraints: use a DB connection pooler, SQLite
+    won't work (ephemeral FS + CGO), and queue/scheduler/WebSocket need a
+    long-running process.
+
 ## [1.2.0] - 2026-07-15
 
 ### Added
