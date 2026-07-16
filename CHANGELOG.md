@@ -4,7 +4,7 @@ All notable changes to Nimbus are documented in this file.
 
 This project follows Semantic Versioning.
 
-## [Unreleased]
+## [1.3.0] - 2026-07-17
 
 ### Added
 - **Serverless / AWS Lambda deployment.** A new `serverless` package adapts any
@@ -20,7 +20,18 @@ This project follows Semantic Versioning.
     scaffolding a new app.
   - Docs note the serverless constraints: use a DB connection pooler, SQLite
     won't work (ephemeral FS + CGO), and queue/scheduler/WebSocket need a
-    long-running process.
+    long-running process. Cloudflare Workers (Go→WASM subset) and Supabase Edge
+    Functions (Deno/TypeScript) are documented as out of scope for the Go app.
+
+### Client packages (npm)
+- **`@codesyncr/echo`** (real-time SSE client for Transmit): **fixed** a bug
+  where `stopListening()` was a no-op — a removed callback kept firing because
+  the listener lived in two registries and only one was cleared. Added a 25-test
+  suite (previously untested). Published as `@codesyncr/echo@1.0.1`.
+- **Renamed and published to npm**: `@codesyncr/nimbus-hive` → **`@codesyncr/hive`**
+  and `@nimbus/echo` → **`@codesyncr/echo`**. Added a Hive README and a repo
+  `LICENSE` (MIT was declared but no license file existed — this also fixes
+  license detection for the Go module on pkg.go.dev).
 
 ## [1.2.0] - 2026-07-15
 
