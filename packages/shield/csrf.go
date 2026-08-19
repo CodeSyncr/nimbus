@@ -202,7 +202,8 @@ func isSafeMethod(method string) bool {
 
 func isExceptPath(path string, except []string) bool {
 	for _, prefix := range except {
-		if strings.HasPrefix(path, prefix) {
+		p := strings.TrimSuffix(prefix, "*")
+		if strings.HasPrefix(path, p) {
 			return true
 		}
 	}

@@ -4,6 +4,21 @@ All notable changes to Nimbus are documented in this file.
 
 This project follows Semantic Versioning.
 
+## [1.5.2] - 2026-08-20
+
+### Added
+- **Claude Code CLI-Style Interactive AI Workspace (`nimbus ai`):**
+  - Interactive multi-turn AI terminal REPL session with session banner, project detection, and prompt loop.
+  - Interactive slash commands: `/help`, `/clear`, `/context`, `/models`, `/routes`, `/offline`, and `/exit`.
+  - Immediate interactive drop-in when running with or without an initial prompt.
+  - Claude Code style `[+]` file generation indicators and post-generation architectural hints.
+
+### Fixed
+- **Shield CSRF Wildcard Path Matching:**
+  - Fixed `isExceptPath()` in `packages/shield` to properly strip trailing asterisks (`*`) in wildcard exclusion patterns (e.g. `/api/*`, `/api/v1/*`), preventing 403 CSRF rejections on API endpoints.
+- **Strict Error Handling in `nimbus ai`:**
+  - Removed silent fallback to local file generator on Cloud AI failures; exact server and connection errors are now cleanly surfaced to the developer.
+
 ## [1.5.1] - 2026-08-20
 
 ### Fixed

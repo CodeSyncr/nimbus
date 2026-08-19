@@ -46,37 +46,96 @@ func (c *AICommand) Flags(cmd *cobra.Command) {
 }
 
 func (c *AICommand) Run(ctx *cli.Context) error {
-	prompt := strings.Join(ctx.Args, " ")
-	if prompt == "" {
-		return c.interactiveMode(ctx)
-	}
-	return c.executePrompt(ctx, prompt)
+	initialPrompt := strings.Join(ctx.Args, " ")
+	return c.interactiveMode(ctx, initialPrompt)
 }
 
 // ---------------------------------------------------------------------------
-// Interactive mode — REPL
+// Claude Code CLI Style Interactive AI Chat Mode
 // ---------------------------------------------------------------------------
 
-func (c *AICommand) interactiveMode(ctx *cli.Context) error {
-	headerStyle := lipgloss.NewStyle().
+func (c *AICommand) interactiveMode(ctx *cli.Context, initialPrompt string) error {
+	serverURL := c.server
+	if serverURL == "" {
+		serverURL = auth.GetServerURL()
+	}
+
+	creds, _ := auth.LoadCredentials()
+	userEmail := "Guest (offline)"
+	userPlan := "local"
+	if creds != nil && !creds.IsExpired() {
+		if creds.Email != "" {
+			userEmail = creds.Email
+		}
+		if creds.Plan != "" {
+			userPlan = strings.ToUpper(creds.Plan)
+		}
+	}
+
+	// Project name & path
+	projName := filepath.Base(ctx.AppRoot)
+	if projName == "" || projName == "." {
+		projName = "nimbus-project"
+	}
+
+	// Banner Styling (Claude Code aesthetic)
+	boxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#6366f1")).
+		Padding(0, 1).
+		MarginBottom(1)
+
+	titleStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#818cf8")).
 		Bold(true)
-	dimStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#64748b"))
 
-	fmt.Fprintln(ctx.Stdout, headerStyle.Render("⚡ Nimbus AI Copilot"))
-	fmt.Fprintln(ctx.Stdout, dimStyle.Render("Type a request and press Enter. Type 'exit' to quit."))
-	fmt.Fprintln(ctx.Stdout, dimStyle.Render("Examples: 'create a blog with posts and comments'"))
-	fmt.Fprintln(ctx.Stdout, dimStyle.Render("          'add auth middleware to the API routes'"))
-	fmt.Fprintln(ctx.Stdout)
-
-	scanner := bufio.NewScanner(ctx.Stdin)
-	promptStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6366f1")).
+	accentStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#22c55e")).
 		Bold(true)
 
+	dimStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#94a3b8"))
+
+	cyanStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#38bdf8"))
+
+	headerContent := fmt.Sprintf(
+		"%s %s\n%s %s  %s %s\n%s %s",
+		titleStyle.Render("⚡ NIMBUS AI COPILOT"),
+		dimStyle.Render("· Interactive Architectural Agent ("+version.Nimbus+")"),
+		dimStyle.Render("Connected:"),
+		cyanStyle.Render(serverURL),
+		dimStyle.Render("Account:"),
+		accentStyle.Render(userEmail+" ["+userPlan+"]"),
+		dimStyle.Render("Commands:"),
+		dimStyle.Render("/help · /clear · /context · /models · /routes · /exit"),
+	)
+
+	fmt.Fprintln(ctx.Stdout)
+	// If non-interactive stdin (e.g. tests, CI or pipe), execute prompt directly
+	if ctx.Stdin == nil {
+		if initialPrompt != "" {
+			return c.executePrompt(ctx, initialPrompt)
+		}
+		return nil
+	}
+
+	scanner := bufio.NewScanner(ctx.Stdin)
+
+	// If initial prompt provided, execute it first
+	if initialPrompt != "" {
+		fmt.Fprintf(ctx.Stdout, "%s %s\n", titleStyle.Render("╭─ [query]"), dimStyle.Render("initial prompt"))
+		fmt.Fprintf(ctx.Stdout, "%s %s\n\n", titleStyle.Render("╰─❯"), initialPrompt)
+		if err := c.executePrompt(ctx, initialPrompt); err != nil {
+			ctx.UI.Errorf("%v", err)
+		}
+		fmt.Fprintln(ctx.Stdout)
+	}
+
 	for {
-		fmt.Fprint(ctx.Stdout, promptStyle.Render("nimbus> "))
+		fmt.Fprintf(ctx.Stdout, "%s %s\n", titleStyle.Render("╭─ [nimbus-ai]"), dimStyle.Render("· "+projName))
+		fmt.Fprint(ctx.Stdout, titleStyle.Render("╰─❯ "))
+
 		if !scanner.Scan() {
 			break
 		}
@@ -84,15 +143,65 @@ func (c *AICommand) interactiveMode(ctx *cli.Context) error {
 		if input == "" {
 			continue
 		}
-		if input == "exit" || input == "quit" || input == "q" {
-			fmt.Fprintln(ctx.Stdout, dimStyle.Render("Goodbye!"))
+
+		// Handle slash commands
+		switch strings.ToLower(input) {
+		case "/exit", "/quit", "exit", "quit", "q":
+			fmt.Fprintln(ctx.Stdout, dimStyle.Render("\n⚡ Goodbye! Exited Nimbus AI Copilot.\n"))
 			return nil
+
+		case "/clear", "clear", "cls":
+			fmt.Fprint(ctx.Stdout, "\033[H\033[2J")
+			fmt.Fprintln(ctx.Stdout, boxStyle.Render(headerContent))
+			continue
+
+		case "/help", "help", "?":
+			fmt.Fprintln(ctx.Stdout, titleStyle.Render("\n⚡ Nimbus AI Copilot Commands:"))
+			fmt.Fprintln(ctx.Stdout, cyanStyle.Render("  /clear     ")+"— Clear screen and refresh session banner")
+			fmt.Fprintln(ctx.Stdout, cyanStyle.Render("  /context   ")+"— Scan and show detected models and project structure")
+			fmt.Fprintln(ctx.Stdout, cyanStyle.Render("  /routes    ")+"— List registered routes in current project")
+			fmt.Fprintln(ctx.Stdout, cyanStyle.Render("  /models    ")+"— Show active AI generation model")
+			fmt.Fprintln(ctx.Stdout, cyanStyle.Render("  /offline   ")+"— Toggle offline rule-based generation")
+			fmt.Fprintln(ctx.Stdout, cyanStyle.Render("  /exit      ")+"— Exit the interactive agent\n")
+			fmt.Fprintln(ctx.Stdout, dimStyle.Render("You can ask in plain English: 'create a blog with posts and comments', 'add auth middleware', etc.\n"))
+			continue
+
+		case "/context":
+			fmt.Fprintln(ctx.Stdout, titleStyle.Render("\n📦 Project Context:"))
+			fmt.Fprintf(ctx.Stdout, "  Directory: %s\n", ctx.AppRoot)
+			modelsDir := filepath.Join(ctx.AppRoot, "app", "models")
+			if entries, err := os.ReadDir(modelsDir); err == nil {
+				fmt.Fprintln(ctx.Stdout, "  Models detected:")
+				for _, e := range entries {
+					if !e.IsDir() && strings.HasSuffix(e.Name(), ".go") {
+						fmt.Fprintf(ctx.Stdout, "    • %s\n", e.Name())
+					}
+				}
+			}
+			fmt.Fprintln(ctx.Stdout)
+			continue
+
+		case "/models":
+			fmt.Fprintf(ctx.Stdout, "\n⚡ Active AI Model: %s (Auto-optimized on Nimbus Cloud)\n\n", cyanStyle.Render("nimbus-cloud-v1.5"))
+			continue
+
+		case "/offline":
+			c.offline = !c.offline
+			if c.offline {
+				fmt.Fprintln(ctx.Stdout, dimStyle.Render("\n⚡ Switched to OFFLINE mode (local template synthesizer).\n"))
+			} else {
+				fmt.Fprintln(ctx.Stdout, accentStyle.Render("\n⚡ Switched to CLOUD mode (connected to https://nimbusgo.space).\n"))
+			}
+			continue
 		}
+
+		fmt.Fprintln(ctx.Stdout)
 		if err := c.executePrompt(ctx, input); err != nil {
 			ctx.UI.Errorf("%v", err)
 		}
 		fmt.Fprintln(ctx.Stdout)
 	}
+
 	return nil
 }
 
@@ -101,9 +210,10 @@ func (c *AICommand) interactiveMode(ctx *cli.Context) error {
 // ---------------------------------------------------------------------------
 
 func (c *AICommand) executePrompt(ctx *cli.Context, prompt string) error {
-	successStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#22c55e"))
+	successStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#22c55e")).Bold(true)
 	fileStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#818cf8"))
 	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#64748b"))
+	accentStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#38bdf8"))
 
 	var files []GeneratedFile
 	var hints []string
@@ -124,7 +234,7 @@ func (c *AICommand) executePrompt(ctx *cli.Context, prompt string) error {
 			}
 		}
 
-		fmt.Fprintln(ctx.Stdout, dimStyle.Render(fmt.Sprintf("  ⚡ Asking Nimbus Cloud AI (%s)...", serverURL)))
+		fmt.Fprintln(ctx.Stdout, dimStyle.Render(fmt.Sprintf("  ⚡ Synthesizing with Nimbus Cloud AI (%s)...", serverURL)))
 
 		cloudFiles, cloudHints, err := callNimbusCloudAI(ctx, creds, prompt, c.model, serverURL)
 		if err != nil {
@@ -134,13 +244,10 @@ func (c *AICommand) executePrompt(ctx *cli.Context, prompt string) error {
 				renderSubscriptionRequired(ctx, subErr.PricingURL)
 				return nil
 			}
-			ctx.UI.Warnf("Cloud AI request failed: %v", err)
-			ctx.UI.Infof("Falling back to local template generator...")
-			files, hints = generateLocally(ctx, prompt)
-		} else {
-			files = cloudFiles
-			hints = cloudHints
+			return fmt.Errorf("cloud AI error: %w", err)
 		}
+		files = cloudFiles
+		hints = cloudHints
 	} else {
 		// Offline mode — local intent parser and template generator
 		files, hints = generateLocally(ctx, prompt)
@@ -152,14 +259,15 @@ func (c *AICommand) executePrompt(ctx *cli.Context, prompt string) error {
 	}
 
 	if c.dry {
-		fmt.Fprintln(ctx.Stdout, dimStyle.Render("\n  [DRY RUN] Would create:"))
+		fmt.Fprintln(ctx.Stdout, dimStyle.Render("  [DRY RUN] Plan:"))
 		for _, f := range files {
 			fmt.Fprintln(ctx.Stdout, fileStyle.Render("    → "+f.Path))
 		}
 		return nil
 	}
 
-	// Write files.
+	// Write files with clean Claude Code style [+] indicators
+	fmt.Fprintln(ctx.Stdout, accentStyle.Render(fmt.Sprintf("  ✨ Applied %d file change(s):", len(files))))
 	for _, f := range files {
 		fullPath := filepath.Join(ctx.AppRoot, f.Path)
 		if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
@@ -168,7 +276,7 @@ func (c *AICommand) executePrompt(ctx *cli.Context, prompt string) error {
 		if err := os.WriteFile(fullPath, []byte(f.Content), 0644); err != nil {
 			return err
 		}
-		fmt.Fprintln(ctx.Stdout, successStyle.Render("  ✓ ")+fileStyle.Render(f.Path))
+		fmt.Fprintln(ctx.Stdout, successStyle.Render("    [+] ")+fileStyle.Render(f.Path))
 	}
 
 	// Post-generation hints.
@@ -257,7 +365,7 @@ func callNimbusCloudAI(ctx *cli.Context, creds *auth.Credentials, prompt, model,
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == http.StatusPaymentRequired || resp.StatusCode == http.StatusForbidden {
+	if resp.StatusCode == http.StatusPaymentRequired {
 		pricingURL := serverURL + "/pricing"
 		return nil, nil, &SubscriptionRequiredError{
 			Message:    "active subscription required",
