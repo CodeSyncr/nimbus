@@ -4,6 +4,13 @@ All notable changes to Nimbus are documented in this file.
 
 This project follows Semantic Versioning.
 
+## [1.5.1] - 2026-08-20
+
+### Fixed
+- **Database Schema Builder Dialect Normalization:**
+  - Automatically normalize boolean column default values (`"0"`, `"1"`, `"false"`, `"true"`) to `FALSE`/`TRUE` on PostgreSQL and `0`/`1` on MySQL and SQLite.
+  - Fixed SQL error `42804` (boolean column with integer default expression) during PostgreSQL / Supabase migrations.
+
 ## [1.5.0] - 2026-08-19
 
 ### Added
