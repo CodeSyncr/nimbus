@@ -8,6 +8,7 @@ import (
 	"html"
 	"html/template"
 	stdlib "net/http"
+	"strings"
 
 	"github.com/CodeSyncr/nimbus/view"
 )
@@ -190,6 +191,80 @@ func (c *Context) String(code int, s string) {
 	c.Response.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	c.Response.WriteHeader(code)
 	c.Response.Write([]byte(s))
+}
+
+// Text sends a plain text response (alias for String).
+func (c *Context) Text(code int, s string) {
+	c.String(code, s)
+}
+
+// ValidationErrors writes a 422 Unprocessable Entity response containing validation errors.
+func (c *Context) ValidationErrors(errors any) error {
+	return c.JSON(stdlib.StatusUnprocessableEntity, map[string]any{
+		"message": "The given data was invalid.",
+		"errors":  errors,
+	})
+}
+
+// ── Server-Sent Events (SSE) ────────────────────────────────────
+
+// SSEWriter handles streaming Server-Sent Events to the client.
+type SSEWriter struct {
+	w       ResponseWriter
+	flusher stdlib.Flusher
+}
+
+// Event writes an SSE message with an optional event name and data payload.
+func (s *SSEWriter) Event(event string, data any) error {
+	var payload []byte
+	switch d := data.(type) {
+	case string:
+		payload = []byte(d)
+	case []byte:
+		payload = d
+	default:
+		b, err := json.Marshal(data)
+		if err != nil {
+			return err
+		}
+		payload = b
+	}
+
+	if event != "" {
+		if _, err := fmt.Fprintf(s.w, "event: %s\n", event); err != nil {
+			return err
+		}
+	}
+	lines := strings.Split(string(payload), "\n")
+	for _, line := range lines {
+		if _, err := fmt.Fprintf(s.w, "data: %s\n", line); err != nil {
+			return err
+		}
+	}
+	if _, err := fmt.Fprint(s.w, "\n\n"); err != nil {
+		return err
+	}
+	if s.flusher != nil {
+		s.flusher.Flush()
+	}
+	return nil
+}
+
+// SSEStream initiates a Server-Sent Events stream to the client.
+func (c *Context) SSEStream(streamHandler func(w *SSEWriter) error) error {
+	c.Response.Header().Set("Content-Type", "text/event-stream")
+	c.Response.Header().Set("Cache-Control", "no-cache")
+	c.Response.Header().Set("Connection", "keep-alive")
+	c.Response.Header().Set("X-Accel-Buffering", "no")
+	c.Response.WriteHeader(stdlib.StatusOK)
+
+	flusher, _ := c.Response.(stdlib.Flusher)
+	if flusher != nil {
+		flusher.Flush()
+	}
+
+	writer := &SSEWriter{w: c.Response, flusher: flusher}
+	return streamHandler(writer)
 }
 
 // Redirect sends a redirect response.

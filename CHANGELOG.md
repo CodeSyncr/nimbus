@@ -4,6 +4,32 @@ All notable changes to Nimbus are documented in this file.
 
 This project follows Semantic Versioning.
 
+## [1.4.0] - 2026-08-19
+
+### Added
+- **Warmup Lifecycle Phase & Application Modes (`nimbus.AppMode`, `nimbus.AppState`):**
+  - Added `app.WarmUp()` allowing deterministic assembly and inspection without starting HTTP listeners, queue consumers, or background schedulers.
+  - Added first-class application modes: `ModeRun` (default), `ModeWarmup`, `ModeTest`, and `ModeCli`.
+  - Added lifecycle events `events.AppWarmed` and `events.AppReady`.
+  - Thread-safe lifecycle state and mode management guarded by `sync.RWMutex`.
+- **Functional Constructor Options:**
+  - `nimbus.New(opts ...Option)` with options `WithMode`, `WithPort`, and `WithConfig` while maintaining 100% backward compatibility for `nimbus.New()`.
+- **Direct `net/http.Handler` Implementation:**
+  - `*App` now directly implements `ServeHTTP(w, r)`, allowing direct usage in `httptest.NewServer(app)` and custom HTTP handler composition.
+- **Extended Provider Lifecycle Hooks:**
+  - Added optional `HasStart` and `HasShutdown` hooks for service providers (skipped during warmup).
+- **First-Party Context Ergonomics & Encapsulation:**
+  - Added `ctx.BindQuery(&dest)` and `ctx.BindForm(&dest)` to `*nhttp.Context`.
+  - Added `ctx.SaveUploadedFile(file, dst)` to simplify saving multipart files to disk.
+  - Added `ctx.ValidationErrors(errors)` for standard 422 Unprocessable Entity responses.
+  - Added `ctx.SSEStream(fn func(w *SSEWriter) error)` with `SSEWriter.Event(event, data)`.
+- **Route Manifest & OpenAPI Tooling:**
+  - Added `app.DumpRoutes(outDir ...string) error` for programmatic client codegen during warmup.
+  - Added `app.DumpOpenAPI(outPath ...string) error` for programmatic OpenAPI 3.0 specification generation.
+- **Testing Subsystem (`nimbus/testing`):**
+  - Added `testing.New(app *nimbus.App)` with automatic warmup in `ModeTest`.
+  - Enhanced fluent assertion chaining (`AssertOK`, `AssertCreated`, `AssertStatus`, `AssertJSONPath`, `AssertHeader`, `AssertContains`).
+
 ## [1.3.0] - 2026-07-17
 
 ### Added

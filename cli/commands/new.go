@@ -452,7 +452,7 @@ func (c *NewCommand) Run(ctx *cli.Context) error {
 func goModContent(name, kit string) string {
 	mod := `module ` + name + `
 
-go 1.21
+go 1.26
 
 require (
 	github.com/CodeSyncr/nimbus ` + version.Nimbus + `
@@ -465,7 +465,7 @@ replace github.com/CodeSyncr/nimbus => ../nimbus
 	if kit != "" {
 		mod = `module ` + name + `
 
-go 1.21
+go 1.26
 
 require (
 	github.com/CodeSyncr/nimbus ` + version.Nimbus + `

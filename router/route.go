@@ -88,6 +88,16 @@ func (rt *Route) Returns(status int, v any) *Route {
 	return rt
 }
 
+// Response sets the expected successful response type (equivalent to Returns(200, v)).
+func (rt *Route) Response(v any) *Route {
+	rt.Meta.Response = v
+	if rt.Meta.Responses == nil {
+		rt.Meta.Responses = make(map[int]any)
+	}
+	rt.Meta.Responses[200] = v
+	return rt
+}
+
 // Secure marks the route as requiring authentication.
 func (rt *Route) Secure(schemes ...string) *Route {
 	if len(schemes) == 0 {

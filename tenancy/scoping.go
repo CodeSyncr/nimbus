@@ -64,6 +64,9 @@ func (m *Manager) scopeSchema(tenant *Tenant) (*lucid.DB, error) {
 	db := m.config.DefaultDB.Session(&lucid.Session{NewDB: true})
 	// Quoting identifier for double safety
 	db = db.Exec(fmt.Sprintf("SET search_path TO %q, public", schema))
+	if db.Error != nil {
+		return nil, db.Error
+	}
 	return db, nil
 }
 

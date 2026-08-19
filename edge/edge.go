@@ -1,42 +1,44 @@
-// Package edge provides an edge function runtime for Nimbus.
+// Package edge provides request-preprocessing middleware for Nimbus.
 //
-// Edge functions run lightweight request handlers at the network edge,
-// enabling ultra-low latency responses for tasks like A/B tests,
-// geolocation routing, auth token validation, response transforms,
-// and dynamic headers — without round-tripping to the origin server.
+// Despite the name, this runs inside your application (it is Nimbus
+// middleware), not on a CDN. It sits in front of your routes and can short-
+// circuit, redirect, rewrite, or decorate requests before they reach your
+// handlers — useful for geo routing, A/B tests, maintenance windows, security
+// headers, basic auth, CORS, simple rate limiting, and response caching. It
+// reads CDN geo headers (CF-IPCountry, X-Vercel-IP-Country, …) when a real CDN
+// sits in front of your app.
+//
+// For deploying to an actual edge/serverless runtime, see the `serverless`
+// package (AWS Lambda).
 //
 // Usage:
 //
-//	edgeRT := edge.New(edge.Config{
-//	    MaxExecTime:   50 * time.Millisecond,
-//	    MaxMemory:     4 * 1024 * 1024, // 4MB
-//	    AllowNetFetch: true,
-//	})
-//
-//	edgeRT.Handle("/geo", func(req *edge.Request) *edge.Response {
-//	    country := req.Header("CF-IPCountry")
-//	    if country == "DE" {
-//	        return edge.Redirect("/de" + req.Path, 302)
+//	rt := edge.New(edge.Config{MaxExecTime: 50 * time.Millisecond})
+//	rt.Handle("/geo", func(req *edge.Request) *edge.Response {
+//	    if req.Geo.Country == "DE" {
+//	        return edge.Redirect("/de"+req.Path, 302)
 //	    }
-//	    return edge.Next() // pass to origin
+//	    return edge.Next() // continue to the normal handler
 //	})
 //
-//	app.RegisterPlugin(edgeRT.Plugin())
+//	app.Use(rt.Plugin())            // registers the middleware + /_edge/metrics
+//	// or, without the plugin:
+//	// app.Router.Use(rt.Middleware())
 package edge
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
-	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/CodeSyncr/nimbus"
 	nhttp "github.com/CodeSyncr/nimbus/http"
 	"github.com/CodeSyncr/nimbus/router"
 )
@@ -45,42 +47,41 @@ import (
 // Configuration
 // ---------------------------------------------------------------------------
 
-// Config for the edge function runtime.
+// Config for the edge middleware runtime.
 type Config struct {
-	// MaxExecTime per function invocation (default: 50ms).
+	// MaxExecTime bounds how long the runtime waits for a handler (default 50ms).
+	// A timeout-scoped context is passed to the handler via req.Context(); note
+	// that Go cannot forcibly stop a goroutine, so a handler that ignores its
+	// context keeps running in the background after a timeout.
 	MaxExecTime time.Duration
 
-	// MaxMemory per function in bytes (default: 4MB).
-	MaxMemory int64
+	// MaxBodyBytes caps how many request-body bytes the runtime reads and
+	// exposes on req.Body (default 4MB). The full body is still forwarded to
+	// downstream handlers.
+	MaxBodyBytes int64
 
-	// AllowNetFetch enables outbound HTTP from edge functions.
-	AllowNetFetch bool
-
-	// Logger for edge function logs.
-	Logger *log.Logger
-
-	// CacheDefault TTL for edge.Cache operations (default: 60s).
+	// CacheDefault TTL for route caching when none is given (default 60s).
 	CacheDefault time.Duration
 
-	// Fallback when an edge function panics or times out.
+	// Fallback behavior when a handler panics or times out (default FallbackNext).
 	Fallback FallbackMode
 
-	// OnError callback for edge function errors.
+	// OnError is called for handler panics and timeouts.
 	OnError func(path string, err error)
 
-	// Prefix for edge routes (default: "").
+	// Prefix is prepended to every registered edge path (default "").
 	Prefix string
 }
 
-// FallbackMode determines behavior on edge function failure.
+// FallbackMode determines behavior on handler failure.
 type FallbackMode int
 
 const (
-	// FallbackNext passes the request to the origin server.
+	// FallbackNext passes the request through to the normal handler.
 	FallbackNext FallbackMode = iota
 	// FallbackError returns a 502 Bad Gateway.
 	FallbackError
-	// FallbackCached returns the last cached response if available.
+	// FallbackCached returns the last successful response for the route, if any.
 	FallbackCached
 )
 
@@ -88,7 +89,7 @@ const (
 // Request / Response types
 // ---------------------------------------------------------------------------
 
-// Request is a lightweight representation of an HTTP request for edge functions.
+// Request is a lightweight view of an HTTP request for edge handlers.
 type Request struct {
 	Method    string            `json:"method"`
 	Path      string            `json:"path"`
@@ -101,7 +102,7 @@ type Request struct {
 	ctx       context.Context
 }
 
-// GeoInfo provides geographic information about the request.
+// GeoInfo provides geographic information derived from CDN headers.
 type GeoInfo struct {
 	Country    string  `json:"country"`
 	Region     string  `json:"region"`
@@ -113,27 +114,24 @@ type GeoInfo struct {
 	Datacenter string  `json:"datacenter"`
 }
 
-// Header returns a request header value.
-func (r *Request) Header(key string) string {
-	return r.Headers[http.CanonicalHeaderKey(key)]
-}
+// Header returns a request header value (canonicalized).
+func (r *Request) Header(key string) string { return r.Headers[http.CanonicalHeaderKey(key)] }
 
 // QueryParam returns a query parameter value.
-func (r *Request) QueryParam(key string) string {
-	return r.Query[key]
-}
+func (r *Request) QueryParam(key string) string { return r.Query[key] }
 
 // ParseJSON decodes the request body into v.
-func (r *Request) ParseJSON(v any) error {
-	return json.Unmarshal(r.Body, v)
-}
+func (r *Request) ParseJSON(v any) error { return json.Unmarshal(r.Body, v) }
 
-// Context returns the request context.
+// Context returns the request context (timeout-scoped to MaxExecTime).
 func (r *Request) Context() context.Context {
+	if r.ctx == nil {
+		return context.Background()
+	}
 	return r.ctx
 }
 
-// Response is the edge function response.
+// Response is an edge handler's response.
 type Response struct {
 	Status  int               `json:"status"`
 	Headers map[string]string `json:"headers"`
@@ -141,12 +139,12 @@ type Response struct {
 	BodyStr string            `json:"-"`
 
 	// Internal flags.
-	passThru bool   // pass to origin
-	rewrite  string // rewrite URL
+	passThru bool   // pass to the normal handler
+	rewrite  string // rewrite URL path
 	cached   bool
 }
 
-// IsNext returns true if the request should be passed to the origin.
+// IsNext reports whether the request should continue to the normal handler.
 func (r *Response) IsNext() bool { return r.passThru }
 
 // SetHeader sets a response header.
@@ -158,80 +156,70 @@ func (r *Response) SetHeader(key, value string) *Response {
 	return r
 }
 
+// body returns the effective response body regardless of which field was set.
+func (r *Response) body() []byte {
+	if len(r.Body) > 0 {
+		return r.Body
+	}
+	if r.BodyStr != "" {
+		return []byte(r.BodyStr)
+	}
+	return nil
+}
+
 // ---------------------------------------------------------------------------
 // Response Constructors
 // ---------------------------------------------------------------------------
 
-// Next signals that the request should pass through to the origin server.
-func Next() *Response {
-	return &Response{passThru: true}
-}
+// Next continues to the normal handler.
+func Next() *Response { return &Response{passThru: true} }
 
-// Respond creates a response with the given status and body.
+// Respond creates a plain-text response.
 func Respond(status int, body string) *Response {
-	return &Response{
-		Status:  status,
-		BodyStr: body,
-		Headers: map[string]string{"Content-Type": "text/plain; charset=utf-8"},
-	}
+	return &Response{Status: status, BodyStr: body,
+		Headers: map[string]string{"Content-Type": "text/plain; charset=utf-8"}}
 }
 
 // JSON creates a JSON response.
 func JSON(status int, data any) *Response {
 	body, _ := json.Marshal(data)
-	return &Response{
-		Status:  status,
-		Body:    body,
-		Headers: map[string]string{"Content-Type": "application/json"},
-	}
+	return &Response{Status: status, Body: body,
+		Headers: map[string]string{"Content-Type": "application/json"}}
 }
 
 // HTML creates an HTML response.
 func HTML(status int, html string) *Response {
-	return &Response{
-		Status:  status,
-		BodyStr: html,
-		Headers: map[string]string{"Content-Type": "text/html; charset=utf-8"},
-	}
+	return &Response{Status: status, BodyStr: html,
+		Headers: map[string]string{"Content-Type": "text/html; charset=utf-8"}}
 }
 
 // Redirect creates a redirect response.
 func Redirect(url string, status int) *Response {
-	return &Response{
-		Status:  status,
-		Headers: map[string]string{"Location": url},
-	}
+	return &Response{Status: status, Headers: map[string]string{"Location": url}}
 }
 
-// Rewrite rewrites the request URL without a redirect.
-func Rewrite(url string) *Response {
-	return &Response{passThru: true, rewrite: url}
-}
+// Rewrite rewrites the request URL path without a client-visible redirect.
+func Rewrite(url string) *Response { return &Response{passThru: true, rewrite: url} }
 
-// ---------------------------------------------------------------------------
-// Edge Function Handler
-// ---------------------------------------------------------------------------
-
-// HandlerFunc is the signature for edge functions.
+// HandlerFunc is the signature for edge handlers.
 type HandlerFunc func(req *Request) *Response
 
 // ---------------------------------------------------------------------------
-// Edge Runtime
+// Runtime
 // ---------------------------------------------------------------------------
 
-// Runtime is the edge function runtime.
+// Runtime holds registered edge handlers and metrics.
 type Runtime struct {
 	config   Config
 	handlers map[string]edgeRoute
 	cache    *Cache
 	mu       sync.RWMutex
 
-	// Metrics
 	totalInvocations uint64
 	totalErrors      uint64
 	totalCacheHits   uint64
 	totalTimeouts    uint64
-	avgLatencyNs     int64
+	totalLatencyNs   uint64
 }
 
 type edgeRoute struct {
@@ -242,12 +230,19 @@ type edgeRoute struct {
 }
 
 type routeCache struct {
-	enabled bool
-	ttl     time.Duration
-	key     func(req *Request) string
+	ttl time.Duration
+	key func(req *Request) string
 }
 
-// New creates a new edge function runtime.
+// cachedResponse is the on-cache representation (survives round-tripping,
+// unlike a *Response whose BodyStr is json:"-").
+type cachedResponse struct {
+	Status  int               `json:"s"`
+	Headers map[string]string `json:"h"`
+	Body    []byte            `json:"b"`
+}
+
+// New creates an edge middleware runtime.
 func New(cfgs ...Config) *Runtime {
 	cfg := Config{}
 	if len(cfgs) > 0 {
@@ -256,13 +251,12 @@ func New(cfgs ...Config) *Runtime {
 	if cfg.MaxExecTime == 0 {
 		cfg.MaxExecTime = 50 * time.Millisecond
 	}
-	if cfg.MaxMemory == 0 {
-		cfg.MaxMemory = 4 * 1024 * 1024
+	if cfg.MaxBodyBytes == 0 {
+		cfg.MaxBodyBytes = 4 * 1024 * 1024
 	}
 	if cfg.CacheDefault == 0 {
 		cfg.CacheDefault = 60 * time.Second
 	}
-
 	return &Runtime{
 		config:   cfg,
 		handlers: make(map[string]edgeRoute),
@@ -270,26 +264,22 @@ func New(cfgs ...Config) *Runtime {
 	}
 }
 
-// Handle registers an edge function for a path.
+// Handle registers an edge handler for a path (supports a trailing "*" wildcard).
 func (rt *Runtime) Handle(path string, handler HandlerFunc) *edgeRouteBuilder {
 	fullPath := rt.config.Prefix + path
-	route := edgeRoute{
-		pattern: fullPath,
-		handler: handler,
-	}
 	rt.mu.Lock()
-	rt.handlers[fullPath] = route
+	rt.handlers[fullPath] = edgeRoute{pattern: fullPath, handler: handler}
 	rt.mu.Unlock()
 	return &edgeRouteBuilder{rt: rt, path: fullPath}
 }
 
-// edgeRouteBuilder provides a fluent API for edge route configuration.
+// edgeRouteBuilder is a fluent configurator for an edge route.
 type edgeRouteBuilder struct {
 	rt   *Runtime
 	path string
 }
 
-// Methods restricts the edge function to specific HTTP methods.
+// Methods restricts the handler to specific HTTP methods.
 func (b *edgeRouteBuilder) Methods(methods ...string) *edgeRouteBuilder {
 	b.rt.mu.Lock()
 	defer b.rt.mu.Unlock()
@@ -299,15 +289,16 @@ func (b *edgeRouteBuilder) Methods(methods ...string) *edgeRouteBuilder {
 	return b
 }
 
-// WithCache enables response caching for this edge function.
+// WithCache caches the handler's response for ttl (0 → CacheDefault). An
+// optional key function customizes the cache key (default "method:path").
 func (b *edgeRouteBuilder) WithCache(ttl time.Duration, keyFn ...func(req *Request) string) *edgeRouteBuilder {
 	b.rt.mu.Lock()
 	defer b.rt.mu.Unlock()
-	r := b.rt.handlers[b.path]
-	r.cache = &routeCache{
-		enabled: true,
-		ttl:     ttl,
+	if ttl == 0 {
+		ttl = b.rt.config.CacheDefault
 	}
+	r := b.rt.handlers[b.path]
+	r.cache = &routeCache{ttl: ttl}
 	if len(keyFn) > 0 {
 		r.cache.key = keyFn[0]
 	}
@@ -315,90 +306,82 @@ func (b *edgeRouteBuilder) WithCache(ttl time.Duration, keyFn ...func(req *Reque
 	return b
 }
 
-// Middleware returns a Nimbus middleware that runs edge functions.
+// Middleware returns the Nimbus middleware that runs matching edge handlers.
 func (rt *Runtime) Middleware() router.Middleware {
 	return func(next router.HandlerFunc) router.HandlerFunc {
 		return func(c *nhttp.Context) error {
-			path := c.Request.URL.Path
-
 			rt.mu.RLock()
-			route, found := rt.findRoute(path)
+			route, found := rt.findRoute(c.Request.URL.Path)
 			rt.mu.RUnlock()
-
-			if !found {
+			if !found || !methodAllowed(route, c.Request.Method) {
 				return next(c)
 			}
 
-			// Method check.
-			if len(route.methods) > 0 {
-				methodAllowed := false
-				for _, m := range route.methods {
-					if strings.EqualFold(m, c.Request.Method) {
-						methodAllowed = true
-						break
-					}
-				}
-				if !methodAllowed {
-					return next(c)
-				}
-			}
-
-			// Check cache.
-			if route.cache != nil && route.cache.enabled {
-				cacheKey := rt.getCacheKey(route, rt.buildRequest(c))
-				if cached, ok := rt.cache.Get(cacheKey); ok {
-					atomic.AddUint64(&rt.totalCacheHits, 1)
-					var resp Response
-					if json.Unmarshal(cached, &resp) == nil {
-						return rt.writeResponse(c, &resp)
-					}
-				}
-			}
-
-			// Execute edge function.
+			// Build the request view ONCE; this restores c.Request.Body so both
+			// the edge handler and any downstream handler can read it.
 			req := rt.buildRequest(c)
+
+			// Serve from cache if present.
+			if route.cache != nil {
+				if data, ok := rt.cache.Get(rt.cacheKey(route, req)); ok {
+					atomic.AddUint64(&rt.totalCacheHits, 1)
+					var cr cachedResponse
+					if json.Unmarshal(data, &cr) == nil {
+						return writeCached(c, cr)
+					}
+				}
+			}
+
 			resp := rt.execute(route, req)
-
-			if resp == nil {
-				return next(c)
-			}
-
-			// Pass through to origin.
-			if resp.IsNext() {
-				if resp.rewrite != "" {
-					c.Request.URL.Path = resp.rewrite
-				}
-				// Apply any headers.
-				for k, v := range resp.Headers {
-					c.Response.Header().Set(k, v)
+			if resp == nil || resp.IsNext() {
+				if resp != nil {
+					if resp.rewrite != "" {
+						c.Request.URL.Path = resp.rewrite
+					}
+					for k, v := range resp.Headers {
+						c.Response.Header().Set(k, v)
+					}
 				}
 				return next(c)
 			}
 
-			// Cache the response.
-			if route.cache != nil && route.cache.enabled {
-				cacheKey := rt.getCacheKey(route, req)
-				data, _ := json.Marshal(resp)
-				rt.cache.Set(cacheKey, data, route.cache.ttl)
+			// Cache and/or record as the fallback for this route.
+			if route.cache != nil {
+				cr := cachedResponse{Status: statusOr(resp.Status, 200), Headers: resp.Headers, Body: resp.body()}
+				if data, err := json.Marshal(cr); err == nil {
+					rt.cache.Set(rt.cacheKey(route, req), data, route.cache.ttl)
+				}
 			}
-
+			if rt.config.Fallback == FallbackCached {
+				cr := cachedResponse{Status: statusOr(resp.Status, 200), Headers: resp.Headers, Body: resp.body()}
+				if data, err := json.Marshal(cr); err == nil {
+					rt.cache.Set("fallback:"+route.pattern, data, time.Hour)
+				}
+			}
 			return rt.writeResponse(c, resp)
 		}
 	}
 }
 
+func methodAllowed(route edgeRoute, method string) bool {
+	if len(route.methods) == 0 {
+		return true
+	}
+	for _, m := range route.methods {
+		if strings.EqualFold(m, method) {
+			return true
+		}
+	}
+	return false
+}
+
 func (rt *Runtime) findRoute(path string) (edgeRoute, bool) {
-	// Exact match.
 	if route, ok := rt.handlers[path]; ok {
 		return route, true
 	}
-	// Prefix match with wildcard.
 	for pattern, route := range rt.handlers {
-		if strings.HasSuffix(pattern, "*") {
-			prefix := strings.TrimSuffix(pattern, "*")
-			if strings.HasPrefix(path, prefix) {
-				return route, true
-			}
+		if strings.HasSuffix(pattern, "*") && strings.HasPrefix(path, strings.TrimSuffix(pattern, "*")) {
+			return route, true
 		}
 	}
 	return edgeRoute{}, false
@@ -414,28 +397,24 @@ func (rt *Runtime) buildRequest(c *nhttp.Context) *Request {
 		StartTime: time.Now(),
 		ctx:       c.Request.Context(),
 	}
-
-	// Query params.
 	for k, v := range c.Request.URL.Query() {
 		if len(v) > 0 {
 			req.Query[k] = v[0]
 		}
 	}
-
-	// Headers.
 	for k, v := range c.Request.Header {
 		if len(v) > 0 {
 			req.Headers[k] = v[0]
 		}
 	}
-
-	// Body (limit to MaxMemory).
+	// Read a bounded copy of the body and RESTORE it so downstream handlers
+	// (and cache re-checks) still see the full body.
 	if c.Request.Body != nil {
-		body, _ := io.ReadAll(io.LimitReader(c.Request.Body, rt.config.MaxMemory))
+		body, _ := io.ReadAll(io.LimitReader(c.Request.Body, rt.config.MaxBodyBytes))
+		_ = c.Request.Body.Close()
+		c.Request.Body = io.NopCloser(bytes.NewReader(body))
 		req.Body = body
 	}
-
-	// Geo info from CDN headers.
 	req.Geo = GeoInfo{
 		Country:    c.Request.Header.Get("CF-IPCountry"),
 		City:       c.Request.Header.Get("CF-IPCity"),
@@ -445,77 +424,63 @@ func (rt *Runtime) buildRequest(c *nhttp.Context) *Request {
 		Timezone:   c.Request.Header.Get("CF-Timezone"),
 		Datacenter: c.Request.Header.Get("CF-Ray"),
 	}
-
-	// Also check X-Vercel, Fastly, and AWS CloudFront headers.
 	if req.Geo.Country == "" {
 		req.Geo.Country = c.Request.Header.Get("X-Vercel-IP-Country")
 	}
 	if req.Geo.City == "" {
 		req.Geo.City = c.Request.Header.Get("X-Vercel-IP-City")
 	}
-
 	return req
 }
 
 func (rt *Runtime) execute(route edgeRoute, req *Request) *Response {
 	atomic.AddUint64(&rt.totalInvocations, 1)
 
-	type result struct {
-		resp *Response
-		err  error
-	}
+	// Give the handler a timeout-scoped context it can honor.
+	ctx, cancel := context.WithTimeout(req.Context(), rt.config.MaxExecTime)
+	defer cancel()
+	req.ctx = ctx
 
-	ch := make(chan result, 1)
-
+	ch := make(chan *Response, 1)
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
 				atomic.AddUint64(&rt.totalErrors, 1)
 				if rt.config.OnError != nil {
-					rt.config.OnError(route.pattern, fmt.Errorf("edge function panic: %v", r))
+					rt.config.OnError(route.pattern, fmt.Errorf("edge handler panic: %v", r))
 				}
-				ch <- result{resp: nil, err: fmt.Errorf("panic: %v", r)}
+				ch <- nil
 			}
 		}()
-
-		// Memory tracking.
-		var memBefore runtime.MemStats
-		runtime.ReadMemStats(&memBefore)
-
-		resp := route.handler(req)
-
-		ch <- result{resp: resp}
+		ch <- route.handler(req)
 	}()
 
 	select {
-	case r := <-ch:
-		latency := time.Since(req.StartTime).Nanoseconds()
-		atomic.StoreInt64(&rt.avgLatencyNs, latency)
-
-		if r.err != nil {
+	case resp := <-ch:
+		atomic.AddUint64(&rt.totalLatencyNs, uint64(time.Since(req.StartTime).Nanoseconds()))
+		if resp == nil {
 			return rt.fallbackResponse(route.pattern)
 		}
-		return r.resp
-
-	case <-time.After(rt.config.MaxExecTime):
+		return resp
+	case <-ctx.Done():
 		atomic.AddUint64(&rt.totalTimeouts, 1)
 		if rt.config.OnError != nil {
-			rt.config.OnError(route.pattern, fmt.Errorf("edge function timed out after %s", rt.config.MaxExecTime))
+			rt.config.OnError(route.pattern, fmt.Errorf("edge handler timed out after %s", rt.config.MaxExecTime))
 		}
 		return rt.fallbackResponse(route.pattern)
 	}
 }
 
-func (rt *Runtime) fallbackResponse(path string) *Response {
+func (rt *Runtime) fallbackResponse(pattern string) *Response {
 	switch rt.config.Fallback {
 	case FallbackError:
-		return Respond(502, "Edge Function Error")
+		return Respond(502, "Edge handler error")
 	case FallbackCached:
-		if cached, ok := rt.cache.Get("resp:" + path); ok {
-			var resp Response
-			if json.Unmarshal(cached, &resp) == nil {
-				resp.SetHeader("X-Edge-Fallback", "cached")
-				return &resp
+		if data, ok := rt.cache.Get("fallback:" + pattern); ok {
+			var cr cachedResponse
+			if json.Unmarshal(data, &cr) == nil {
+				resp := &Response{Status: cr.Status, Headers: cr.Headers, Body: cr.Body}
+				return resp.SetHeader("X-Edge-Fallback", "cached")
 			}
 		}
 		return Next()
@@ -528,77 +493,98 @@ func (rt *Runtime) writeResponse(c *nhttp.Context, resp *Response) error {
 	for k, v := range resp.Headers {
 		c.Response.Header().Set(k, v)
 	}
-	c.Response.Header().Set("X-Edge-Function", "true")
-
-	status := resp.Status
-	if status == 0 {
-		status = 200
-	}
-
-	c.Response.WriteHeader(status)
-
-	if len(resp.Body) > 0 {
-		_, err := c.Response.Write(resp.Body)
-		return err
-	}
-	if resp.BodyStr != "" {
-		_, err := c.Response.Write([]byte(resp.BodyStr))
+	c.Response.Header().Set("X-Edge-Handler", "true")
+	c.Response.WriteHeader(statusOr(resp.Status, 200))
+	if b := resp.body(); len(b) > 0 {
+		_, err := c.Response.Write(b)
 		return err
 	}
 	return nil
 }
 
-func (rt *Runtime) getCacheKey(route edgeRoute, req *Request) string {
+func writeCached(c *nhttp.Context, cr cachedResponse) error {
+	for k, v := range cr.Headers {
+		c.Response.Header().Set(k, v)
+	}
+	c.Response.Header().Set("X-Edge-Cache", "HIT")
+	c.Response.WriteHeader(statusOr(cr.Status, 200))
+	if len(cr.Body) > 0 {
+		_, err := c.Response.Write(cr.Body)
+		return err
+	}
+	return nil
+}
+
+func (rt *Runtime) cacheKey(route edgeRoute, req *Request) string {
 	if route.cache != nil && route.cache.key != nil {
 		return route.cache.key(req)
 	}
 	return req.Method + ":" + req.Path
 }
 
+func statusOr(status, def int) int {
+	if status == 0 {
+		return def
+	}
+	return status
+}
+
 // ---------------------------------------------------------------------------
 // Metrics
 // ---------------------------------------------------------------------------
 
-// Metrics returns runtime metrics.
+// Metrics returns a snapshot of runtime counters.
 func (rt *Runtime) Metrics() map[string]any {
+	inv := atomic.LoadUint64(&rt.totalInvocations)
+	var avg uint64
+	if inv > 0 {
+		avg = atomic.LoadUint64(&rt.totalLatencyNs) / inv
+	}
+	rt.mu.RLock()
+	routes := len(rt.handlers)
+	rt.mu.RUnlock()
 	return map[string]any{
-		"total_invocations": atomic.LoadUint64(&rt.totalInvocations),
+		"total_invocations": inv,
 		"total_errors":      atomic.LoadUint64(&rt.totalErrors),
 		"total_cache_hits":  atomic.LoadUint64(&rt.totalCacheHits),
 		"total_timeouts":    atomic.LoadUint64(&rt.totalTimeouts),
-		"avg_latency_ns":    atomic.LoadInt64(&rt.avgLatencyNs),
-		"routes":            len(rt.handlers),
+		"avg_latency_ns":    avg,
+		"routes":            routes,
 	}
 }
 
 // ---------------------------------------------------------------------------
-// Plugin Integration
+// Plugin integration
 // ---------------------------------------------------------------------------
 
-// EdgePlugin wraps the runtime as a Nimbus plugin.
+var (
+	_ nimbus.Plugin    = (*EdgePlugin)(nil)
+	_ nimbus.HasRoutes = (*EdgePlugin)(nil)
+)
+
+// EdgePlugin wires the runtime into a Nimbus app: it applies the middleware and
+// mounts a /_edge/metrics endpoint.
 type EdgePlugin struct {
 	runtime *Runtime
 }
 
-// Plugin returns the edge runtime as a Nimbus plugin.
-func (rt *Runtime) Plugin() *EdgePlugin {
-	return &EdgePlugin{runtime: rt}
-}
+// Plugin returns the runtime as a Nimbus plugin. Register with app.Use(rt.Plugin()).
+func (rt *Runtime) Plugin() *EdgePlugin { return &EdgePlugin{runtime: rt} }
 
 func (ep *EdgePlugin) Name() string    { return "edge" }
 func (ep *EdgePlugin) Version() string { return "1.0.0" }
 
-func (ep *EdgePlugin) Register(app interface{}) error { return nil }
-func (ep *EdgePlugin) Boot(app interface{}) error     { return nil }
+// Register applies the edge middleware to the application router.
+func (ep *EdgePlugin) Register(app *nimbus.App) error {
+	app.Router.Use(ep.runtime.Middleware())
+	return nil
+}
 
-// RegisterRoutes adds the edge metrics endpoint.
+func (ep *EdgePlugin) Boot(*nimbus.App) error { return nil }
+
+// RegisterRoutes mounts the metrics endpoint.
 func (ep *EdgePlugin) RegisterRoutes(r *router.Router) {
 	r.Get("/_edge/metrics", func(c *nhttp.Context) error {
 		return c.JSON(200, ep.runtime.Metrics())
 	})
-}
-
-// Middleware returns the edge middleware for use as HasMiddleware plugin.
-func (ep *EdgePlugin) Middleware() []router.Middleware {
-	return []router.Middleware{ep.runtime.Middleware()}
 }

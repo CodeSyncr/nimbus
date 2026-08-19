@@ -24,6 +24,15 @@ type TestClient struct {
 	cookies []*http.Cookie
 }
 
+// New returns an HTTP test client bound to the given Nimbus App.
+// It automatically warms up the application if not already warmed.
+func New(app *nimbus.App) *TestClient {
+	if !app.IsWarmedUp() {
+		_ = app.WarmUp()
+	}
+	return NewTestClient(app.Router)
+}
+
 // NewTestClient returns a client that sends requests to the given router.
 func NewTestClient(r *router.Router) *TestClient {
 	return &TestClient{

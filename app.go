@@ -2,6 +2,7 @@ package nimbus
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net"
@@ -9,9 +10,11 @@ import (
 	_ "net/http/pprof"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime/debug"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -23,6 +26,7 @@ import (
 	"github.com/CodeSyncr/nimbus/health"
 	nhttp "github.com/CodeSyncr/nimbus/http"
 	"github.com/CodeSyncr/nimbus/locale"
+	"github.com/CodeSyncr/nimbus/openapi"
 	"github.com/CodeSyncr/nimbus/router"
 	"github.com/CodeSyncr/nimbus/schedule"
 )
@@ -32,6 +36,66 @@ import (
 type Provider interface {
 	Register(app *App) error
 	Boot(app *App) error
+}
+
+// HasStart can be optionally implemented by a Provider or Plugin to execute logic
+// right before the HTTP server begins serving requests (skipped in ModeWarmup).
+type HasStart interface {
+	Start(app *App) error
+}
+
+// AppMode represents the operational mode of the application (AdonisJS-inspired).
+type AppMode string
+
+const (
+	ModeRun    AppMode = "run"    // Default: full server execution
+	ModeWarmup AppMode = "warmup" // Assembly & inspection only (no server, workers, or listeners)
+	ModeTest   AppMode = "test"   // Testing environment
+	ModeCli    AppMode = "cli"    // CLI command execution
+)
+
+// AppState represents the lifecycle stage of the application.
+type AppState string
+
+const (
+	StateInitiated   AppState = "initiated"
+	StateBooting     AppState = "booting"
+	StateBooted      AppState = "booted"
+	StateWarming     AppState = "warming"
+	StateWarmed      AppState = "warmed"
+	StateStarting    AppState = "starting"
+	StateReady       AppState = "ready"
+	StateTerminating AppState = "terminating"
+	StateTerminated  AppState = "terminated"
+)
+
+// Option is a functional option for configuring a Nimbus App.
+type Option func(*App)
+
+// WithMode sets the initial operational mode of the App.
+func WithMode(m AppMode) Option {
+	return func(a *App) {
+		a.mode = m
+	}
+}
+
+// WithConfig overrides the configuration used by the App.
+func WithConfig(cfg *config.Config) Option {
+	return func(a *App) {
+		a.Config = cfg
+	}
+}
+
+// WithPort overrides the port that the App listens on.
+func WithPort(port string) Option {
+	return func(a *App) {
+		if a.Config != nil {
+			a.Config.App.Port = port
+		}
+		if a.Server != nil {
+			a.Server.Addr = ":" + port
+		}
+	}
 }
 
 // App is the core Nimbus application (AdonisJS-style).
@@ -49,13 +113,20 @@ type App struct {
 	namedMiddleware map[string]router.Middleware
 	pluginConfigs   map[string]map[string]any
 
+	mu         sync.RWMutex
+	mode       AppMode
+	state      AppState
+	isBooted   bool
+	isWarmedUp bool
+
 	bootHooks     []func(*App)
+	warmHooks     []func(*App)
 	startHooks    []func(*App)
 	shutdownHooks []func(*App)
 }
 
-// New creates a new Nimbus application with default config.
-func New() *App {
+// New creates a new Nimbus application with default config and optional functional options.
+func New(opts ...Option) *App {
 	cfg := config.Load()
 	locale.BootFromEnv()
 	r := router.New()
@@ -70,6 +141,8 @@ func New() *App {
 		pluginIndex:     make(map[string]Plugin),
 		namedMiddleware: make(map[string]router.Middleware),
 		pluginConfigs:   make(map[string]map[string]any),
+		mode:            ModeRun,
+		state:           StateInitiated,
 	}
 	app.Router.Container = app.Container
 	app.Server = &stdhttp.Server{
@@ -82,6 +155,11 @@ func New() *App {
 		WriteTimeout:      cfg.App.WriteTimeout,
 		IdleTimeout:       cfg.App.IdleTimeout,
 		MaxHeaderBytes:    cfg.App.MaxHeaderBytes,
+	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(app)
+		}
 	}
 	app.registerDefaultHealthRoutes()
 	return app
@@ -163,12 +241,89 @@ func (a *App) PluginConfig(name string) map[string]any {
 }
 
 // ---------------------------------------------------------------------------
+// Mode & State Accessors
+// ---------------------------------------------------------------------------
+
+// GetMode returns the current application operational mode. Defaults to ModeRun.
+func (a *App) GetMode() AppMode {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if a.mode == "" {
+		return ModeRun
+	}
+	return a.mode
+}
+
+// Mode returns the current application operational mode (shorthand for GetMode).
+func (a *App) Mode() AppMode {
+	return a.GetMode()
+}
+
+// SetMode configures the application operational mode (e.g. ModeRun, ModeWarmup, ModeTest, ModeCli).
+func (a *App) SetMode(m AppMode) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.mode = m
+}
+
+// State returns the current lifecycle state of the application.
+func (a *App) State() AppState {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if a.state == "" {
+		return StateInitiated
+	}
+	return a.state
+}
+
+// IsWarmedUp returns true if the application has completed its warmup phase.
+func (a *App) IsWarmedUp() bool {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.isWarmedUp
+}
+
+// IsBooted returns true if the application has completed its boot phase.
+func (a *App) IsBooted() bool {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.isBooted
+}
+
+// IsWarmup returns true if the application mode is ModeWarmup.
+func (a *App) IsWarmup() bool {
+	return a.GetMode() == ModeWarmup
+}
+
+// IsRun returns true if the application mode is ModeRun.
+func (a *App) IsRun() bool {
+	return a.GetMode() == ModeRun
+}
+
+// IsTest returns true if the application mode is ModeTest.
+func (a *App) IsTest() bool {
+	return a.GetMode() == ModeTest
+}
+
+// IsCli returns true if the application mode is ModeCli.
+func (a *App) IsCli() bool {
+	return a.GetMode() == ModeCli
+}
+
+// ServeHTTP implements net/http.Handler directly on *App, dispatching
+// requests to the underlying router. This allows testing with httptest or
+// embedding the Nimbus App directly as an http.Handler.
+func (a *App) ServeHTTP(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	a.Router.ServeHTTP(w, r)
+}
+
+// ---------------------------------------------------------------------------
 // Lifecycle Hooks
 // ---------------------------------------------------------------------------
 
 // OnBoot registers a callback that runs after providers/plugins have been
-// booted and plugin routes/middleware have been applied, but before the
-// server starts listening.
+// booted and plugin routes/middleware have been applied, but before warmup
+// completes and before the server starts listening.
 func (a *App) OnBoot(fn func(*App)) {
 	if fn == nil {
 		return
@@ -176,8 +331,17 @@ func (a *App) OnBoot(fn func(*App)) {
 	a.bootHooks = append(a.bootHooks, fn)
 }
 
+// OnWarmup registers a callback that runs during the WarmUp phase, after
+// Boot has completed but before the HTTP server starts listening.
+func (a *App) OnWarmup(fn func(*App)) {
+	if fn == nil {
+		return
+	}
+	a.warmHooks = append(a.warmHooks, fn)
+}
+
 // OnStart registers a callback that runs right before the HTTP server begins
-// serving requests (after Boot and listen/port selection).
+// serving requests (after Boot/WarmUp and listen/port selection).
 func (a *App) OnStart(fn func(*App)) {
 	if fn == nil {
 		return
@@ -196,7 +360,7 @@ func (a *App) shutdownTimeout() time.Duration {
 }
 
 // OnShutdown registers a callback that runs during graceful shutdown, before
-// plugin HasShutdown hooks are executed.
+// plugin and provider HasShutdown hooks are executed.
 func (a *App) OnShutdown(fn func(*App)) {
 	if fn == nil {
 		return
@@ -216,7 +380,16 @@ func (a *App) OnShutdown(fn func(*App)) {
 //  4. Provider Boot (all)
 //  5. Plugin Boot (all)
 //  6. Plugin capabilities applied (routes, middleware, views)
+//  7. App-level boot hooks
 func (a *App) Boot() error {
+	a.mu.Lock()
+	if a.isBooted {
+		a.mu.Unlock()
+		return nil
+	}
+	a.state = StateBooting
+	a.mu.Unlock()
+
 	// Pass 0 — Fail-closed config validation. Refuse to boot in production
 	// with a missing/weak APP_KEY; warn (don't block) in development.
 	if a.Config != nil {
@@ -320,22 +493,141 @@ func (a *App) Boot() error {
 		fn(a)
 	}
 
+	a.mu.Lock()
+	a.isBooted = true
+	a.state = StateBooted
+	a.mu.Unlock()
 	a.Events.Dispatch(events.AppBooted, nil)
 	return nil
 }
 
-// Shutdown calls Shutdown on every plugin that implements HasShutdown.
+// ---------------------------------------------------------------------------
+// WarmUp & Tooling
+// ---------------------------------------------------------------------------
+
+// WarmUp executes provider boot, plugin assembly, and warmup hooks without
+// starting network listeners, queue consumers, or background schedulers.
+// It allows full application inspection (e.g. reading routes for codegen,
+// CLI commands, or running unit tests). Calling WarmUp on an already warmed
+// app is a safe no-op.
+func (a *App) WarmUp() error {
+	a.mu.Lock()
+	if a.isWarmedUp {
+		a.mu.Unlock()
+		return nil
+	}
+	a.mu.Unlock()
+
+	if !a.IsBooted() {
+		if err := a.Boot(); err != nil {
+			return err
+		}
+	}
+
+	a.mu.Lock()
+	a.state = StateWarming
+	a.mu.Unlock()
+
+	for _, fn := range a.warmHooks {
+		fn(a)
+	}
+
+	a.mu.Lock()
+	a.isWarmedUp = true
+	a.state = StateWarmed
+	a.mu.Unlock()
+
+	a.Events.Dispatch(events.AppWarmed, a)
+	return nil
+}
+
+// DumpRoutes exports the application router manifest to the specified output
+// directory (defaults to ".nimbus-client"). It automatically warms up the app.
+func (a *App) DumpRoutes(outDir ...string) error {
+	if !a.IsWarmedUp() {
+		if err := a.WarmUp(); err != nil {
+			return err
+		}
+	}
+	target := ".nimbus-client"
+	if len(outDir) > 0 && outDir[0] != "" {
+		target = outDir[0]
+	}
+	return router.WriteManifest(a.Router, target)
+}
+
+// DumpOpenAPI generates and writes the OpenAPI 3.0 specification to the given
+// output file or directory (defaults to "openapi.json"). It automatically warms up the app.
+func (a *App) DumpOpenAPI(outPath ...string) error {
+	if !a.IsWarmedUp() {
+		if err := a.WarmUp(); err != nil {
+			return err
+		}
+	}
+	target := "openapi.json"
+	if len(outPath) > 0 && outPath[0] != "" {
+		target = outPath[0]
+	}
+	title := "Nimbus API"
+	if a.Config != nil && a.Config.App.Name != "" {
+		title = a.Config.App.Name
+	}
+	spec := openapi.NewGenerator(openapi.GeneratorConfig{
+		Title:   title,
+		Version: "1.0.0",
+	}).Generate(a.Router.Routes())
+	data, err := json.MarshalIndent(spec, "", "  ")
+	if err != nil {
+		return fmt.Errorf("nimbus: marshal openapi: %w", err)
+	}
+	if strings.HasSuffix(target, ".json") {
+		dir := filepath.Dir(target)
+		if dir != "." && dir != "" {
+			if err := os.MkdirAll(dir, 0755); err != nil {
+				return err
+			}
+		}
+		return os.WriteFile(target, data, 0644)
+	}
+	if err := os.MkdirAll(target, 0755); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(target, "openapi.json"), data, 0644)
+}
+
+// Shutdown calls Shutdown on every provider and plugin that implements HasShutdown.
+// If the app is in ModeWarmup, provider and plugin shutdown hooks are skipped to avoid
+// constructing lazy resources just to tear them down.
 func (a *App) Shutdown() error {
+	a.mu.Lock()
+	a.state = StateTerminating
+	a.mu.Unlock()
+
 	for i := len(a.shutdownHooks) - 1; i >= 0; i-- {
 		a.shutdownHooks[i](a)
 	}
-	for i := len(a.plugins) - 1; i >= 0; i-- {
-		if hs, ok := a.plugins[i].(HasShutdown); ok {
-			if err := hs.Shutdown(); err != nil {
-				return fmt.Errorf("plugin %s shutdown: %w", a.plugins[i].Name(), err)
+	if a.GetMode() != ModeWarmup {
+		// Providers shutdown
+		for i := len(a.providers) - 1; i >= 0; i-- {
+			if hs, ok := a.providers[i].(HasShutdown); ok {
+				if err := hs.Shutdown(); err != nil {
+					return fmt.Errorf("provider shutdown: %w", err)
+				}
+			}
+		}
+		// Plugins shutdown
+		for i := len(a.plugins) - 1; i >= 0; i-- {
+			if hs, ok := a.plugins[i].(HasShutdown); ok {
+				if err := hs.Shutdown(); err != nil {
+					return fmt.Errorf("plugin %s shutdown: %w", a.plugins[i].Name(), err)
+				}
 			}
 		}
 	}
+
+	a.mu.Lock()
+	a.state = StateTerminated
+	a.mu.Unlock()
 	return nil
 }
 
@@ -343,9 +635,12 @@ func (a *App) Shutdown() error {
 // Run
 // ---------------------------------------------------------------------------
 
-// Run boots providers and plugins, then starts the HTTP server.
+// Run boots providers and plugins, warms up the app, executes HasStart hooks,
+// then starts the HTTP server.
 // If the configured port is busy, it automatically picks a free port.
 // Listens for SIGINT/SIGTERM and gracefully shuts down to release the port.
+// Calling Run on an app configured with ModeWarmup returns an error.
+//
 // dumpRoutesIfRequested writes the route manifest and reports done=true when
 // NIMBUS_DUMP_ROUTES is set, so the caller skips serving. The output directory
 // defaults to ".nimbus-client" and can be overridden with NIMBUS_CLIENT_OUT.
@@ -360,7 +655,7 @@ func (a *App) dumpRoutesIfRequested() (bool, error) {
 	if outDir == "" {
 		outDir = ".nimbus-client"
 	}
-	if err := router.WriteManifest(a.Router, outDir); err != nil {
+	if err := a.DumpRoutes(outDir); err != nil {
 		return true, fmt.Errorf("nimbus: dump routes: %w", err)
 	}
 	fmt.Printf("Wrote %s/%s (%d routes). Now run: nimbus gen:client\n",
@@ -369,10 +664,15 @@ func (a *App) dumpRoutesIfRequested() (bool, error) {
 }
 
 func (a *App) Run() error {
+	if a.GetMode() == ModeWarmup {
+		return fmt.Errorf("nimbus: cannot run application in %s mode", a.GetMode())
+	}
 	configureGOGCFromEnv()
 	startPprofIfEnabled()
-	if err := a.Boot(); err != nil {
-		return err
+	if !a.IsWarmedUp() {
+		if err := a.WarmUp(); err != nil {
+			return err
+		}
 	}
 	// NIMBUS_DUMP_ROUTES=1 writes the route manifest (consumed by
 	// `nimbus gen:client`) and exits without serving.
@@ -386,6 +686,28 @@ func (a *App) Run() error {
 	a.Config.App.Port = port
 	a.printStartup("http", port)
 
+	a.mu.Lock()
+	a.state = StateStarting
+	a.mu.Unlock()
+
+	// Provider HasStart hooks
+	for _, p := range a.providers {
+		if hs, ok := p.(HasStart); ok {
+			if err := hs.Start(a); err != nil {
+				return fmt.Errorf("provider start: %w", err)
+			}
+		}
+	}
+
+	// Plugin HasStart hooks
+	for _, p := range a.plugins {
+		if hs, ok := p.(HasStart); ok {
+			if err := hs.Start(a); err != nil {
+				return fmt.Errorf("plugin %s start: %w", p.Name(), err)
+			}
+		}
+	}
+
 	for _, fn := range a.startHooks {
 		fn(a)
 	}
@@ -397,6 +719,11 @@ func (a *App) Run() error {
 	if a.Scheduler.Count() > 0 {
 		a.Scheduler.Start(schedulerCtx)
 	}
+
+	a.mu.Lock()
+	a.state = StateReady
+	a.mu.Unlock()
+	a.Events.Dispatch(events.AppReady, port)
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
@@ -427,9 +754,15 @@ func (a *App) Run() error {
 // RunTLS starts the HTTP server with TLS.
 // If the configured port is busy, it automatically picks a free port.
 // Listens for SIGINT/SIGTERM and gracefully shuts down to release the port.
+// Calling RunTLS on an app configured with ModeWarmup returns an error.
 func (a *App) RunTLS(certFile, keyFile string) error {
-	if err := a.Boot(); err != nil {
-		return err
+	if a.GetMode() == ModeWarmup {
+		return fmt.Errorf("nimbus: cannot run application in %s mode", a.GetMode())
+	}
+	if !a.IsWarmedUp() {
+		if err := a.WarmUp(); err != nil {
+			return err
+		}
 	}
 	ln, port, err := a.listen()
 	if err != nil {
@@ -437,6 +770,28 @@ func (a *App) RunTLS(certFile, keyFile string) error {
 	}
 	a.Config.App.Port = port
 	a.printStartup("https", port)
+
+	a.mu.Lock()
+	a.state = StateStarting
+	a.mu.Unlock()
+
+	// Provider HasStart hooks
+	for _, p := range a.providers {
+		if hs, ok := p.(HasStart); ok {
+			if err := hs.Start(a); err != nil {
+				return fmt.Errorf("provider start: %w", err)
+			}
+		}
+	}
+
+	// Plugin HasStart hooks
+	for _, p := range a.plugins {
+		if hs, ok := p.(HasStart); ok {
+			if err := hs.Start(a); err != nil {
+				return fmt.Errorf("plugin %s start: %w", p.Name(), err)
+			}
+		}
+	}
 
 	for _, fn := range a.startHooks {
 		fn(a)
@@ -448,6 +803,11 @@ func (a *App) RunTLS(certFile, keyFile string) error {
 	if a.Scheduler.Count() > 0 {
 		a.Scheduler.Start(schedulerCtx)
 	}
+
+	a.mu.Lock()
+	a.state = StateReady
+	a.mu.Unlock()
+	a.Events.Dispatch(events.AppReady, port)
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)

@@ -32,7 +32,9 @@ const (
 
 	// App lifecycle
 	AppBooted   = "app:booted"   // payload: nil — boot complete, capabilities applied
+	AppWarmed   = "app:warmed"   // payload: *App — warmup complete, assembled for run or inspection
 	AppStarted  = "app:started"  // payload: string (port) — server listening
+	AppReady    = "app:ready"    // payload: string (port) — HTTP server actively accepting traffic
 	AppShutdown = "app:shutdown" // payload: os.Signal — graceful shutdown started
 
 	// Route registration

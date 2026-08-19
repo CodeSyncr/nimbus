@@ -28,23 +28,45 @@ Nimbus is an AdonisJS-style web framework for Go, prioritizing "convention over 
 ## Lifecycle
 
 1.  **Configuration**: Load `.env` and `config/`.
-2.  **Provider Registration**: Register all Service Providers.
-3.  **Plugin Initialization**: Register and boot plugins (AI, Inertia, etc.).
-4.  **Routing**: Apply global and per-route middleware, then register routes.
-5.  **Hooks**: Run `OnBoot` and `OnStart` callbacks.
-6.  **HTTP Server**: Start listening and serving requests.
+2.  **Provider Registration**: Register all Service Providers (`Register(app)`).
+3.  **Plugin Initialization**: Register and boot plugins (`Register` + `Boot`).
+4.  **Routing & Capabilities**: Mount routes, merge middleware, register CLI commands, crons, and health checks.
+5.  **WarmUp Phase**: Run `OnWarmup` hooks, assemble the app completely, and dispatch `events.AppWarmed`.
+6.  **Run / HTTP Server**: Run `OnStart` hooks, start schedulers, dispatch `events.AppReady`, and serve HTTP traffic.
+
+## Application Modes & Warmup
+
+Nimbus supports 4 application modes (`nimbus.AppMode`):
+- `nimbus.ModeRun` (default): Normal execution with HTTP server, queue consumers, and schedulers.
+- `nimbus.ModeWarmup`: Inspection/assembly mode. Used by codegen tools (`nimbus gen:client`), CLI commands, and test suites. `app.Run()` returns an error, and plugin shutdown hooks are skipped.
+- `nimbus.ModeTest`: Integration and unit test mode.
+- `nimbus.ModeCli`: Artisan-style CLI command execution.
+
+### Using app.WarmUp()
+
+```go
+app := bin.Boot()
+app.SetMode(nimbus.ModeWarmup)
+
+if err := app.WarmUp(); err != nil {
+    log.Fatal(err)
+}
+
+// Safely inspect routes, container bindings, and plugins without starting network listeners
+routes := app.Router.Routes()
+```
 
 ## Key Components
 
 ### Router
--   Wraps [go-chi/chi](https://github.com/go-chi/chi) for performance.
--   Supports route groups, named routes, and resources.
+-   High-performance Nimbus router with full RESTful and resourceful routing support.
+-   Supports route groups, named routes, prefixes, and resources.
 -   Dynamic parameter extraction (e.g., `:id`).
 
-### Context
--   Unified access to `http.Request` and `http.ResponseWriter`.
--   Helpers: `c.JSON()`, `c.View()`, `c.Param()`, `c.Redirect()`.
--   Supports user context for authentication.
+### HTTP Context (`*http.Context`)
+-   Unified, developer-friendly interface for HTTP request lifecycle and response building.
+-   First-party helpers: `c.JSON()`, `c.View()`, `c.Param()`, `c.Redirect()`, `c.Validate()`.
+-   Built-in user context and authentication guards.
 
 ### Service Provider
 -   `Register(app *App)`: Bind services to the container.

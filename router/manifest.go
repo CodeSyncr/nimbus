@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -12,17 +13,144 @@ import (
 // ManifestEntry describes a single registered route for code generation
 // (e.g. `nimbus gen:client` → Hive registry).
 type ManifestEntry struct {
-	Name   string                  `json:"name"`
-	Method string                  `json:"method"`
-	Path   string                  `json:"path"`
-	Params []string                `json:"params,omitempty"`
-	Schema map[string]ManifestRule `json:"schema,omitempty"`
+	Name     string                  `json:"name"`
+	Method   string                  `json:"method"`
+	Path     string                  `json:"path"`
+	Params   []string                `json:"params,omitempty"`
+	Schema   map[string]ManifestRule `json:"schema,omitempty"`
+	Response *ManifestType           `json:"response,omitempty"`
+}
+
+// ManifestType describes the structural type representation of a Go type.
+type ManifestType struct {
+	Kind       string                  `json:"kind"`                 // "primitive", "struct", "array", "map", "any"
+	Type       string                  `json:"type,omitempty"`       // primitive type name (string, number, boolean)
+	Fields     map[string]ManifestType `json:"fields,omitempty"`     // struct fields
+	Elem       *ManifestType           `json:"elem,omitempty"`       // array element type or map/slice value type
+	IsNullable bool                    `json:"is_nullable,omitempty"` // nullable (pointers, slice/map, or omitempty)
 }
 
 // ManifestRule is a body-schema field's generated type info.
 type ManifestRule struct {
 	Type     string `json:"type"`
 	Required bool   `json:"required"`
+}
+
+// reflectTypeToManifest converts a reflect.Type to a ManifestType.
+func reflectTypeToManifest(t reflect.Type, visited map[reflect.Type]bool) *ManifestType {
+	if t == nil {
+		return &ManifestType{Kind: "any"}
+	}
+
+	// Dereference pointers
+	isNullable := false
+	for t.Kind() == reflect.Ptr {
+		isNullable = true
+		t = t.Elem()
+	}
+
+	// Avoid circular recursion
+	if visited[t] {
+		return &ManifestType{Kind: "any", IsNullable: isNullable}
+	}
+
+	// Special case: time.Time
+	if t.PkgPath() == "time" && t.Name() == "Time" {
+		return &ManifestType{Kind: "primitive", Type: "string", IsNullable: isNullable}
+	}
+
+	switch t.Kind() {
+	case reflect.Struct:
+		visited[t] = true
+		defer func() { visited[t] = false }()
+
+		fields := make(map[string]ManifestType)
+		for i := 0; i < t.NumField(); i++ {
+			f := t.Field(i)
+			// Skip unexported fields unless anonymous
+			if f.PkgPath != "" && !f.Anonymous {
+				continue
+			}
+
+			tag := f.Tag.Get("json")
+			if tag == "-" {
+				continue
+			}
+
+			name := f.Name
+			omitempty := false
+			if tag != "" {
+				parts := strings.Split(tag, ",")
+				if parts[0] != "" {
+					name = parts[0]
+				}
+				for _, p := range parts[1:] {
+					if p == "omitempty" {
+						omitempty = true
+					}
+				}
+			}
+
+			if f.Anonymous && tag == "" {
+				elem := f.Type
+				for elem.Kind() == reflect.Ptr {
+					elem = elem.Elem()
+				}
+				if elem.Kind() == reflect.Struct {
+					sub := reflectTypeToManifest(elem, visited)
+					if sub != nil && sub.Kind == "struct" {
+						for k, v := range sub.Fields {
+							fields[k] = v
+						}
+					}
+				}
+				continue
+			}
+
+			fieldVal := reflectTypeToManifest(f.Type, visited)
+			if fieldVal != nil {
+				if omitempty {
+					fieldVal.IsNullable = true
+				}
+				fields[name] = *fieldVal
+			}
+		}
+		return &ManifestType{
+			Kind:       "struct",
+			Fields:     fields,
+			IsNullable: isNullable,
+		}
+
+	case reflect.Slice, reflect.Array:
+		elem := reflectTypeToManifest(t.Elem(), visited)
+		return &ManifestType{
+			Kind:       "array",
+			Elem:       elem,
+			IsNullable: isNullable,
+		}
+
+	case reflect.Map:
+		val := reflectTypeToManifest(t.Elem(), visited)
+		return &ManifestType{
+			Kind:       "map",
+			Elem:       val,
+			IsNullable: isNullable,
+		}
+
+	case reflect.String:
+		return &ManifestType{Kind: "primitive", Type: "string", IsNullable: isNullable}
+
+	case reflect.Bool:
+		return &ManifestType{Kind: "primitive", Type: "boolean", IsNullable: isNullable}
+
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+		reflect.Float32, reflect.Float64:
+		return &ManifestType{Kind: "primitive", Type: "number", IsNullable: isNullable}
+
+	default:
+		return &ManifestType{Kind: "any", IsNullable: isNullable}
+	}
 }
 
 // ManifestFileName is the manifest written into the client output directory.
@@ -159,12 +287,18 @@ func Manifest(r *Router) []ManifestEntry {
 			}
 		}
 
+		var respType *ManifestType
+		if rt.Meta.Response != nil {
+			respType = reflectTypeToManifest(reflect.TypeOf(rt.Meta.Response), make(map[reflect.Type]bool))
+		}
+
 		entries = append(entries, ManifestEntry{
-			Name:   name,
-			Method: rt.Method(),
-			Path:   rt.Path(),
-			Params: PathParams(rt.Path()),
-			Schema: schema,
+			Name:     name,
+			Method:   rt.Method(),
+			Path:     rt.Path(),
+			Params:   PathParams(rt.Path()),
+			Schema:   schema,
+			Response: respType,
 		})
 	}
 	return entries

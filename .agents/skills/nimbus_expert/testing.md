@@ -11,15 +11,45 @@ Nimbus provides deep support for building reliable applications through HTTP tes
 
 ## Usage
 
-### Simple HTTP Test
+### Fluent Integration Test Client
 
 ```go
+import ntest "github.com/CodeSyncr/nimbus/testing"
+
+func TestProductAPI(t *testing.T) {
+    app := bin.Boot()
+    app.SetMode(nimbus.ModeTest)
+    client := ntest.New(app)
+
+    client.Get("/api/products").
+        WithBearerToken("secret-token").
+        Do(req). // or client.Get(...)
+        AssertOK(t).
+        AssertHeader(t, "Content-Type", "application/json").
+        AssertJSONPath(t, "status", "success")
+}
+```
+
+### Direct HTTP Handler Test
+
+```go
+func SetupTestApp() *nimbus.App {
+    app := bin.Boot()
+    app.SetMode(nimbus.ModeTest)
+    if err := app.WarmUp(); err != nil {
+        panic(err)
+    }
+    return app
+}
+
 func TestProductIndex(t *testing.T) {
     app := SetupTestApp()
     req := httptest.NewRequest("GET", "/products", nil)
     rec := httptest.NewRecorder()
     app.ServeHTTP(rec, req)
-    assert(t, rec.Code, 200)
+    if rec.Code != http.StatusOK {
+        t.Fatalf("expected 200, got %d", rec.Code)
+    }
 }
 ```
 

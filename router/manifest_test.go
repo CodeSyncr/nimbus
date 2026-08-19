@@ -172,3 +172,86 @@ func keys2(m map[string]bool) []string {
 	}
 	return out
 }
+
+type DummySubStruct struct {
+	Foo string `json:"foo"`
+}
+
+type DummyResponse struct {
+	ID        int             `json:"id"`
+	Title     string          `json:"title,omitempty"`
+	Sub       DummySubStruct  `json:"sub"`
+	PtrSub    *DummySubStruct `json:"ptr_sub"`
+	Tags      []string        `json:"tags"`
+	SecretVal string          `json:"-"`
+}
+
+func TestManifest_ResponseSerialization(t *testing.T) {
+	r := New()
+	r.Get("/test", noop).Response(&DummyResponse{})
+
+	entries := Manifest(r)
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+
+	entry := entries[0]
+	if entry.Response == nil {
+		t.Fatal("expected Response to be non-nil")
+	}
+
+	if entry.Response.Kind != "struct" {
+		t.Fatalf("expected Kind struct, got %s", entry.Response.Kind)
+	}
+
+	fields := entry.Response.Fields
+	if id, ok := fields["id"]; !ok || id.Kind != "primitive" || id.Type != "number" {
+		t.Errorf("invalid fields[id]: %+v", id)
+	}
+
+	if title, ok := fields["title"]; !ok || title.Kind != "primitive" || title.Type != "string" || !title.IsNullable {
+		t.Errorf("invalid fields[title]: %+v", title)
+	}
+
+	if sub, ok := fields["sub"]; !ok || sub.Kind != "struct" || sub.Fields["foo"].Type != "string" {
+		t.Errorf("invalid fields[sub]: %+v", sub)
+	}
+
+	if ptrSub, ok := fields["ptr_sub"]; !ok || ptrSub.Kind != "struct" || !ptrSub.IsNullable || ptrSub.Fields["foo"].Type != "string" {
+		t.Errorf("invalid fields[ptr_sub]: %+v", ptrSub)
+	}
+
+	if tags, ok := fields["tags"]; !ok || tags.Kind != "array" || tags.Elem.Type != "string" {
+		t.Errorf("invalid fields[tags]: %+v", tags)
+	}
+
+	if _, ok := fields["SecretVal"]; ok {
+		t.Error("SecretVal should be excluded due to json:\"-\"")
+	}
+}
+
+type CircularNode struct {
+	Value int           `json:"value"`
+	Next  *CircularNode `json:"next"`
+}
+
+func TestManifest_CircularResponseSerialization(t *testing.T) {
+	r := New()
+	r.Get("/circular", noop).Response(CircularNode{})
+
+	entries := Manifest(r)
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+
+	entry := entries[0]
+	if entry.Response == nil {
+		t.Fatal("expected Response to be non-nil")
+	}
+
+	nextField := entry.Response.Fields["next"]
+	if nextField.Kind != "any" {
+		t.Errorf("expected circular reference nextField to be kind 'any', got %s", nextField.Kind)
+	}
+}
+

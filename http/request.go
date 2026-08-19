@@ -160,6 +160,19 @@ func (c *Context) BindJSON(v any) error {
 	return json.NewDecoder(c.Request.Body).Decode(v)
 }
 
+// BindQuery binds URL query parameters into a struct using json or form tags.
+func (c *Context) BindQuery(v any) error {
+	return bindForm(c.Request.URL.Query(), v)
+}
+
+// BindForm binds urlencoded or multipart form body into a struct.
+func (c *Context) BindForm(v any) error {
+	if err := c.Request.ParseForm(); err != nil {
+		return err
+	}
+	return bindForm(c.Request.PostForm, v)
+}
+
 // bindForm binds url.Values to a struct using json tags.
 func bindForm(values map[string][]string, v any) error {
 	// Simple JSON round-trip: convert to flat map, then marshal/unmarshal.
@@ -197,6 +210,28 @@ func (c *Context) Files(name string) []*multipart.FileHeader {
 		return nil
 	}
 	return c.Request.MultipartForm.File[name]
+}
+
+// SaveUploadedFile saves an uploaded file header to the specified destination path on disk.
+func (c *Context) SaveUploadedFile(file *multipart.FileHeader, dst string) error {
+	src, err := file.Open()
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+
+	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+		return err
+	}
+
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	_, err = io.Copy(out, src)
+	return err
 }
 
 // HasFile returns true if a file was uploaded for the field.
