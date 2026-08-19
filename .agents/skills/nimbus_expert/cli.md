@@ -20,9 +20,14 @@ The Nimbus CLI is the primary tool for scaffolding, code generation, and project
 -   `schedule:run`: Run the task scheduler.
 -   `schedule:list`: List all registered scheduled tasks.
 
-### AI Copilot
--   `nimbus ai "<description>"`: Generate code from a natural language prompt.
--   `nimbus test:generate`: Automatically generate tests for your controllers.
+### Nimbus Cloud Authentication
+-   `nimbus login`: Authenticate with your Nimbus Cloud account (`https://nimbusgo.in`) via browser OAuth.
+-   `nimbus logout`: Clear saved credentials.
+-   `nimbus whoami`: Display logged-in account, email, and subscription tier.
+
+### AI Copilot & Testing
+-   `nimbus ai "<description>"`: Generate code from a natural language prompt (powered by Nimbus Cloud with active subscription, or pass `--offline` for local generation).
+-   `nimbus test:generate` (`nimbus tg`): Automatically generate tests for your controllers via 100% offline static AST analysis.
 
 ## Plugin Management
 

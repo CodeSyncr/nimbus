@@ -2,8 +2,12 @@ package commands
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -12,6 +16,8 @@ import (
 	"unicode"
 
 	"github.com/CodeSyncr/nimbus/cli"
+	"github.com/CodeSyncr/nimbus/cli/auth"
+	"github.com/CodeSyncr/nimbus/internal/version"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 )
@@ -22,17 +28,21 @@ func init() {
 
 // AICommand is the `nimbus ai` CLI copilot.
 type AICommand struct {
-	model string
-	dry   bool
+	model   string
+	server  string
+	dry     bool
+	offline bool
 }
 
 func (c *AICommand) Name() string        { return "ai" }
-func (c *AICommand) Description() string { return "AI copilot — generate code from natural language" }
+func (c *AICommand) Description() string { return "AI copilot — generate code from natural language (powered by nimbusgo.in)" }
 func (c *AICommand) Args() int           { return -1 }
 
 func (c *AICommand) Flags(cmd *cobra.Command) {
-	cmd.Flags().StringVarP(&c.model, "model", "m", "", "AI model to use (default: reads from NIMBUS_AI_MODEL or uses gpt-4o)")
+	cmd.Flags().StringVarP(&c.model, "model", "m", "", "AI model to use (default: cloud optimal model or gpt-4o)")
+	cmd.Flags().StringVar(&c.server, "server", "", "Nimbus Cloud server URL (default: https://nimbusgo.in)")
 	cmd.Flags().BoolVar(&c.dry, "dry-run", false, "Show generated code without writing files")
+	cmd.Flags().BoolVar(&c.offline, "offline", false, "Use local template generator without connecting to Nimbus Cloud")
 }
 
 func (c *AICommand) Run(ctx *cli.Context) error {
@@ -91,19 +101,49 @@ func (c *AICommand) interactiveMode(ctx *cli.Context) error {
 // ---------------------------------------------------------------------------
 
 func (c *AICommand) executePrompt(ctx *cli.Context, prompt string) error {
-	// Parse the intent from the natural language prompt.
-	intent := parseIntent(prompt)
-
 	successStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#22c55e"))
 	fileStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#818cf8"))
 	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#64748b"))
 
-	fmt.Fprintln(ctx.Stdout, dimStyle.Render(fmt.Sprintf("  Generating %s: %s", intent.Type, intent.Name)))
+	var files []GeneratedFile
+	var hints []string
 
-	// Execute generation based on intent.
-	files, err := generateFromIntent(ctx.AppRoot, intent)
-	if err != nil {
-		return fmt.Errorf("generation failed: %w", err)
+	if !c.offline {
+		// Online mode — Authenticate and call Nimbus Cloud AI API
+		serverURL := c.server
+		if serverURL == "" {
+			serverURL = auth.GetServerURL()
+		}
+
+		creds, err := auth.LoadCredentials()
+		if err != nil || creds == nil || creds.IsExpired() {
+			fmt.Fprintln(ctx.Stdout, dimStyle.Render("  Authentication required for Nimbus Cloud AI Copilot."))
+			creds, err = auth.Login(ctx, serverURL)
+			if err != nil {
+				return fmt.Errorf("authentication failed: %w", err)
+			}
+		}
+
+		fmt.Fprintln(ctx.Stdout, dimStyle.Render(fmt.Sprintf("  ⚡ Asking Nimbus Cloud AI (%s)...", serverURL)))
+
+		cloudFiles, cloudHints, err := callNimbusCloudAI(ctx, creds, prompt, c.model, serverURL)
+		if err != nil {
+			// If payment/subscription required, render actionable error and return
+			var subErr *SubscriptionRequiredError
+			if errors.As(err, &subErr) {
+				renderSubscriptionRequired(ctx, subErr.PricingURL)
+				return nil
+			}
+			ctx.UI.Warnf("Cloud AI request failed: %v", err)
+			ctx.UI.Infof("Falling back to local template generator...")
+			files, hints = generateLocally(ctx, prompt)
+		} else {
+			files = cloudFiles
+			hints = cloudHints
+		}
+	} else {
+		// Offline mode — local intent parser and template generator
+		files, hints = generateLocally(ctx, prompt)
 	}
 
 	if len(files) == 0 {
@@ -132,14 +172,148 @@ func (c *AICommand) executePrompt(ctx *cli.Context, prompt string) error {
 	}
 
 	// Post-generation hints.
-	if len(intent.Hints) > 0 {
+	if len(hints) > 0 {
 		fmt.Fprintln(ctx.Stdout)
-		for _, hint := range intent.Hints {
+		for _, hint := range hints {
 			fmt.Fprintln(ctx.Stdout, dimStyle.Render("  💡 "+hint))
 		}
 	}
 
 	return nil
+}
+
+func generateLocally(ctx *cli.Context, prompt string) ([]GeneratedFile, []string) {
+	intent := parseIntent(prompt)
+	files, err := generateFromIntent(ctx.AppRoot, intent)
+	if err != nil {
+		ctx.UI.Errorf("Local generation error: %v", err)
+		return nil, nil
+	}
+	return files, intent.Hints
+}
+
+// ---------------------------------------------------------------------------
+// Nimbus Cloud AI Client & Subscription Handling
+// ---------------------------------------------------------------------------
+
+// SubscriptionRequiredError indicates the account lacks an active AI subscription.
+type SubscriptionRequiredError struct {
+	Message    string
+	PricingURL string
+}
+
+func (e *SubscriptionRequiredError) Error() string {
+	return e.Message
+}
+
+type cloudAIRequest struct {
+	Prompt           string         `json:"prompt"`
+	Model            string         `json:"model,omitempty"`
+	FrameworkVersion string         `json:"framework_version"`
+	ProjectContext   map[string]any `json:"project_context,omitempty"`
+}
+
+type cloudAIResponse struct {
+	Success bool            `json:"success"`
+	Files   []GeneratedFile `json:"files"`
+	Hints   []string        `json:"hints,omitempty"`
+	Error   string          `json:"error,omitempty"`
+	Upgrade struct {
+		Required   bool   `json:"required"`
+		PricingURL string `json:"pricing_url"`
+		Message    string `json:"message"`
+	} `json:"upgrade,omitempty"`
+}
+
+func callNimbusCloudAI(ctx *cli.Context, creds *auth.Credentials, prompt, model, serverURL string) ([]GeneratedFile, []string, error) {
+	apiURL := fmt.Sprintf("%s/api/v1/ai/generate", strings.TrimRight(serverURL, "/"))
+
+	reqBody := cloudAIRequest{
+		Prompt:           prompt,
+		Model:            model,
+		FrameworkVersion: version.Nimbus,
+		ProjectContext: map[string]any{
+			"app_root": ctx.AppRoot,
+		},
+	}
+
+	jsonBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	httpReq, err := http.NewRequest(http.MethodPost, apiURL, bytes.NewReader(jsonBytes))
+	if err != nil {
+		return nil, nil, err
+	}
+	httpReq.Header.Set("Authorization", "Bearer "+creds.AccessToken)
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("User-Agent", "nimbus-cli/"+version.Nimbus)
+
+	client := &http.Client{Timeout: 90 * time.Second}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return nil, nil, fmt.Errorf("connection error: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusPaymentRequired || resp.StatusCode == http.StatusForbidden {
+		pricingURL := serverURL + "/pricing"
+		return nil, nil, &SubscriptionRequiredError{
+			Message:    "active subscription required",
+			PricingURL: pricingURL,
+		}
+	}
+
+	if resp.StatusCode == http.StatusUnauthorized {
+		return nil, nil, errors.New("unauthorized: session expired. Run 'nimbus login' to re-authenticate")
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, nil, fmt.Errorf("server error (%d): %s", resp.StatusCode, string(body))
+	}
+
+	var res cloudAIResponse
+	if err := json.Unmarshal(body, &res); err != nil {
+		return nil, nil, fmt.Errorf("invalid response from server: %w", err)
+	}
+
+	if res.Upgrade.Required {
+		pURL := res.Upgrade.PricingURL
+		if pURL == "" {
+			pURL = serverURL + "/pricing"
+		}
+		return nil, nil, &SubscriptionRequiredError{
+			Message:    res.Upgrade.Message,
+			PricingURL: pURL,
+		}
+	}
+
+	if res.Error != "" {
+		return nil, nil, errors.New(res.Error)
+	}
+
+	return res.Files, res.Hints, nil
+}
+
+func renderSubscriptionRequired(ctx *cli.Context, pricingURL string) {
+	headerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#f59e0b")).Bold(true)
+	titleStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#f8fafc")).Bold(true)
+	linkStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#38bdf8")).Underline(true).Bold(true)
+	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#64748b"))
+
+	fmt.Fprintln(ctx.Stdout)
+	fmt.Fprintln(ctx.Stdout, headerStyle.Render("⚡ Nimbus AI Copilot — Subscription Required"))
+	fmt.Fprintln(ctx.Stdout, titleStyle.Render("Your Nimbus Cloud account does not have an active AI Copilot subscription."))
+	fmt.Fprintln(ctx.Stdout)
+	fmt.Fprintln(ctx.Stdout, "👉 Upgrade your plan to access powerful cloud AI code generation:")
+	fmt.Fprintf(ctx.Stdout, "   %s\n\n", linkStyle.Render(pricingURL))
+	fmt.Fprintln(ctx.Stdout, dimStyle.Render("Tip: Run 'nimbus ai \"...\" --offline' to use the local basic template generator."))
 }
 
 // ---------------------------------------------------------------------------
