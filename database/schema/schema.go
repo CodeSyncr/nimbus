@@ -483,7 +483,23 @@ func (t *Table) buildColumnSQL(c columnDef) string {
 		s += " UNIQUE"
 	}
 	if c.default_ != "" {
-		s += " DEFAULT " + quoteDefault(c.default_)
+		defVal := c.default_
+		if c.typ == "BOOLEAN" || resolved == "BOOLEAN" {
+			if defVal == "0" || strings.EqualFold(defVal, "false") {
+				if t.driverName() == "postgres" {
+					defVal = "FALSE"
+				} else {
+					defVal = "0"
+				}
+			} else if defVal == "1" || strings.EqualFold(defVal, "true") {
+				if t.driverName() == "postgres" {
+					defVal = "TRUE"
+				} else {
+					defVal = "1"
+				}
+			}
+		}
+		s += " DEFAULT " + quoteDefault(defVal)
 	}
 	return s
 }
