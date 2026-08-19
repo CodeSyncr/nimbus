@@ -25,12 +25,12 @@ type LoginCommand struct {
 }
 
 func (c *LoginCommand) Name() string        { return "login" }
-func (c *LoginCommand) Description() string { return "Log in to your Nimbus Cloud account (nimbusgo.in)" }
+func (c *LoginCommand) Description() string { return "Log in to your Nimbus Cloud account (nimbusgo.space)" }
 func (c *LoginCommand) Args() int           { return 0 }
 func (c *LoginCommand) Aliases() []string   { return []string{"auth:login"} }
 
 func (c *LoginCommand) Flags(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&c.server, "server", "", "Custom Nimbus Cloud server URL (default: https://nimbusgo.in)")
+	cmd.Flags().StringVar(&c.server, "server", "", "Custom Nimbus Cloud server URL (default: https://nimbusgo.space)")
 }
 
 func (c *LoginCommand) Run(ctx *cli.Context) error {
@@ -82,7 +82,7 @@ func (c *WhoamiCommand) Run(ctx *cli.Context) error {
 
 	if creds == nil || creds.AccessToken == "" {
 		ctx.UI.Warnf("Not currently logged in to Nimbus Cloud.")
-		ctx.UI.Infof("Run 'nimbus login' to authenticate with nimbusgo.in")
+		ctx.UI.Infof("Run 'nimbus login' to authenticate with nimbusgo.space")
 		return nil
 	}
 
@@ -109,7 +109,7 @@ func (c *WhoamiCommand) Run(ctx *cli.Context) error {
 
 	if !creds.HasSub && plan == "free" {
 		fmt.Fprintln(ctx.Stdout)
-		fmt.Fprintln(ctx.Stdout, warningStyle.Render("  ⚠  No active AI subscription. Upgrade at https://nimbusgo.in/pricing to unlock AI Copilot."))
+		fmt.Fprintln(ctx.Stdout, warningStyle.Render("  ⚠  No active AI subscription. Upgrade at https://nimbusgo.space/pricing to unlock AI Copilot."))
 	}
 
 	return nil

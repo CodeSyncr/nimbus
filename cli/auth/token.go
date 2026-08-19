@@ -9,7 +9,7 @@ import (
 )
 
 // DefaultServerURL is the default Nimbus Cloud API & OAuth server.
-const DefaultServerURL = "https://nimbusgo.in"
+const DefaultServerURL = "https://nimbusgo.space"
 
 // Credentials represents authenticated developer credentials for Nimbus Cloud.
 type Credentials struct {

@@ -46,7 +46,7 @@ func Login(ctx *cli.Context, serverURL string) (*Credentials, error) {
 	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#64748b"))
 	successStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#22c55e")).Bold(true)
 
-	fmt.Fprintln(ctx.Stdout, headerStyle.Render("🔐 Authenticating with Nimbus Cloud (nimbusgo.in)..."))
+	fmt.Fprintln(ctx.Stdout, headerStyle.Render("🔐 Authenticating with Nimbus Cloud (nimbusgo.space)..."))
 	fmt.Fprintln(ctx.Stdout, dimStyle.Render("Opening your browser to authorize your CLI session:"))
 	fmt.Fprintf(ctx.Stdout, "  %s\n\n", linkStyle.Render(authURL))
 	fmt.Fprintln(ctx.Stdout, dimStyle.Render("Waiting for authorization (press Ctrl+C to cancel)..."))
@@ -98,25 +98,179 @@ func Login(ctx *cli.Context, serverURL string) (*Credentials, error) {
 		}
 
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		fmt.Fprint(w, `<!DOCTYPE html>
-<html>
+		fmt.Fprintf(w, `<!DOCTYPE html>
+<html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Nimbus CLI Authenticated</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Terminal Authorized — Nimbus Cloud</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Mona+Sans:ital,wdth,wght@0,75..125,200..900;1,75..125,200..900&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #0f172a; color: #f8fafc; text-align: center; }
-    .card { background: #1e293b; padding: 2.5rem 3.5rem; border-radius: 1rem; border: 1px solid #334155; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.5); }
-    h1 { color: #818cf8; margin-bottom: 0.5rem; font-size: 1.75rem; }
-    p { color: #94a3b8; font-size: 1rem; margin-top: 0; }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Mona Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #ffffff;
+      color: #111827;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      position: relative;
+    }
+    body::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0; height: 3px;
+      background: linear-gradient(90deg, #e74c3c 0%%, #f97316 50%%, #fbbf24 100%%);
+    }
+    .card {
+      max-width: 480px;
+      width: 100%%;
+      background: #ffffff;
+      border: 1px solid #e5e7eb;
+      border-radius: 16px;
+      padding: 40px 36px 32px;
+      text-align: center;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.06), 0 1px 3px rgba(0,0,0,0.04);
+    }
+    .logo-badge {
+      width: 48px;
+      height: 48px;
+      background: linear-gradient(135deg, #e74c3c 0%%, #f97316 100%%);
+      border-radius: 12px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: #ffffff;
+      margin-bottom: 20px;
+      box-shadow: 0 8px 16px rgba(231, 76, 60, 0.2);
+    }
+    h1 {
+      font-size: 1.35rem;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      color: #111827;
+      margin-bottom: 8px;
+    }
+    .desc {
+      font-size: 0.9rem;
+      color: #6b7280;
+      line-height: 1.5;
+      margin-bottom: 24px;
+    }
+    .user-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: #fafafa;
+      border: 1px solid #e5e7eb;
+      padding: 8px 14px;
+      border-radius: 99px;
+      font-size: 0.82rem;
+      color: #374151;
+      font-family: 'DM Mono', monospace;
+      margin-bottom: 28px;
+    }
+    .status-dot {
+      width: 7px;
+      height: 7px;
+      background: #22c55e;
+      border-radius: 50%%;
+      display: inline-block;
+    }
+    .terminal-tip {
+      background: #18181f;
+      border-radius: 10px;
+      padding: 14px 16px;
+      text-align: left;
+      font-family: 'DM Mono', monospace;
+      font-size: 0.8rem;
+      color: #dde1ed;
+      margin-bottom: 24px;
+      border: 1px solid rgba(255,255,255,0.06);
+    }
+    .terminal-tip .label {
+      color: #64748b;
+      font-size: 0.72rem;
+      margin-bottom: 6px;
+      display: block;
+    }
+    .terminal-tip .cmd {
+      color: #86efac;
+    }
+    .btn-group {
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 9px 18px;
+      border-radius: 8px;
+      font-size: 0.84rem;
+      font-weight: 600;
+      text-decoration: none;
+      transition: all 0.15s;
+    }
+    .btn-primary {
+      background: #e74c3c;
+      color: #ffffff;
+    }
+    .btn-primary:hover {
+      background: #c0392b;
+    }
+    .btn-secondary {
+      background: #ffffff;
+      color: #374151;
+      border: 1px solid #e5e7eb;
+    }
+    .btn-secondary:hover {
+      background: #fafafa;
+      border-color: #d1d5db;
+    }
+    .footer-note {
+      margin-top: 24px;
+      font-size: 0.78rem;
+      color: #9ca3af;
+    }
   </style>
 </head>
 <body>
   <div class="card">
-    <h1>✓ Authenticated with Nimbus</h1>
-    <p>You can now close this tab and return to your terminal.</p>
+    <div class="logo-badge">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>
+    </div>
+    <h1>Terminal Authorized</h1>
+    <p class="desc">Your Nimbus CLI session is now authenticated. You can safely close this browser window and return to your terminal.</p>
+    
+    <div class="user-pill">
+      <span class="status-dot"></span>
+      <span>%s</span>
+      <span style="color: #9ca3af;">·</span>
+      <span style="text-transform: capitalize; font-weight: 600; color: #111827;">%s Plan</span>
+    </div>
+
+    <div class="terminal-tip">
+      <span class="label">Ready in terminal:</span>
+      <span>$ <span class="cmd">nimbus ai "generate blog controller"</span></span>
+    </div>
+
+    <div class="btn-group">
+      <a href="%s/cloud/dashboard" class="btn btn-primary">Open Dashboard</a>
+      <a href="%s/docs" class="btn btn-secondary">Read Docs</a>
+    </div>
   </div>
+  
+  <p class="footer-note">Nimbus Cloud · <a href="%s" style="color: inherit; text-decoration: underline;">nimbusgo.space</a></p>
 </body>
-</html>`)
+</html>`, email, plan, serverURL, serverURL, serverURL)
 
 		tokenChan <- creds
 	})

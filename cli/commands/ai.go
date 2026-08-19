@@ -35,12 +35,12 @@ type AICommand struct {
 }
 
 func (c *AICommand) Name() string        { return "ai" }
-func (c *AICommand) Description() string { return "AI copilot — generate code from natural language (powered by nimbusgo.in)" }
+func (c *AICommand) Description() string { return "AI copilot — generate code from natural language (powered by nimbusgo.space)" }
 func (c *AICommand) Args() int           { return -1 }
 
 func (c *AICommand) Flags(cmd *cobra.Command) {
 	cmd.Flags().StringVarP(&c.model, "model", "m", "", "AI model to use (default: cloud optimal model or gpt-4o)")
-	cmd.Flags().StringVar(&c.server, "server", "", "Nimbus Cloud server URL (default: https://nimbusgo.in)")
+	cmd.Flags().StringVar(&c.server, "server", "", "Nimbus Cloud server URL (default: https://nimbusgo.space)")
 	cmd.Flags().BoolVar(&c.dry, "dry-run", false, "Show generated code without writing files")
 	cmd.Flags().BoolVar(&c.offline, "offline", false, "Use local template generator without connecting to Nimbus Cloud")
 }

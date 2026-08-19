@@ -4,6 +4,18 @@ All notable changes to Nimbus are documented in this file.
 
 This project follows Semantic Versioning.
 
+## [1.5.0] - 2026-08-19
+
+### Added
+- **Nimbus Cloud & CLI Authentication Subsystem:**
+  - Added `nimbus login`, `nimbus logout`, and `nimbus whoami` CLI commands for browser-based OAuth authentication with Nimbus Cloud (`https://nimbusgo.space`).
+  - Added secure token management and profile caching in `~/.nimbus/auth.json`.
+  - Added redesigned, light-themed terminal authorization callback page with clean typography and real-time session indicators.
+- **AI Copilot Cloud Synthesizer (`nimbus ai`):**
+  - Integrated `nimbus ai "<prompt>"` cloud code generation engine connected to Nimbus Cloud AI services.
+  - Added support for subscription tier gating and seamless fallback to `--offline` rule-based code generation.
+  - Added AI chat context with strict Nimbus Go framework CLI ergonomics (`nimbus serve`, `nimbus make:*`, `nimbus db:migrate`).
+
 ## [1.4.0] - 2026-08-19
 
 ### Added
