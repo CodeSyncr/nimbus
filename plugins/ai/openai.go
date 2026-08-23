@@ -4,14 +4,18 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http"
+	"strings"
+	"time"
 
 	openai "github.com/sashabaranov/go-openai"
 )
 
 // openAIProvider implements Provider using the OpenAI API.
 type openAIProvider struct {
-	client *openai.Client
-	model  string
+	client    *openai.Client
+	model     string
+	maxTokens int
 }
 
 func (p *openAIProvider) Name() string { return "openai" }
@@ -20,12 +24,27 @@ func newOpenAIProvider(cfg *Config) (*openAIProvider, error) {
 	if cfg.OpenAIKey == "" {
 		return nil, fmt.Errorf("ai: OPENAI_API_KEY is required for OpenAI provider")
 	}
-	client := openai.NewClient(cfg.OpenAIKey)
+	openaiConfig := openai.DefaultConfig(cfg.OpenAIKey)
+	if cfg.OpenAIBaseURL != "" {
+		openaiConfig.BaseURL = cfg.OpenAIBaseURL
+	}
+	timeoutSec := 600
+	if cfg.Timeout > 0 {
+		timeoutSec = cfg.Timeout
+	}
+	openaiConfig.HTTPClient = &http.Client{
+		Timeout: time.Duration(timeoutSec) * time.Second,
+	}
+	client := openai.NewClientWithConfig(openaiConfig)
 	model := cfg.Model
 	if model == "" {
 		model = openai.GPT4o
 	}
-	return &openAIProvider{client: client, model: model}, nil
+	maxTokens := cfg.MaxTokens
+	if maxTokens <= 0 {
+		maxTokens = 8192
+	}
+	return &openAIProvider{client: client, model: model, maxTokens: maxTokens}, nil
 }
 
 func (p *openAIProvider) Generate(ctx context.Context, req *GenerateRequest) (*GenerateResponse, error) {
@@ -36,17 +55,35 @@ func (p *openAIProvider) Generate(ctx context.Context, req *GenerateRequest) (*G
 	}
 	maxTokens := req.MaxTokens
 	if maxTokens <= 0 {
-		maxTokens = 1024
+		maxTokens = p.maxTokens
 	}
 
-	resp, err := p.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
-		Model:       model,
-		Messages:    messages,
-		MaxTokens:   maxTokens,
-		Temperature: req.Temperature,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("ai: openai: %w", err)
+	var resp openai.ChatCompletionResponse
+	var err error
+
+	for attempt := 1; attempt <= 3; attempt++ {
+		resp, err = p.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
+			Model:       model,
+			Messages:    messages,
+			MaxTokens:   maxTokens,
+			Temperature: req.Temperature,
+		})
+		if err == nil && len(resp.Choices) > 0 {
+			break
+		}
+		if err != nil {
+			errMsg := strings.ToLower(err.Error())
+			if attempt < 3 && (strings.Contains(errMsg, "502") || strings.Contains(errMsg, "503") || strings.Contains(errMsg, "504") || strings.Contains(errMsg, "429") || strings.Contains(errMsg, "bad gateway") || strings.Contains(errMsg, "timeout") || strings.Contains(errMsg, "deadline")) {
+				time.Sleep(time.Duration(attempt) * 800 * time.Millisecond)
+				continue
+			}
+			return nil, fmt.Errorf("ai: openai: %w", err)
+		}
+		// If err == nil but no choices, retry
+		if attempt < 3 {
+			time.Sleep(time.Duration(attempt) * 800 * time.Millisecond)
+			continue
+		}
 	}
 
 	if len(resp.Choices) == 0 {
@@ -84,14 +121,24 @@ func (p *openAIProvider) Stream(ctx context.Context, req *GenerateRequest) (*Str
 			maxTokens = 1024
 		}
 
-		stream, err := p.client.CreateChatCompletionStream(ctx, openai.ChatCompletionRequest{
-			Model:       model,
-			Messages:    messages,
-			MaxTokens:   maxTokens,
-			Temperature: req.Temperature,
-			Stream:      true,
-		})
-		if err != nil {
+		var stream *openai.ChatCompletionStream
+		var err error
+		for attempt := 1; attempt <= 3; attempt++ {
+			stream, err = p.client.CreateChatCompletionStream(ctx, openai.ChatCompletionRequest{
+				Model:       model,
+				Messages:    messages,
+				MaxTokens:   maxTokens,
+				Temperature: req.Temperature,
+				Stream:      true,
+			})
+			if err == nil {
+				break
+			}
+			errMsg := strings.ToLower(err.Error())
+			if attempt < 3 && (strings.Contains(errMsg, "502") || strings.Contains(errMsg, "503") || strings.Contains(errMsg, "504") || strings.Contains(errMsg, "429") || strings.Contains(errMsg, "bad gateway")) {
+				time.Sleep(time.Duration(attempt) * 600 * time.Millisecond)
+				continue
+			}
 			errCh <- fmt.Errorf("ai: openai stream: %w", err)
 			return
 		}

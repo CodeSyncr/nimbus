@@ -4,6 +4,17 @@ All notable changes to Nimbus are documented in this file.
 
 This project follows Semantic Versioning.
 
+## [1.5.3] - 2026-08-23
+
+### Added
+- **Agentic AI Workspace Engine (`internal/ai` & `internal/ai/tui`):**
+  - Full-featured Bubbletea TUI with markdown rendering, interactive plan visualization, question handling, diff previews, and tool execution.
+  - Built-in embedded skills system (`internal/ai/default_skills`) containing 20+ expert skills (`nimbus-expert`, `go-architect`, `database-migrations`, `livewire-components`, `mcp-builder`, `test-engineer`, `frontend-design`, etc.).
+  - Multi-turn session management, automated tool orchestration, and agent reasoning loop.
+- **Custom AI Base URLs & Resiliency:**
+  - Added support for custom provider API base URLs (`OPENAI_BASE_URL` / `OPENAI_API_URL` and `ANTHROPIC_BASE_URL` / `ANTHROPIC_API_URL`).
+  - Added exponential backoff retry handler (3 attempts) in OpenAI provider for transient 502/503/504/429/gateway/timeout errors.
+
 ## [1.5.2] - 2026-08-20
 
 ### Added

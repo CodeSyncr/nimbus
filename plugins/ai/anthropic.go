@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -18,39 +19,100 @@ import (
 // anthropicVersion is the required Anthropic API version header value.
 const anthropicVersion = "2023-06-01"
 
-// defaultAnthropicModel is used when no model is configured. Per Anthropic's
-// guidance, default to the most capable Opus-tier model.
-const defaultAnthropicModel = "claude-opus-4-8"
+// defaultAnthropicModel is used when no model is configured.
+const defaultAnthropicModel = "claude-sonnet-5"
 
 // defaultAnthropicMaxTokens is the fallback when a request sets no MaxTokens.
-// Anthropic's Messages API requires max_tokens on every request.
-const defaultAnthropicMaxTokens = 4096
+// Anthropic Messages API requires max_tokens on every request.
+const defaultAnthropicMaxTokens = 8192
 
 var anthropicHTTPClient = &http.Client{Timeout: 120 * time.Second}
 
-// anthropicBaseURL is the Messages API endpoint. It is a package var so tests
-// can point the provider at a local server.
+// anthropicBaseURL is the default Messages API endpoint.
 var anthropicBaseURL = "https://api.anthropic.com/v1/messages"
 
+// normalizeAnthropicURL ensures the endpoint points to the /messages path.
+func normalizeAnthropicURL(u string) string {
+	u = strings.TrimSpace(u)
+	if u == "" {
+		return anthropicBaseURL
+	}
+	u = strings.TrimRight(u, "/")
+	if strings.HasSuffix(u, "/messages") {
+		return u
+	}
+	if strings.HasSuffix(u, "/v1") {
+		return u + "/messages"
+	}
+	return u + "/v1/messages"
+}
+
 func newAnthropicProvider(cfg *Config) (Provider, error) {
-	if cfg.AnthropicKey == "" {
+	apiKey := cfg.AnthropicKey
+	if apiKey == "" {
+		apiKey = os.Getenv("ANTHROPIC_API_KEY")
+	}
+	if apiKey == "" {
 		return nil, fmt.Errorf("ai: ANTHROPIC_API_KEY is required for Anthropic provider")
 	}
+
 	model := cfg.Model
+	if model == "" {
+		model = os.Getenv("AI_MODEL")
+	}
 	if model == "" {
 		model = defaultAnthropicModel
 	}
-	return &anthropicProvider{apiKey: cfg.AnthropicKey, model: model}, nil
+
+	apiURL := cfg.AnthropicBaseURL
+	if apiURL == "" {
+		apiURL = cfg.AnthropicAPIURL
+	}
+	if apiURL == "" {
+		apiURL = os.Getenv("ANTHROPIC_BASE_URL")
+	}
+	if apiURL == "" {
+		apiURL = os.Getenv("ANTHROPIC_API_URL")
+	}
+
+	maxTokens := cfg.MaxTokens
+	if v := os.Getenv("AI_MAX_TOKENS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			maxTokens = n
+		}
+	}
+	if maxTokens <= 0 {
+		maxTokens = defaultAnthropicMaxTokens
+	}
+
+	return &anthropicProvider{
+		apiKey:    apiKey,
+		model:     model,
+		endpoint:  normalizeAnthropicURL(apiURL),
+		maxTokens: maxTokens,
+	}, nil
 }
 
 type anthropicProvider struct {
-	apiKey string
-	model  string
+	apiKey    string
+	model     string
+	endpoint  string
+	maxTokens int
 }
 
 func (p *anthropicProvider) Name() string { return "anthropic" }
 
-// ── Wire types (Messages API) ────────────────────────────────────
+func (p *anthropicProvider) effectiveMaxTokens(reqMax int) int {
+	if reqMax > 0 {
+		return reqMax
+	}
+	if p.maxTokens > 0 {
+		return p.maxTokens
+	}
+	return defaultAnthropicMaxTokens
+}
+
+// ── Wire types (Anthropic Messages API) ──────────────────────────
 
 type anthropicRequest struct {
 	Model     string             `json:"model"`
@@ -60,9 +122,8 @@ type anthropicRequest struct {
 	Tools     []anthropicTool    `json:"tools,omitempty"`
 	Stop      []string           `json:"stop_sequences,omitempty"`
 	Stream    bool               `json:"stream,omitempty"`
-	// NOTE: temperature/top_p/top_k are deliberately NOT forwarded. They are
-	// rejected with a 400 on Opus 4.8/4.7 and Sonnet 5; steer behavior through
-	// prompting instead.
+	// NOTE: temperature/top_p/top_k are not forwarded to Opus/Sonnet
+	// to avoid 400 rejection; behavior is steered via prompting.
 }
 
 type anthropicMessage struct {
@@ -146,14 +207,18 @@ func (p *anthropicProvider) Generate(ctx context.Context, req *GenerateRequest) 
 	}, nil
 }
 
-// do performs a non-streaming Messages API call and returns the raw body.
 func (p *anthropicProvider) do(ctx context.Context, body *anthropicRequest) ([]byte, error) {
 	jsonBody, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", anthropicBaseURL, bytes.NewReader(jsonBody))
+	endpoint := p.endpoint
+	if endpoint == "" {
+		endpoint = anthropicBaseURL
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewReader(jsonBody))
 	if err != nil {
 		return nil, err
 	}
@@ -177,8 +242,6 @@ func (p *anthropicProvider) do(ctx context.Context, body *anthropicRequest) ([]b
 
 // ── Stream ───────────────────────────────────────────────────────
 
-// anthropicStreamEvent is a superset of the SSE event shapes we consume; unused
-// fields for a given event type stay at their zero value.
 type anthropicStreamEvent struct {
 	Type  string `json:"type"`
 	Delta struct {
@@ -204,7 +267,12 @@ func (p *anthropicProvider) Stream(ctx context.Context, req *GenerateRequest) (*
 		return nil, err
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", anthropicBaseURL, bytes.NewReader(jsonBody))
+	endpoint := p.endpoint
+	if endpoint == "" {
+		endpoint = anthropicBaseURL
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewReader(jsonBody))
 	if err != nil {
 		return nil, err
 	}
@@ -230,7 +298,6 @@ func (p *anthropicProvider) Stream(ctx context.Context, req *GenerateRequest) (*
 
 		usage := &Usage{}
 		scanner := bufio.NewScanner(resp.Body)
-		// Allow long SSE data lines (default 64KiB can be exceeded by large blocks).
 		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 		for scanner.Scan() {
 			line := scanner.Text()
@@ -261,11 +328,9 @@ func (p *anthropicProvider) Stream(ctx context.Context, req *GenerateRequest) (*
 					}
 				}
 			case "message_delta":
-				if ev.Usage.OutputTokens > 0 {
-					usage.CompletionTokens = ev.Usage.OutputTokens
-				}
-			case "message_stop":
+				usage.CompletionTokens = ev.Usage.OutputTokens
 				usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
+			case "message_stop":
 				select {
 				case chunks <- StreamChunk{Usage: usage, Done: true}:
 				case <-ctx.Done():
@@ -292,13 +357,15 @@ func (p *anthropicProvider) setHeaders(req *http.Request) {
 }
 
 func (p *anthropicProvider) buildRequest(req *GenerateRequest, stream bool) *anthropicRequest {
-	maxTokens := req.MaxTokens
-	if maxTokens <= 0 {
-		maxTokens = defaultAnthropicMaxTokens
+	maxTokens := p.effectiveMaxTokens(req.MaxTokens)
+
+	model := req.Model
+	if model == "" {
+		model = p.model
 	}
 
 	ar := &anthropicRequest{
-		Model:     p.model,
+		Model:     model,
 		MaxTokens: maxTokens,
 		Stop:      req.Stop,
 		Stream:    stream,
@@ -316,9 +383,7 @@ func (p *anthropicProvider) buildRequest(req *GenerateRequest, stream bool) *ant
 		})
 	}
 
-	// The Messages API takes the system prompt as a top-level field and only
-	// user/assistant turns in messages. Hoist any system-role messages up and
-	// map everything else to user/assistant.
+	// Hoist system prompt to top-level field per Messages API spec.
 	var systemParts []string
 	if req.System != "" {
 		systemParts = append(systemParts, req.System)
@@ -351,9 +416,6 @@ func (p *anthropicProvider) buildRequest(req *GenerateRequest, stream bool) *ant
 	return ar
 }
 
-// anthropicImageBlocks reads local image paths and encodes them as base64
-// image content blocks. Unreadable paths are skipped (matching the Gemini
-// provider's best-effort behavior).
 func anthropicImageBlocks(paths []string) []anthropicContent {
 	var blocks []anthropicContent
 	for _, imgPath := range paths {

@@ -120,7 +120,16 @@ func (p *Plugin) loadConfig(app *nimbus.App) *Config {
 
 	// Override from env
 	cfg.OpenAIKey = os.Getenv("OPENAI_API_KEY")
+	cfg.OpenAIBaseURL = os.Getenv("OPENAI_BASE_URL")
+	if cfg.OpenAIBaseURL == "" {
+		cfg.OpenAIBaseURL = os.Getenv("OPENAI_API_URL")
+	}
 	cfg.AnthropicKey = os.Getenv("ANTHROPIC_API_KEY")
+	cfg.AnthropicBaseURL = os.Getenv("ANTHROPIC_BASE_URL")
+	if cfg.AnthropicBaseURL == "" {
+		cfg.AnthropicBaseURL = os.Getenv("ANTHROPIC_API_URL")
+	}
+	cfg.AnthropicAPIURL = os.Getenv("ANTHROPIC_API_URL")
 	cfg.CohereKey = os.Getenv("COHERE_API_KEY")
 	cfg.GeminiKey = os.Getenv("GEMINI_API_KEY")
 	cfg.MistralKey = os.Getenv("MISTRAL_API_KEY")

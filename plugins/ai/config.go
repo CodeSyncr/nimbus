@@ -8,12 +8,15 @@ type Config struct {
 	Timeout   int
 	MaxTokens int
 	// Text generation providers
-	OpenAIKey    string
-	AnthropicKey string
-	CohereKey    string
-	GeminiKey    string
-	MistralKey   string
-	XAIKey       string
+	OpenAIKey       string
+	OpenAIBaseURL   string
+	AnthropicKey    string
+	AnthropicBaseURL string
+	AnthropicAPIURL  string
+	CohereKey       string
+	GeminiKey       string
+	MistralKey      string
+	XAIKey          string
 	// Ollama uses OLLAMA_HOST (default localhost:11434), no key
 	OllamaHost string
 	// Embeddings / specialized (for future use)

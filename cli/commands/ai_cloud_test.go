@@ -21,17 +21,51 @@ func TestAICommand_CloudGeneration(t *testing.T) {
 
 	// Test with a mock Nimbus Cloud server returning 200 OK
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/v1/ai/generate" {
-			w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/api/v1/ai/plan" {
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"success": true,
-				"files": []map[string]string{
-					{
-						"path":    "app/models/product.go",
-						"content": "package models\n\ntype Product struct {\n\tTitle string\n\tPrice float64\n}\n",
+				"plan": map[string]any{
+					"summary":  "Scaffold product model",
+					"overview": "Create product model",
+					"steps": []map[string]any{
+						{
+							"id":          1,
+							"action":      "create_file",
+							"target":      "app/models/product.go",
+							"description": "Create product model",
+							"approved":    true,
+						},
 					},
 				},
-				"hints": []string{"Run nimbus migrate"},
+			})
+			return
+		}
+		if r.URL.Path == "/api/v1/ai/execute" {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"success": true,
+				"content": []map[string]any{
+					{
+						"type": "tool_use",
+						"id":   "call_1",
+						"name": "write_file",
+						"input": map[string]any{
+							"path":    "app/models/product.go",
+							"content": "package models\n\ntype Product struct {\n\tTitle string\n\tPrice float64\n}\n",
+						},
+					},
+					{
+						"type": "text",
+						"text": "File created successfully.",
+					},
+				},
+			})
+			return
+		}
+		if r.URL.Path == "/api/v1/ai/generate" {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"success": true,
+				"reply":   "Product model scaffolded",
 			})
 			return
 		}

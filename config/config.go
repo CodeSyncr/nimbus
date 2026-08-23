@@ -59,11 +59,11 @@ func Load() *Config {
 			Key:  getEnv("APP_KEY", ""),
 			// Bound every phase of a request's lifecycle so a slow or
 			// malicious client cannot pin a connection open forever.
-			ReadTimeout:       getEnvDuration("SERVER_READ_TIMEOUT", 15*time.Second),
-			ReadHeaderTimeout: getEnvDuration("SERVER_READ_HEADER_TIMEOUT", 5*time.Second),
-			WriteTimeout:      getEnvDuration("SERVER_WRITE_TIMEOUT", 30*time.Second),
-			IdleTimeout:       getEnvDuration("SERVER_IDLE_TIMEOUT", 120*time.Second),
-			ShutdownTimeout:   getEnvDuration("SERVER_SHUTDOWN_TIMEOUT", 10*time.Second),
+			ReadTimeout:       getEnvDuration("SERVER_READ_TIMEOUT", 60*time.Second),
+			ReadHeaderTimeout: getEnvDuration("SERVER_READ_HEADER_TIMEOUT", 15*time.Second),
+			WriteTimeout:      getEnvDuration("SERVER_WRITE_TIMEOUT", 300*time.Second),
+			IdleTimeout:       getEnvDuration("SERVER_IDLE_TIMEOUT", 300*time.Second),
+			ShutdownTimeout:   getEnvDuration("SERVER_SHUTDOWN_TIMEOUT", 15*time.Second),
 			MaxHeaderBytes:    getEnvInt("SERVER_MAX_HEADER_BYTES", 1<<20), // 1 MiB
 		},
 		Database: DatabaseConfig{

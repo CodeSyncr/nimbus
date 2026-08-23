@@ -19,7 +19,7 @@ Inspired by Vercel AI SDK and LangChain, it provides unified abstractions for:
 ## Core Components
 
 ### Clients & Providers
-The `ai.Client` handles communication with multiple providers (OpenAI, Anthropic, Gemini, Ollama, etc.) through a unified interface.
+The `ai.Client` handles communication with multiple providers (OpenAI, Anthropic, Gemini, Ollama, etc.) through a unified interface. Providers support custom base URLs (`OPENAI_BASE_URL`, `ANTHROPIC_BASE_URL` / `ANTHROPIC_API_URL`) and automatic exponential backoff retries on transient network and gateway errors (`502`, `503`, `504`, `429`).
 
 ### Agents
 Agents combine instructions, tools, and memory to perform complex tasks autonomously.

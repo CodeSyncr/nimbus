@@ -6,6 +6,7 @@ import (
 
 	"github.com/CodeSyncr/nimbus/cli"
 	_ "github.com/CodeSyncr/nimbus/cli/commands"
+	"github.com/CodeSyncr/nimbus/internal/ai"
 	"github.com/CodeSyncr/nimbus/internal/version"
 	"github.com/spf13/cobra"
 )
@@ -18,6 +19,7 @@ var rootCmd = &cobra.Command{
 }
 
 func main() {
+	_ = ai.EnsureDefaultSkills()
 	if err := cli.NewRoot(rootCmd).Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

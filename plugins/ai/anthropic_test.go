@@ -21,7 +21,7 @@ func withAnthropicServer(t *testing.T, handler http.HandlerFunc, fn func(p *anth
 	anthropicBaseURL = srv.URL
 	defer func() { anthropicBaseURL = orig }()
 
-	fn(&anthropicProvider{apiKey: "test-key", model: defaultAnthropicModel})
+	fn(&anthropicProvider{apiKey: "test-key", model: defaultAnthropicModel, endpoint: srv.URL})
 }
 
 func TestAnthropicGenerate(t *testing.T) {
@@ -164,5 +164,41 @@ func TestAnthropicMissingKey(t *testing.T) {
 	}
 	if p.(*anthropicProvider).model != defaultAnthropicModel {
 		t.Fatalf("default model: got %q", p.(*anthropicProvider).model)
+	}
+	if p.(*anthropicProvider).endpoint != "https://api.anthropic.com/v1/messages" {
+		t.Fatalf("default endpoint: got %q", p.(*anthropicProvider).endpoint)
+	}
+}
+
+func TestAnthropicCustomURL(t *testing.T) {
+	tests := []struct {
+		input   string
+		wantURL string
+	}{
+		{"https://custom-proxy.example.com/v1", "https://custom-proxy.example.com/v1/messages"},
+		{"https://custom-proxy.example.com/v1/", "https://custom-proxy.example.com/v1/messages"},
+		{"https://custom-proxy.example.com/v1/messages", "https://custom-proxy.example.com/v1/messages"},
+		{"https://api.anthropic.com/v1/messages", "https://api.anthropic.com/v1/messages"},
+		{"https://api.anthropic.com/v1", "https://api.anthropic.com/v1/messages"},
+		{"", "https://api.anthropic.com/v1/messages"},
+	}
+
+	for _, tt := range tests {
+		gotURL := normalizeAnthropicURL(tt.input)
+		if gotURL != tt.wantURL {
+			t.Errorf("normalizeAnthropicURL(%q) URL = %q, want %q", tt.input, gotURL, tt.wantURL)
+		}
+	}
+
+	p, err := newAnthropicProvider(&Config{
+		AnthropicKey:    "k",
+		AnthropicAPIURL: "https://custom-proxy.example.com/v1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ap := p.(*anthropicProvider)
+	if ap.endpoint != "https://custom-proxy.example.com/v1/messages" {
+		t.Fatalf("custom endpoint: got %q", ap.endpoint)
 	}
 }
