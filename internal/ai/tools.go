@@ -129,6 +129,18 @@ func (t *ToolExecutor) GetToolDefinitions() []ToolDefinition {
 				"required": []string{"skill_name"},
 			},
 		},
+		{
+			Name:        "query_skill",
+			Description: "Search and retrieve specific rule sections or topics from a skill to keep context lightweight.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"skill_name": map[string]any{"type": "string", "description": "The exact name of the skill to query."},
+					"query":      map[string]any{"type": "string", "description": "The topic or keyword to retrieve (e.g. 'validation', 'routing', 'wire:model')."},
+				},
+				"required": []string{"skill_name", "query"},
+			},
+		},
 	}
 }
 
@@ -147,6 +159,16 @@ func (t *ToolExecutor) ExecuteTool(ctx context.Context, name string, args map[st
 		}
 		out, err := t.LoadSkill(skillName)
 		return out, "", err
+
+	case "query_skill":
+		skillName, _ := args["skill_name"].(string)
+		if skillName == "" {
+			skillName, _ = args["name"].(string)
+		}
+		query, _ := args["query"].(string)
+		out, err := t.QuerySkill(skillName, query)
+		return out, "", err
+
 
 	case "list_dir":
 		path, _ := args["path"].(string)
@@ -241,6 +263,22 @@ func (t *ToolExecutor) LoadSkill(skillName string) (string, error) {
 func (t *ToolExecutor) ReadSkill(name string) (string, error) {
 	return t.LoadSkill(name)
 }
+
+// QuerySkill reads specific sections or topics from a skill to keep context lightweight.
+func (t *ToolExecutor) QuerySkill(skillName, query string) (string, error) {
+	skillName = strings.TrimSpace(skillName)
+	if skillName == "" {
+		return "", errors.New("skill_name cannot be empty")
+	}
+
+	section, err := ReadSkillSection(t.AppRoot, skillName, query)
+	if err != nil {
+		return "", err
+	}
+
+	return fmt.Sprintf("# Skill Query: %s (Topic: %s)\n\n%s", skillName, query, section), nil
+}
+
 
 func (t *ToolExecutor) ListDir(relPath string) (string, error) {
 	fullPath, err := t.resolvePath(relPath)

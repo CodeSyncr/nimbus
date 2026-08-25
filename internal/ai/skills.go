@@ -270,3 +270,69 @@ func FormatSkillsSummary(skills []Skill) string {
 	sb.WriteString("\n")
 	return sb.String()
 }
+
+// ReadSkillSection reads only the relevant sections matching a query from a skill document.
+func ReadSkillSection(appRoot, skillName, query string) (string, error) {
+	fullBody, err := ReadSkillContent(appRoot, skillName)
+	if err != nil {
+		return "", err
+	}
+	query = strings.TrimSpace(query)
+	if query == "" {
+		lines := strings.Split(fullBody, "\n")
+		if len(lines) > 150 {
+			return strings.Join(lines[:150], "\n") + "\n\n... (skill content truncated, query specific sections with query_skill)", nil
+		}
+		return fullBody, nil
+	}
+
+	sections := strings.Split(fullBody, "\n#")
+	var matchedSections []string
+	lowerQuery := strings.ToLower(query)
+
+	for idx, sec := range sections {
+		headerPrefix := ""
+		if idx > 0 {
+			headerPrefix = "#"
+		}
+		fullSec := headerPrefix + sec
+		if strings.Contains(strings.ToLower(fullSec), lowerQuery) {
+			matchedSections = append(matchedSections, strings.TrimSpace(fullSec))
+		}
+	}
+
+	if len(matchedSections) > 0 {
+		return strings.Join(matchedSections, "\n\n---\n\n"), nil
+	}
+
+	lines := strings.Split(fullBody, "\n")
+	var matchedLines []string
+	for idx, line := range lines {
+		if strings.Contains(strings.ToLower(line), lowerQuery) {
+			start := idx - 3
+			if start < 0 {
+				start = 0
+			}
+			end := idx + 4
+			if end > len(lines) {
+				end = len(lines)
+			}
+			matchedLines = append(matchedLines, strings.Join(lines[start:end], "\n"))
+		}
+	}
+
+	if len(matchedLines) > 0 {
+		return "Matching snippets for '" + query + "':\n\n" + strings.Join(matchedLines, "\n\n---\n\n"), nil
+	}
+
+	return fmt.Sprintf("No section matching '%s' found in skill '%s'. Showing top summary:\n\n%s", query, skillName, extractTopSummary(fullBody)), nil
+}
+
+func extractTopSummary(body string) string {
+	lines := strings.Split(body, "\n")
+	if len(lines) > 40 {
+		return strings.Join(lines[:40], "\n")
+	}
+	return body
+}
+

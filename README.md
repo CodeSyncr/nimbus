@@ -63,20 +63,56 @@ Release checklist: **[V1_RELEASE.md](./V1_RELEASE.md)** · History: **[CHANGELOG
 
 ### Install CLI
 
-From the **nimbus** repo directory:
+Install the Nimbus CLI globally using `go install`:
+
+```bash
+go install github.com/CodeSyncr/nimbus/cmd/nimbus@latest
+```
+
+Or from a local clone of the **nimbus** repository:
 
 ```bash
 cd /path/to/nimbus
 go install ./cmd/nimbus
 ```
 
-**If you get `zsh: command not found: nimbus`**, add Go’s bin directory to your PATH. For zsh, run once:
+#### PATH Configuration by Operating System
+
+Make sure Go's binary directory is in your system `PATH`:
+
+- **macOS (Zsh / Bash):**
+  ```bash
+  # For Zsh (macOS default):
+  echo 'export PATH="$HOME/go/bin:$PATH"' >> ~/.zshrc && source ~/.zshrc
+
+  # For Bash:
+  echo 'export PATH="$HOME/go/bin:$PATH"' >> ~/.bash_profile && source ~/.bash_profile
+  ```
+
+- **Windows (PowerShell / Command Prompt):**
+  ```powershell
+  # PowerShell (run once):
+  [Environment]::SetEnvironmentVariable("Path", [Environment]::GetEnvironmentVariable("Path", "User") + ";$env:USERPROFILE\go\bin", "User")
+
+  # Command Prompt (run once):
+  setx PATH "%PATH%;%USERPROFILE%\go\bin"
+  ```
+  *(Restart your terminal after adding to PATH).*
+
+- **Linux (Bash / Zsh):**
+  ```bash
+  # For Bash:
+  echo 'export PATH="$HOME/go/bin:$PATH"' >> ~/.bashrc && source ~/.bashrc
+
+  # For Zsh:
+  echo 'export PATH="$HOME/go/bin:$PATH"' >> ~/.zshrc && source ~/.zshrc
+  ```
+
+#### Verify Installation
 
 ```bash
-echo 'export PATH="$HOME/go/bin:$PATH"' >> ~/.zshrc && source ~/.zshrc
+nimbus help
 ```
-
-Then run `nimbus` again. You can also run your app without the CLI: `go run main.go` (no hot reload) or `go run github.com/air-verse/air@v1.52.3` (hot reload).
 
 **Hot reload:** `nimbus serve` runs [air](https://github.com/air-verse/air) via `go run`, so you don’t install anything extra. The first run may download air once; after that, edits to `.go` and `.nimbus` files restart the app automatically. No need to add air to your app’s `go.mod` or run `go mod tidy` for it. Press **Ctrl+C** to stop the server; it shuts down gracefully and releases the port.
 

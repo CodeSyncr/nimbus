@@ -37,8 +37,9 @@ func NewContext(cmd *cobra.Command, args []string) *Context {
 	}
 }
 
-// findAppRoot walks up from the current working directory looking for go.mod.
-// If not found, it returns the original working directory.
+// findAppRoot walks up from the current working directory looking for project root markers
+// (go.mod, nimbus.json, package.json, .git, Cargo.toml, pyproject.toml).
+// If not found or when reaching root boundaries, it returns the current working directory.
 func findAppRoot() string {
 	wd, err := os.Getwd()
 	if err != nil {
@@ -46,13 +47,18 @@ func findAppRoot() string {
 	}
 	dir := wd
 	for {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			return dir
+		markers := []string{"go.mod", "nimbus.json", "package.json", ".git", "Cargo.toml", "pyproject.toml"}
+		for _, m := range markers {
+			if _, err := os.Stat(filepath.Join(dir, m)); err == nil {
+				return dir
+			}
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			return wd
+			break
 		}
 		dir = parent
 	}
+	return wd
 }
+

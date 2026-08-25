@@ -487,9 +487,9 @@ func cleanErrorMessage(statusCode int, body []byte) string {
 }
 
 // compactMessagesForWire strips large file content from write_file tool_use blocks
-// in message history before sending to the server. The server only needs input.path
-// to detect which files have already been written — not the full file content.
-// This prevents payload bloat that grows with each iteration (each file can be 10KB+).
+// compactMessagesForWire strips large file content and raw skill dumps from message history
+// before sending to the server. The server only needs input metadata to track state.
+// This prevents exponential payload bloat across multi-turn tool loops.
 func compactMessagesForWire(messages []Message) []Message {
 	compacted := make([]Message, len(messages))
 	for i, msg := range messages {
@@ -512,11 +512,29 @@ func compactMessagesForWire(messages []Message) []Message {
 						Name:  cb.Name,
 						Input: newInput,
 					}
+				} else if cb.Type == "tool_use" && (name == "load_skill" || name == "read_skill" || name == "query_skill") {
+					newInput := map[string]any{}
+					if s, ok := cb.Input["skill_name"].(string); ok {
+						newInput["skill_name"] = s
+					} else if s, ok := cb.Input["name"].(string); ok {
+						newInput["skill_name"] = s
+					}
+					if q, ok := cb.Input["query"].(string); ok {
+						newInput["query"] = q
+					}
+					stripped[j] = ContentBlock{
+						Type:  cb.Type,
+						ID:    cb.ID,
+						Name:  cb.Name,
+						Input: newInput,
+					}
 				} else if cb.Type == "tool_result" {
-					// Trim verbose tool result content (success messages can be long)
+					// Trim verbose tool result content (skills & file writes)
 					result := cb.Content
-					if len(result) > 100 {
-						result = result[:100]
+					if strings.Contains(result, "# Skill:") || strings.Contains(result, "# Skill Query:") {
+						result = "[Skill content mounted into active system frame]"
+					} else if len(result) > 120 {
+						result = result[:120] + "... (truncated)"
 					}
 					stripped[j] = ContentBlock{
 						Type:      cb.Type,
@@ -531,3 +549,4 @@ func compactMessagesForWire(messages []Message) []Message {
 	}
 	return compacted
 }
+

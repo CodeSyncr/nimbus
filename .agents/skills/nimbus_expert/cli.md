@@ -2,6 +2,22 @@
 
 The Nimbus CLI is the primary tool for scaffolding, code generation, and project management.
 
+## Installation
+
+Install globally using `go install`:
+
+```bash
+go install github.com/CodeSyncr/nimbus/cmd/nimbus@latest
+```
+
+### PATH Setup by Operating System
+- **macOS (Zsh):** `echo 'export PATH="$HOME/go/bin:$PATH"' >> ~/.zshrc && source ~/.zshrc`
+- **Windows (PowerShell):** `[Environment]::SetEnvironmentVariable("Path", [Environment]::GetEnvironmentVariable("Path", "User") + ";$env:USERPROFILE\go\bin", "User")`
+- **Windows (CMD):** `setx PATH "%PATH%;%USERPROFILE%\go\bin"`
+- **Linux (Bash):** `echo 'export PATH="$HOME/go/bin:$PATH"' >> ~/.bashrc && source ~/.bashrc`
+
+Verify with `nimbus help` or `nimbus --version`.
+
 ## Core Commands
 
 ### Project Management

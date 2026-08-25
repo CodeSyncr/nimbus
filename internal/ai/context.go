@@ -11,20 +11,22 @@ import (
 
 // ProjectContext contains scanned information about the current Nimbus project.
 type ProjectContext struct {
-	AppRoot        string            `json:"app_root"`
-	ProjectName    string            `json:"project_name"`
-	GoModName      string            `json:"go_mod_name"`
-	GoVersion      string            `json:"go_version"`
-	NimbusModules  []string          `json:"nimbus_modules"`
-	NimbusJSON     string            `json:"nimbus_json,omitempty"`
-	DirectoryTree  string            `json:"directory_tree"`
-	GitBranch      string            `json:"git_branch,omitempty"`
-	GitDiffSummary string            `json:"git_diff_summary,omitempty"`
-	Models         []string          `json:"models"`
-	Controllers    []string          `json:"controllers"`
-	Migrations     []string          `json:"migrations"`
-	RoutesSummary  string            `json:"routes_summary,omitempty"`
-	Skills         []Skill           `json:"skills,omitempty"`
+	AppRoot          string            `json:"app_root"`
+	ProjectName      string            `json:"project_name"`
+	GoModName        string            `json:"go_mod_name,omitempty"`
+	GoVersion        string            `json:"go_version,omitempty"`
+	NimbusModules    []string          `json:"nimbus_modules,omitempty"`
+	NimbusJSON       string            `json:"nimbus_json,omitempty"`
+	DirectoryTree    string            `json:"directory_tree"`
+	GitBranch        string            `json:"git_branch,omitempty"`
+	GitDiffSummary   string            `json:"git_diff_summary,omitempty"`
+	RootFiles        []string          `json:"root_files,omitempty"`
+	Models           []string          `json:"models,omitempty"`
+	Controllers      []string          `json:"controllers,omitempty"`
+	Migrations       []string          `json:"migrations,omitempty"`
+	RoutesSummary    string            `json:"routes_summary,omitempty"`
+	Skills           []Skill           `json:"skills,omitempty"`
+	ActiveSkillFrame string            `json:"active_skill_frame,omitempty"`
 }
 
 // ScanProject scans the given project directory and constructs a ProjectContext.
@@ -38,13 +40,23 @@ func ScanProject(appRoot string) (*ProjectContext, error) {
 		AppRoot:       absRoot,
 		ProjectName:   filepath.Base(absRoot),
 		NimbusModules: make([]string, 0),
+		RootFiles:     make([]string, 0),
 		Models:        make([]string, 0),
 		Controllers:   make([]string, 0),
 		Migrations:    make([]string, 0),
 		Skills:        make([]Skill, 0),
 	}
 
-	// 1. Read go.mod
+	// Scan top-level files in AppRoot
+	if entries, err := os.ReadDir(absRoot); err == nil {
+		for _, e := range entries {
+			if !e.IsDir() && !strings.HasPrefix(e.Name(), ".") {
+				ctx.RootFiles = append(ctx.RootFiles, e.Name())
+			}
+		}
+	}
+
+	// 1. Read go.mod if present
 	goModPath := filepath.Join(absRoot, "go.mod")
 	if data, err := os.ReadFile(goModPath); err == nil {
 		lines := strings.Split(string(data), "\n")
@@ -99,7 +111,9 @@ func (p *ProjectContext) FormatSystemContext() string {
 
 	sb.WriteString("## Project Context\n")
 	sb.WriteString(fmt.Sprintf("- **Project Root:** `%s`\n", p.AppRoot))
-	sb.WriteString(fmt.Sprintf("- **Module:** `%s`\n", p.GoModName))
+	if p.GoModName != "" {
+		sb.WriteString(fmt.Sprintf("- **Module:** `%s`\n", p.GoModName))
+	}
 	if p.GoVersion != "" {
 		sb.WriteString(fmt.Sprintf("- **Go Version:** `%s`\n", p.GoVersion))
 	}
@@ -107,9 +121,14 @@ func (p *ProjectContext) FormatSystemContext() string {
 		sb.WriteString(fmt.Sprintf("- **Git Branch:** `%s`\n", p.GitBranch))
 	}
 
+	if len(p.RootFiles) > 0 {
+		sb.WriteString(fmt.Sprintf("- **Root Directory Files:** `%s`\n", strings.Join(p.RootFiles, "`, `")))
+	}
+
 	if len(p.NimbusModules) > 0 {
 		sb.WriteString(fmt.Sprintf("- **Imported Nimbus Modules:** %s\n", strings.Join(p.NimbusModules, ", ")))
 	}
+
 
 	if len(p.Models) > 0 {
 		sb.WriteString(fmt.Sprintf("- **Models:** `%s`\n", strings.Join(p.Models, "`, `")))
@@ -141,8 +160,15 @@ func (p *ProjectContext) FormatSystemContext() string {
 		sb.WriteString(FormatSkillsSummary(p.Skills))
 	}
 
+	if p.ActiveSkillFrame != "" {
+		sb.WriteString("\n### Active System Skill Frame\n")
+		sb.WriteString(p.ActiveSkillFrame)
+		sb.WriteString("\n\n")
+	}
+
 	return sb.String()
 }
+
 
 // detectNimbusModules checks for nimbus/str, nimbus/collect, nimbus/timex, nimbus/pipeline, etc.
 func detectNimbusModules(appRoot string) []string {
@@ -246,11 +272,12 @@ func buildDirectoryTree(root string, maxDepth int) string {
 		var filtered []os.DirEntry
 		for _, e := range entries {
 			name := e.Name()
-			if strings.HasPrefix(name, ".") || name == "node_modules" || name == "vendor" || name == "bin" || name == "storage" || name == "public" {
+			if strings.HasPrefix(name, ".") || name == "node_modules" || name == "vendor" || name == "bin" || name == "storage" {
 				continue
 			}
 			filtered = append(filtered, e)
 		}
+
 
 		for i, e := range filtered {
 			isLast := i == len(filtered)-1

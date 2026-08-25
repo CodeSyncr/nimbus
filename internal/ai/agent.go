@@ -246,7 +246,7 @@ func (a *Agent) ExecuteApprovedPlan(ctx context.Context, plan *PlanSummary) (str
 			var diff string
 			var err error
 
-			if tb.Name == "load_skill" || tb.Name == "read_skill" {
+			if tb.Name == "load_skill" || tb.Name == "read_skill" || tb.Name == "query_skill" {
 				skillName, _ := tb.Input["skill_name"].(string)
 				if skillName == "" {
 					skillName, _ = tb.Input["name"].(string)
@@ -255,15 +255,20 @@ func (a *Agent) ExecuteApprovedPlan(ctx context.Context, plan *PlanSummary) (str
 				if a.Session.LoadedSkills == nil {
 					a.Session.LoadedSkills = make(map[string]string)
 				}
-				if cached, ok := a.Session.LoadedSkills[skillName]; ok && cached != "" {
+				if cached, ok := a.Session.LoadedSkills[skillName]; ok && cached != "" && tb.Name != "query_skill" {
 					out = cached
 					err = nil
 				} else {
 					out, diff, err = a.Tools.ExecuteTool(ctx, tb.Name, tb.Input)
-					if err == nil && out != "" {
+					if err == nil && out != "" && tb.Name != "query_skill" {
 						a.Session.LoadedSkills[skillName] = out
 						_ = SaveSession(a.Context.AppRoot, a.Session)
 					}
+				}
+
+				if err == nil && out != "" {
+					// Mount active skill into System Frame slot instead of polluting message history
+					a.Context.ActiveSkillFrame = out
 				}
 			} else {
 				out, diff, err = a.Tools.ExecuteTool(ctx, tb.Name, tb.Input)
@@ -278,16 +283,23 @@ func (a *Agent) ExecuteApprovedPlan(ctx context.Context, plan *PlanSummary) (str
 				a.Callbacks.OnDiffGenerated(path, diff)
 			}
 
+			// Compact result text in history if loading skill to keep context lightweight
+			historyContent := out
+			if (tb.Name == "load_skill" || tb.Name == "read_skill" || tb.Name == "query_skill") && err == nil {
+				historyContent = "[Skill content mounted into active system frame]"
+			}
+
 			resBlock := ContentBlock{
 				Type:      "tool_result",
 				ToolUseID: tb.ID,
-				Content:   out,
+				Content:   historyContent,
 			}
 			if err != nil {
 				resBlock.IsError = true
 				resBlock.Content = fmt.Sprintf("Error: %v", err)
 			}
 			toolResults = append(toolResults, resBlock)
+
 		}
 
 		// Append tool results to messages
