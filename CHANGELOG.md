@@ -18,6 +18,12 @@ This project follows Semantic Versioning.
 - New `/api/v1/ai/turn` client protocol (single agentic model turn with native tools); older servers fall back to the previous `/ai/plan` + `/ai/execute` flow automatically.
 - `bash` tool works on stock Windows (falls back to `cmd /C` when `sh` is unavailable), captures head+tail of long output, and has a 120s timeout.
 
+- **`nimbus ai` TUI redesigned** in the style of Claude Code: one-line header with project/branch/mode, Claude-style tool activity lines (`● Read main.go  42 lines`, `● Edit start/routes.go  +2 −0` with inline diffs), phase markers with timings (Exploring → Planning → Executing → Verifying), streamed assistant text, a plan-review card that scrolls, restyled clarification questions, adaptive light/dark palette, `Esc` to interrupt a running task, `/session` and `/help` commands, and prompts passed on the command line (`nimbus ai "add a comments resource"`) now run immediately.
+
+### Fixed
+- **`nimbus ai` on Windows:** the console is switched to UTF-8 and virtual-terminal mode before the TUI starts, so glyphs and colours render in cmd.exe/conhost instead of mojibake.
+- **Tests overwrote the real `~/.nimbus/auth.json` on Windows.** The CLI tests set `HOME` to a temp dir, but Go resolves the home directory from `USERPROFILE` on Windows, so running the test suite replaced the developer's login with mock credentials pointing at a dead localhost server — after which `nimbus ai` could not reach Nimbus Cloud. Added `NIMBUS_CONFIG_DIR` (honoured by `auth.ConfigDir`) and pointed every test at it. If you ran the tests before this fix, run `nimbus login` again.
+
 ### Added
 - **`plugins/ai`: native tool calling for the OpenAI provider** (function tools, `tool_calls` parsing, `role: tool` results, streamed tool-call accumulation). The Anthropic provider now sends proper `tool_use` / `tool_result` blocks instead of flattening them to text.
 

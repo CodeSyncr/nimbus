@@ -9,8 +9,8 @@ import (
 
 var (
 	reBold       = regexp.MustCompile(`\*\*(.+?)\*\*`)
-	reItalic     = regexp.MustCompile(`\*([^*]+?)\*`)
 	reInlineCode = regexp.MustCompile("`([^`]+)`")
+	reNumbered   = regexp.MustCompile(`^(\d+)\.\s+(.*)$`)
 )
 
 // RenderMarkdown parses basic markdown constructs and converts them into Lipgloss styled strings.
@@ -26,50 +26,37 @@ func RenderMarkdown(input string, maxWidth int) string {
 	codeBlockLang := ""
 	var codeLines []string
 
-	h1Style := lipgloss.NewStyle().Foreground(lipgloss.Color("#D97757")).Bold(true)
-	h2Style := lipgloss.NewStyle().Foreground(lipgloss.Color("#F4F4F5")).Bold(true)
-	h3Style := lipgloss.NewStyle().Foreground(lipgloss.Color("#E4E4E7")).Bold(true)
-	bulletStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#D97757"))
-	numStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#A1A1AA"))
-	quoteStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF")).Italic(true)
-	quoteBar := lipgloss.NewStyle().Foreground(lipgloss.Color("#D97757")).Render("│ ")
-	codeBlockStyle := lipgloss.NewStyle().
-		Background(lipgloss.Color("#18181B")).
-		Foreground(lipgloss.Color("#E4E4E7")).
-		Padding(0, 1)
-	langTagStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#D97757")).
-		Background(lipgloss.Color("#27272A")).
-		Bold(true).
-		Padding(0, 1)
-	hrStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#3F3F46"))
+	h1Style := sAccentBold
+	h2Style := sBold
+	h3Style := lipgloss.NewStyle().Foreground(cSoft).Bold(true)
+	bulletStyle := sAccent
+	numStyle := sMuted
+	quoteStyle := sMuted.Italic(true)
+	quoteBar := sAccent.Render(glyphBar + " ")
+	codeBlockStyle := lipgloss.NewStyle().Background(cPanel).Foreground(cText).Padding(0, 1)
+	langTagStyle := lipgloss.NewStyle().Foreground(cAccent).Background(cCode).Bold(true).Padding(0, 1)
 
 	for i := 0; i < len(lines); i++ {
 		line := lines[i]
 
-		// Handle fenced code block boundary
+		// Fenced code block boundary
 		if strings.HasPrefix(strings.TrimSpace(line), "```") {
 			if !inCodeBlock {
 				inCodeBlock = true
 				codeBlockLang = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "```"))
 				codeLines = nil
 				continue
-			} else {
-				inCodeBlock = false
-				// Flush code block
-				header := ""
-				if codeBlockLang != "" {
-					header = langTagStyle.Render(codeBlockLang) + "\n"
-				}
-				codeBody := strings.Join(codeLines, "\n")
-				renderedCode := codeBlockStyle.Render(codeBody)
-				sb.WriteString(header + renderedCode + "\n")
-				codeLines = nil
-				codeBlockLang = ""
-				continue
 			}
+			inCodeBlock = false
+			header := ""
+			if codeBlockLang != "" {
+				header = langTagStyle.Render(codeBlockLang) + "\n"
+			}
+			sb.WriteString(header + codeBlockStyle.Render(strings.Join(codeLines, "\n")) + "\n")
+			codeLines = nil
+			codeBlockLang = ""
+			continue
 		}
-
 		if inCodeBlock {
 			codeLines = append(codeLines, line)
 			continue
@@ -86,85 +73,63 @@ func RenderMarkdown(input string, maxWidth int) string {
 			if width > 60 {
 				width = 60
 			}
-			sb.WriteString(hrStyle.Render(strings.Repeat("─", width)) + "\n")
+			sb.WriteString(sDivider.Render(strings.Repeat("─", width)) + "\n")
 			continue
 		}
 
 		// Headings
-		if strings.HasPrefix(line, "# ") {
-			text := strings.TrimPrefix(line, "# ")
-			sb.WriteString(h1Style.Render(styleInline(text)) + "\n")
+		switch {
+		case strings.HasPrefix(line, "# "):
+			sb.WriteString(h1Style.Render(styleInline(strings.TrimPrefix(line, "# "))) + "\n")
 			continue
-		}
-		if strings.HasPrefix(line, "## ") {
-			text := strings.TrimPrefix(line, "## ")
-			sb.WriteString(h2Style.Render(styleInline(text)) + "\n")
+		case strings.HasPrefix(line, "## "):
+			sb.WriteString(h2Style.Render(styleInline(strings.TrimPrefix(line, "## "))) + "\n")
 			continue
-		}
-		if strings.HasPrefix(line, "### ") {
-			text := strings.TrimPrefix(line, "### ")
-			sb.WriteString(h3Style.Render(styleInline(text)) + "\n")
+		case strings.HasPrefix(line, "### "), strings.HasPrefix(line, "#### "):
+			sb.WriteString(h3Style.Render(styleInline(strings.TrimLeft(line, "# "))) + "\n")
 			continue
 		}
 
 		// Blockquotes
 		if strings.HasPrefix(trimmed, "> ") {
-			text := strings.TrimPrefix(trimmed, "> ")
-			sb.WriteString(quoteBar + quoteStyle.Render(styleInline(text)) + "\n")
+			sb.WriteString(quoteBar + quoteStyle.Render(styleInline(strings.TrimPrefix(trimmed, "> "))) + "\n")
 			continue
 		}
 
 		// Bullet lists
 		if strings.HasPrefix(trimmed, "- ") || strings.HasPrefix(trimmed, "* ") {
 			indent := len(line) - len(strings.TrimLeft(line, " \t"))
-			prefix := strings.Repeat(" ", indent)
-			text := trimmed[2:]
-			sb.WriteString(prefix + bulletStyle.Render("• ") + styleInline(text) + "\n")
+			sb.WriteString(strings.Repeat(" ", indent) + bulletStyle.Render("• ") + styleInline(trimmed[2:]) + "\n")
 			continue
 		}
 
-		// Numbered lists (e.g. 1. , 2. )
-		if len(trimmed) > 3 && (trimmed[1] == '.' || trimmed[2] == '.') && (trimmed[0] >= '0' && trimmed[0] <= '9') {
-			parts := strings.SplitN(trimmed, ". ", 2)
-			if len(parts) == 2 {
-				indent := len(line) - len(strings.TrimLeft(line, " \t"))
-				prefix := strings.Repeat(" ", indent)
-				sb.WriteString(prefix + numStyle.Render(parts[0]+". ") + styleInline(parts[1]) + "\n")
-				continue
-			}
+		// Numbered lists
+		if m := reNumbered.FindStringSubmatch(trimmed); m != nil {
+			indent := len(line) - len(strings.TrimLeft(line, " \t"))
+			sb.WriteString(strings.Repeat(" ", indent) + numStyle.Render(m[1]+". ") + styleInline(m[2]) + "\n")
+			continue
 		}
 
-		// Regular line with inline markdown
 		sb.WriteString(styleInline(line) + "\n")
 	}
 
-	// If code block left open
 	if inCodeBlock && len(codeLines) > 0 {
-		codeBody := strings.Join(codeLines, "\n")
-		sb.WriteString(codeBlockStyle.Render(codeBody) + "\n")
+		sb.WriteString(codeBlockStyle.Render(strings.Join(codeLines, "\n")) + "\n")
 	}
 
 	return strings.TrimRight(sb.String(), "\n")
 }
 
-// styleInline parses **bold**, *italic*, and `code` inline elements.
+// styleInline parses **bold** and `code` inline elements.
 func styleInline(text string) string {
-	boldStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFFFFF"))
-	codeStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#E4E4E7")).
-		Background(lipgloss.Color("#27272A"))
+	boldStyle := sBold
+	codeStyle := lipgloss.NewStyle().Foreground(cText).Background(cCode)
 
-	// Replace bold
 	text = reBold.ReplaceAllStringFunc(text, func(m string) string {
-		inner := m[2 : len(m)-2]
-		return boldStyle.Render(inner)
+		return boldStyle.Render(m[2 : len(m)-2])
 	})
-
-	// Replace inline code
 	text = reInlineCode.ReplaceAllStringFunc(text, func(m string) string {
-		inner := m[1 : len(m)-1]
-		return codeStyle.Render(" " + inner + " ")
+		return codeStyle.Render(" " + m[1:len(m)-1] + " ")
 	})
-
 	return text
 }

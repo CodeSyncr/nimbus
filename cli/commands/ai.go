@@ -106,7 +106,9 @@ func (c *AICommand) Run(ctx *cli.Context) error {
 		return nil
 	}
 
-	// 7. Launch Interactive TUI
+	// 7. Launch Interactive TUI. On Windows, put the console into UTF-8 /
+	// virtual-terminal mode first so the glyphs and colours render.
+	enableConsoleUTF8()
 	isOneShot := initialPrompt != "" && !c.interactiveModeEnabled()
 	model := tui.NewModel(agent, initialPrompt, isOneShot)
 
@@ -117,6 +119,10 @@ func (c *AICommand) Run(ctx *cli.Context) error {
 	}
 
 	if m, ok := finalModel.(tui.Model); ok {
+		if m.OneShot && m.FinalSummary != "" {
+			// The alt screen is gone; repeat the outcome on the normal screen.
+			fmt.Fprintln(ctx.Stdout, m.FinalSummary)
+		}
 		if m.Agent.Session != nil {
 			_ = ai.SaveSession(ctx.AppRoot, m.Agent.Session)
 			fmt.Fprintf(ctx.Stdout, "\n⚡ Session saved. Resume anytime with: nimbus ai --resume %s\n\n", m.Agent.Session.ID)

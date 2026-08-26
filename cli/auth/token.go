@@ -34,13 +34,21 @@ func (c *Credentials) IsExpired() bool {
 	return time.Now().After(c.ExpiresAt)
 }
 
-// ConfigDir returns the path to ~/.nimbus directory.
+// ConfigDirEnv overrides the config directory (default ~/.nimbus). Tests use
+// it so they never touch the real login; on Windows os.UserHomeDir reads
+// USERPROFILE, so overriding HOME alone is not enough.
+const ConfigDirEnv = "NIMBUS_CONFIG_DIR"
+
+// ConfigDir returns the path to the ~/.nimbus directory (or $NIMBUS_CONFIG_DIR).
 func ConfigDir() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
+	dir := os.Getenv(ConfigDirEnv)
+	if dir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		dir = filepath.Join(home, ".nimbus")
 	}
-	dir := filepath.Join(home, ".nimbus")
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return "", err
 	}

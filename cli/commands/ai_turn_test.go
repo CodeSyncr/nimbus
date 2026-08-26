@@ -100,7 +100,7 @@ func TestAICommand_TurnProtocol(t *testing.T) {
 	defer server.Close()
 
 	t.Setenv("HOME", tmpDir)
-	t.Setenv("USERPROFILE", tmpDir)
+	t.Setenv(auth.ConfigDirEnv, filepath.Join(tmpDir, ".nimbus"))
 	t.Setenv("NIMBUS_CLOUD_URL", server.URL)
 	_ = auth.SaveCredentials(&auth.Credentials{
 		AccessToken: "mock-token", Email: "pro@nimbusgo.in", Plan: "pro", HasSub: true,

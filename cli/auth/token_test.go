@@ -2,6 +2,8 @@ package auth_test
 
 import (
 	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -39,6 +41,7 @@ func TestCredentials_Expiry(t *testing.T) {
 func TestCredentials_SaveLoadClear(t *testing.T) {
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
+	t.Setenv(auth.ConfigDirEnv, filepath.Join(tmpHome, ".nimbus"))
 
 	// Verify initially nil
 	creds, err := auth.LoadCredentials()
@@ -81,7 +84,8 @@ func TestCredentials_SaveLoadClear(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to stat auth file: %v", err)
 	}
-	if perm := info.Mode().Perm(); perm != 0600 {
+	// NTFS does not carry Unix permission bits; Go reports 0666 there.
+	if perm := info.Mode().Perm(); perm != 0600 && runtime.GOOS != "windows" {
 		t.Errorf("expected 0600 permissions, got %o", perm)
 	}
 

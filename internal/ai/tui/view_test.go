@@ -111,8 +111,8 @@ func TestTUIModelAndViews(t *testing.T) {
 	if !strings.Contains(chatView, "Create a User model") {
 		t.Errorf("expected user prompt in chatView, got: %s", chatView)
 	}
-	if !strings.Contains(chatView, "ANALYZED") {
-		t.Errorf("expected tool action badge in chatView, got: %s", chatView)
+	if !strings.Contains(chatView, "Read") || !strings.Contains(chatView, "models/user.go") {
+		t.Errorf("expected 'Read models/user.go' tool line in chatView, got: %s", chatView)
 	}
 
 	// Test Plan Review View

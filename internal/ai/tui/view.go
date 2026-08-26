@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/CodeSyncr/nimbus/internal/version"
 	"github.com/charmbracelet/lipgloss"
@@ -10,301 +11,282 @@ import (
 
 func (m Model) View() string {
 	if !m.Ready || m.Width == 0 || m.Height == 0 {
-		return lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#D97757")).
-			Bold(true).
-			Render("✦ Initializing Nimbus AI Copilot...")
+		return sAccentBold.Render(glyphAI+" Nimbus AI") + sMuted.Render("  starting…")
 	}
 
 	headerView := renderHeader(&m)
 	footerView := renderFooter(&m)
 
-	headerHeight := lipgloss.Height(headerView)
-	footerHeight := lipgloss.Height(footerView)
-
-	var elements []string
-	elements = append(elements, headerView)
-
+	var body string
 	switch m.Mode {
 	case ModeClarification:
-		questionView := renderQuestionView(&m)
-		elements = append(elements, questionView)
-
-	case ModePlanReview:
-		planView := renderPlanView(&m)
-		elements = append(elements, planView)
-
-	default: // ModeChat, ModePlanning, ModeExecuting, ModeCompleted
-		vpHeight := m.Height - headerHeight - footerHeight
-		if vpHeight < 4 {
-			vpHeight = 4
+		body = renderQuestionView(&m)
+	default:
+		m.Viewport.Height = m.Height - lipgloss.Height(headerView) - lipgloss.Height(footerView)
+		if m.Viewport.Height < 4 {
+			m.Viewport.Height = 4
 		}
-		m.Viewport.Height = vpHeight
-		elements = append(elements, m.Viewport.View())
+		body = m.Viewport.View()
 	}
 
-	elements = append(elements, footerView)
+	return lipgloss.JoinVertical(lipgloss.Left, headerView, body, footerView)
+}
 
-	return lipgloss.JoinVertical(lipgloss.Left, elements...)
+func contentWidth(m *Model) int {
+	w := m.Width - 2
+	if w < 40 {
+		w = 40
+	}
+	return w
 }
 
 func renderHeader(m *Model) string {
-	width := m.Width - 4
-	if width < 40 {
-		width = 40
-	}
+	width := contentWidth(m)
 
-	titleStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#38BDF8")).
-		Bold(true)
+	vStr := "v" + strings.TrimPrefix(version.Nimbus, "v")
+	left := " " + sAccentBold.Render(glyphAI+" Nimbus AI") + " " + sDim.Render(vStr)
 
-	subStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#71717A"))
-
-	projStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#F4F4F5")).
-		Bold(true)
-
-	branchStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#A1A1AA")).
-		Background(lipgloss.Color("#27272A")).
-		Padding(0, 1)
-
-	modeBadge := lipgloss.NewStyle().
-		Bold(true).
-		Padding(0, 1)
-
-	switch m.Mode {
-	case ModeChat:
-		modeBadge = modeBadge.Background(lipgloss.Color("#27272A")).Foreground(lipgloss.Color("#38BDF8")).SetString("● CHAT")
-	case ModePlanning:
-		modeBadge = modeBadge.Background(lipgloss.Color("#451A03")).Foreground(lipgloss.Color("#FBBF24")).SetString(fmt.Sprintf("%s PLANNING", m.Spinner.View()))
-	case ModePlanReview:
-		modeBadge = modeBadge.Background(lipgloss.Color("#78350F")).Foreground(lipgloss.Color("#FEF3C7")).SetString("⚙ PLAN REVIEW")
-	case ModeExecuting:
-		modeBadge = modeBadge.Background(lipgloss.Color("#064E3B")).Foreground(lipgloss.Color("#4ADE80")).SetString(fmt.Sprintf("%s EXECUTING", m.Spinner.View()))
-	case ModeCompleted:
-		modeBadge = modeBadge.Background(lipgloss.Color("#14532D")).Foreground(lipgloss.Color("#86EFAC")).SetString("✓ COMPLETED")
-	}
-
-	branch := m.Agent.Context.GitBranch
-	if branch == "" {
-		branch = "main"
-	}
-
-	projName := m.Agent.Context.ProjectName
-	if projName == "" {
-		projName = "nimbus-app"
-	}
-
-	vStr := strings.TrimPrefix(version.Nimbus, "v")
-	vStr = "v" + vStr
-
-	line1Left := fmt.Sprintf("%s %s", titleStyle.Render("☁ Nimbus AI"), subStyle.Render("("+vStr+")"))
-	line1Right := modeBadge.Render()
-
-	spacerLen := width - lipgloss.Width(line1Left) - lipgloss.Width(line1Right)
-	if spacerLen < 1 {
-		spacerLen = 1
-	}
-	line1 := line1Left + strings.Repeat(" ", spacerLen) + line1Right
-
-	modules := ""
-	if len(m.Agent.Context.NimbusModules) > 0 {
-		var pills []string
-		for _, mod := range m.Agent.Context.NimbusModules {
-			pills = append(pills, lipgloss.NewStyle().Foreground(lipgloss.Color("#D97757")).Render("["+mod+"]"))
+	projName := "nimbus-app"
+	branch := "main"
+	var modules []string
+	if m.Agent != nil && m.Agent.Context != nil {
+		if m.Agent.Context.ProjectName != "" {
+			projName = m.Agent.Context.ProjectName
 		}
-		modules = " · " + strings.Join(pills, " ")
+		if m.Agent.Context.GitBranch != "" {
+			branch = m.Agent.Context.GitBranch
+		}
+		modules = m.Agent.Context.NimbusModules
+	}
+	info := sMuted.Render("  ·  ") + sBold.Render(projName) + sMuted.Render("  "+glyphBranch+" "+branch)
+	if len(modules) > 0 {
+		var pills []string
+		for i, mod := range modules {
+			if i >= 4 {
+				pills = append(pills, sDim.Render(fmt.Sprintf("+%d", len(modules)-4)))
+				break
+			}
+			pills = append(pills, sAccent.Render("["+mod+"]"))
+		}
+		info += "  " + strings.Join(pills, " ")
 	}
 
-	line2 := fmt.Sprintf(
-		"%s %s  %s%s",
-		subStyle.Render("Workspace:"),
-		projStyle.Render(projName),
-		branchStyle.Render("⎇ "+branch),
-		modules,
-	)
+	var badge string
+	switch m.Mode {
+	case ModePlanning:
+		badge = sYellow.Bold(true).Render(m.Spinner.View() + " PLANNING")
+	case ModeExecuting:
+		badge = sGreen.Bold(true).Render(m.Spinner.View() + " EXECUTING")
+	case ModePlanReview:
+		badge = sAccentBold.Render(glyphDot + " REVIEW PLAN")
+	case ModeClarification:
+		badge = sBlue.Bold(true).Render(glyphDot + " QUESTION")
+	default:
+		badge = sMuted.Render(glyphDot + " CHAT")
+	}
 
-	divider := lipgloss.NewStyle().Foreground(lipgloss.Color("#27272A")).Render(strings.Repeat("─", width))
-
-	return line1 + "\n" + line2 + "\n" + divider
+	lineLeft := left + info
+	space := width - lipgloss.Width(lineLeft) - lipgloss.Width(badge) - 1
+	if space < 1 {
+		space = 1
+	}
+	line := lineLeft + strings.Repeat(" ", space) + badge
+	return line + "\n" + sDivider.Render(strings.Repeat("─", width))
 }
 
 func renderFooter(m *Model) string {
-	width := m.Width - 4
-	if width < 40 {
-		width = 40
-	}
+	width := contentWidth(m)
+	var parts []string
 
-	var elements []string
+	parts = append(parts, sDivider.Render(strings.Repeat("─", width)))
 
-	// Render Claude-Code-style thinking status indicator above input box
 	if m.IsThinking {
-		statusLine := RenderThinkingStatus(m)
-		if statusLine != "" {
-			elements = append(elements, "  "+statusLine)
+		if line := RenderThinkingStatus(m); line != "" {
+			parts = append(parts, " "+line)
 		}
+	} else if m.StatusText != "" {
+		parts = append(parts, " "+sMuted.Render(m.StatusText))
 	}
 
-	inputBorder := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#D97757")).
-		Padding(0, 1).
-		Width(width)
+	switch m.Mode {
+	case ModePlanReview:
+		parts = append(parts, " "+strings.Join([]string{
+			sKey.Render("Enter") + sMuted.Render(" approve & run"),
+			sKey.Render("Esc") + sMuted.Render(" reject"),
+			sKey.Render("↑/↓") + sMuted.Render(" scroll"),
+		}, sDim.Render("   ·   ")))
+	case ModeClarification:
+		parts = append(parts, " "+strings.Join([]string{
+			sKey.Render("↑/↓") + sMuted.Render(" choose"),
+			sKey.Render("1-9") + sMuted.Render(" quick pick"),
+			sKey.Render("c") + sMuted.Render(" custom"),
+			sKey.Render("Enter") + sMuted.Render(" next"),
+			sKey.Render("Esc") + sMuted.Render(" cancel"),
+		}, sDim.Render("   ·   ")))
+	default:
+		box := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(cAccent).
+			Padding(0, 1).
+			Width(width - 2)
+		if m.Mode.busy() {
+			box = box.BorderForeground(cBorder)
+		}
+		parts = append(parts, box.Render(m.TextInput.View()))
 
-	if m.Mode != ModeChat {
-		inputBorder = inputBorder.BorderForeground(lipgloss.Color("#3F3F46"))
+		var hints string
+		if m.Mode.busy() {
+			hints = sMuted.Render("Esc") + sDim.Render(" interrupt   ") + sMuted.Render("PgUp/PgDn") + sDim.Render(" scroll")
+		} else {
+			hints = sMuted.Render("/help") + sDim.Render("  ·  ") + sMuted.Render("/context") + sDim.Render("  ·  ") + sMuted.Render("/clear") + sDim.Render("  ·  ") + sMuted.Render("/exit")
+		}
+		right := sDim.Render("↵ send  ↑/↓ history")
+		space := width - lipgloss.Width(hints) - lipgloss.Width(right) - 2
+		if space < 1 {
+			space = 1
+		}
+		parts = append(parts, " "+hints+strings.Repeat(" ", space)+right)
 	}
 
-	inputView := inputBorder.Render(m.TextInput.View())
-	elements = append(elements, inputView)
-
-	keyStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#D97757")).
-		Bold(true)
-
-	cmdStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#A1A1AA"))
-
-	dimStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#52525B"))
-
-	var helpText string
-	if m.Mode == ModePlanReview {
-		helpText = fmt.Sprintf(
-			"%s Navigate  %s Toggle  %s Approve All  %s Edit  %s Execute  %s Reject",
-			keyStyle.Render("↑/↓"),
-			keyStyle.Render("Space"),
-			keyStyle.Render("a"),
-			keyStyle.Render("e"),
-			keyStyle.Render("Enter"),
-			keyStyle.Render("Esc"),
-		)
-	} else {
-		helpText = fmt.Sprintf(
-			"%s Send   %s History   %s %s %s %s %s %s %s",
-			keyStyle.Render("Enter"),
-			keyStyle.Render("↑/↓"),
-			cmdStyle.Render("/help"),
-			dimStyle.Render("·"),
-			cmdStyle.Render("/context"),
-			dimStyle.Render("·"),
-			cmdStyle.Render("/clear"),
-			dimStyle.Render("·"),
-			cmdStyle.Render("/exit"),
-		)
-	}
-
-	elements = append(elements, helpText)
-
-	return strings.Join(elements, "\n")
+	return strings.Join(parts, "\n")
 }
+
+const maxInlineDiffLines = 24
 
 func renderChatHistory(m *Model) string {
 	var sb strings.Builder
-
-	userPrompt := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#D97757")).
-		Bold(true).
-		Render("❯ ")
-
-	userTextStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#F4F4F5")).
-		Bold(true)
-
-	aiLabel := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#D97757")).
-		Bold(true).
-		Render("✦ Nimbus")
-
-	timeStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#52525B"))
+	width := contentWidth(m)
+	textWidth := width - 4
+	if textWidth < 30 {
+		textWidth = 30
+	}
+	wrap := lipgloss.NewStyle().Width(textWidth)
 
 	for _, item := range m.Messages {
-		timeStr := timeStyle.Render(item.Timestamp.Format("15:04:05"))
-
 		switch item.Role {
 		case "user":
-			sb.WriteString(fmt.Sprintf("%s%s  %s\n\n", userPrompt, userTextStyle.Render(item.Content), timeStr))
+			sb.WriteString("\n")
+			sb.WriteString(sAccentBold.Render(glyphPrompt+" ") + wrap.Inherit(sBold).Render(item.Content))
+			sb.WriteString("\n")
+
+		case "phase":
+			label := item.Content
+			if item.Elapsed > 0 {
+				label += sDim.Render(fmt.Sprintf("  %s", fmtDuration(item.Elapsed)))
+			}
+			sb.WriteString("\n  " + sMuted.Render(glyphPhase+" ") + sMuted.Italic(true).Render(label) + "\n")
 
 		case "tool":
-			badgeColor := "#4ADE80"
-			actionText := "CREATED "
-			upper := strings.ToUpper(item.ToolName)
-			switch {
-			case strings.Contains(upper, "CREATE") || upper == "WRITE_FILE":
-				badgeColor = "#4ADE80" // Green
-				actionText = "CREATED "
-			case strings.Contains(upper, "MODIF") || strings.Contains(upper, "EDIT"):
-				badgeColor = "#D97757" // Orange
-				actionText = "MODIFIED"
-			case strings.Contains(upper, "SKILL"):
-				badgeColor = "#F59E0B" // Amber
-				actionText = "SKILL   "
-			case strings.Contains(upper, "ANALYZ") || strings.Contains(upper, "READ") || strings.Contains(upper, "GREP") || strings.Contains(upper, "LIST"):
-				badgeColor = "#38BDF8" // Cyan
-				actionText = "ANALYZED"
-			case strings.Contains(upper, "EXEC") || strings.Contains(upper, "BASH") || strings.Contains(upper, "RUN"):
-				badgeColor = "#A78BFA" // Purple
-				actionText = "EXECUTED"
-			case strings.Contains(upper, "DELET"):
-				badgeColor = "#F87171" // Red
-				actionText = "DELETED "
-			default:
-				badgeColor = "#38BDF8"
-				actionText = fmt.Sprintf("%-8s", upper)
-			}
-
-			if item.IsError {
-				badgeColor = "#EF4444"
-			}
-
-			badge := lipgloss.NewStyle().
-				Foreground(lipgloss.Color(badgeColor)).
-				Bold(true).
-				Render(actionText)
-
-			target := item.Content
-			if target == "" {
-				if path, ok := item.ToolArgs["path"].(string); ok {
-					target = path
-				} else if cmd, ok := item.ToolArgs["command"].(string); ok {
-					target = cmd
-				}
-			}
-
-			targetStyle := lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#F4F4F5")).
-				Bold(true).
-				Render(target)
-
-			sb.WriteString(fmt.Sprintf("  ✦ %s  %s\n\n", badge, targetStyle))
+			sb.WriteString(renderToolLine(item, textWidth))
 
 		case "assistant":
-			header := fmt.Sprintf("%s  %s", aiLabel, timeStr)
-			formattedContent := RenderMarkdown(item.Content, m.Width)
-
-			if len(item.Diffs) > 0 {
-				formattedContent += "\n\n" + lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#4ADE80")).Render("📄 Applied Changes:")
-				for _, d := range item.Diffs {
-					formattedContent += "\n" + RenderColorizedDiff(d)
-				}
+			sb.WriteString("\n")
+			body := RenderMarkdown(item.Content, textWidth)
+			sb.WriteString(sAccentBold.Render(glyphAI+" ") + indentLines(wrap.Render(body), 2, true))
+			sb.WriteString("\n")
+			for _, d := range item.Diffs {
+				sb.WriteString(indentLines(RenderColorizedDiff(d), 2, false) + "\n")
 			}
 
-			if item.IsError {
-				errCard := lipgloss.NewStyle().
-					Border(lipgloss.NormalBorder(), false, false, false, true).
-					BorderForeground(lipgloss.Color("#EF4444")).
-					Padding(0, 1).
-					Foreground(lipgloss.Color("#FCA5A5")).
-					Render(fmt.Sprintf("✖ %s\n\n%s", header, formattedContent))
-				sb.WriteString(errCard + "\n\n")
-			} else {
-				sb.WriteString(header + "\n\n" + formattedContent + "\n\n")
-			}
+		case "error":
+			sb.WriteString("\n" + sRed.Bold(true).Render(glyphErr+" ") + wrap.Inherit(sRed).Render(item.Content) + "\n")
+
+		case "system":
+			sb.WriteString("\n" + indentLines(wrap.Inherit(sMuted).Render(item.Content), 2, false) + "\n")
 		}
 	}
 
-	return strings.TrimRight(sb.String(), "\n")
+	// Text the model is streaming right now.
+	if m.Mode.busy() && m.StreamBuffer != nil && strings.TrimSpace(m.StreamBuffer.String()) != "" {
+		sb.WriteString("\n" + sAccentBold.Render(glyphAI+" ") + indentLines(wrap.Render(RenderMarkdown(m.StreamBuffer.String(), textWidth)), 2, true) + "\n")
+	}
+
+	return strings.TrimRight(sb.String(), "\n") + "\n"
+}
+
+// renderToolLine renders "  ● Read main.go  120 lines" plus an inline diff
+// for file changes, in the style of Claude Code's tool activity.
+func renderToolLine(item ChatItem, textWidth int) string {
+	verb := toolVerb(item.ToolName, item.ToolArgs)
+	target := item.Content
+	if target == "" {
+		target = toolTarget(item.ToolArgs)
+	}
+
+	dot := sGreen.Render(glyphDot)
+	if item.IsError {
+		dot = sRed.Render(glyphDot)
+	} else if verb == "Read" || verb == "Search" || verb == "Glob" || verb == "List" || verb == "Skill" {
+		dot = sBlue.Render(glyphDot)
+	} else if verb == "Bash" {
+		dot = sPurple.Render(glyphDot)
+	}
+
+	maxTarget := textWidth - len(verb) - 24
+	if maxTarget < 20 {
+		maxTarget = 20
+	}
+	if lipgloss.Width(target) > maxTarget {
+		target = target[:maxTarget-1] + "…"
+	}
+
+	line := "  " + dot + " " + sBold.Render(verb) + " " + sText.Render(target)
+	if item.Detail != "" {
+		if item.IsError {
+			line += "  " + sRed.Render(item.Detail)
+		} else {
+			line += "  " + sDim.Render(item.Detail)
+		}
+	}
+	out := line + "\n"
+
+	if item.Diff != "" {
+		out += indentLines(renderCompactDiff(item.Diff, maxInlineDiffLines), 4, false) + "\n"
+	}
+	return out
+}
+
+// renderCompactDiff shows only changed lines (with a little context), capped.
+func renderCompactDiff(diff string, maxLines int) string {
+	var lines []string
+	for _, l := range strings.Split(strings.TrimRight(diff, "\n"), "\n") {
+		if strings.HasPrefix(l, "+++") || strings.HasPrefix(l, "---") {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(l, "+"):
+			lines = append(lines, sGreen.Render(l))
+		case strings.HasPrefix(l, "-"):
+			lines = append(lines, sRed.Render(l))
+		default:
+			lines = append(lines, sDim.Render(l))
+		}
+	}
+	if len(lines) > maxLines {
+		rest := len(lines) - maxLines
+		lines = append(lines[:maxLines], sDim.Render(fmt.Sprintf("… %d more lines", rest)))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func indentLines(s string, n int, skipFirst bool) string {
+	pad := strings.Repeat(" ", n)
+	lines := strings.Split(s, "\n")
+	for i := range lines {
+		if i == 0 && skipFirst {
+			continue
+		}
+		lines[i] = pad + lines[i]
+	}
+	return strings.Join(lines, "\n")
+}
+
+func fmtDuration(d time.Duration) string {
+	if d < time.Second {
+		return "<1s"
+	}
+	if d < time.Minute {
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	}
+	return fmt.Sprintf("%dm %ds", int(d.Minutes()), int(d.Seconds())%60)
 }

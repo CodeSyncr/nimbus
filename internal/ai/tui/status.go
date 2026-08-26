@@ -7,72 +7,23 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 )
 
 // WordBank contains ~50 present-participle verbs mixing coding-flavored actions
 // with whimsical generic thinking states.
 var WordBank = []string{
 	// Whimsical & Thoughtful
-	"Pondering",
-	"Noodling",
-	"Percolating",
-	"Marinating",
-	"Ruminating",
-	"Brewing",
-	"Cogitating",
-	"Simmering",
-	"Brainstorming",
-	"Contemplating",
-	"Meditating",
-	"Mulling",
-	"Deliberating",
-	"Daydreaming",
-	"Envisioning",
-	"Incubating",
-	"Conjuring",
-	"Weaving",
-	"Cooking",
-	"Fermenting",
-	"Stewing",
-	"Musing",
-	"Formulating",
-	"Scheming",
-	"Ideating",
+	"Pondering", "Noodling", "Percolating", "Marinating", "Ruminating", "Brewing",
+	"Cogitating", "Simmering", "Brainstorming", "Contemplating", "Meditating", "Mulling",
+	"Deliberating", "Daydreaming", "Envisioning", "Incubating", "Conjuring", "Weaving",
+	"Cooking", "Fermenting", "Stewing", "Musing", "Formulating", "Scheming", "Ideating",
 
 	// Coding & Architecture
-	"Compiling",
-	"Refactoring",
-	"Untangling",
-	"Scaffolding",
-	"Synthesizing",
-	"Architecting",
-	"Parsing",
-	"Optimizing",
-	"Indexing",
-	"Wiring",
-	"Inspecting",
-	"Analyzing",
-	"Structuring",
-	"Composing",
-	"Crafting",
-	"Benchmarking",
-	"Validating",
-	"Assembling",
-	"Decoupling",
-	"Vectorizing",
-	"Generating",
-	"Calibrating",
-	"Tracing",
-	"Transforming",
-	"Polishing",
-	"Resolving",
-	"Orchestrating",
-	"Refining",
-	"Linting",
-	"Provisioning",
-	"Connecting",
-	"Formatting",
+	"Compiling", "Refactoring", "Untangling", "Scaffolding", "Synthesizing", "Architecting",
+	"Parsing", "Optimizing", "Indexing", "Wiring", "Inspecting", "Analyzing", "Structuring",
+	"Composing", "Crafting", "Benchmarking", "Validating", "Assembling", "Decoupling",
+	"Vectorizing", "Generating", "Calibrating", "Tracing", "Transforming", "Polishing",
+	"Resolving", "Orchestrating", "Refining", "Linting", "Provisioning", "Connecting", "Formatting",
 }
 
 type thinkingTickMsg struct {
@@ -91,8 +42,7 @@ func NextRandomVerb(lastVerb string) string {
 		return "Pondering"
 	}
 	for i := 0; i < 15; i++ {
-		idx := rand.Intn(len(WordBank))
-		candidate := WordBank[idx]
+		candidate := WordBank[rand.Intn(len(WordBank))]
 		if candidate != lastVerb {
 			return candidate
 		}
@@ -105,16 +55,24 @@ func NextRandomVerb(lastVerb string) string {
 	return WordBank[0]
 }
 
-// RenderThinkingStatus formats the Claude-Code-style animated thinking indicator.
-// Example: "☁ Percolating… (12s · 340 tokens)" or "☁ Percolating… (12s)"
+// RenderThinkingStatus formats the animated activity line shown above the
+// input while the agent works, e.g.
+// "☁ ✦ Exploring the codebase… (12s · 340 tokens · esc to interrupt)".
+// The agent's current phase is used when known; otherwise a random verb.
 func RenderThinkingStatus(m *Model) string {
 	if !m.IsThinking {
 		return ""
 	}
 
-	verb := m.ThinkingVerb
-	if verb == "" {
-		verb = "Pondering"
+	label := strings.TrimRight(m.Phase, "…. ")
+	if label == "" {
+		label = m.ThinkingVerb
+		if label == "" {
+			label = "Pondering"
+		}
+	}
+	if m.StatusText != "" {
+		label += sDim.Render(" · " + m.StatusText)
 	}
 
 	elapsed := int(time.Since(m.ThinkingStartTime).Seconds())
@@ -122,17 +80,16 @@ func RenderThinkingStatus(m *Model) string {
 		elapsed = 0
 	}
 
-	var stats string
+	parts := []string{fmt.Sprintf("%ds", elapsed)}
 	if m.ThinkingTokens > 0 {
-		stats = fmt.Sprintf("(%ds · %d tokens)", elapsed, m.ThinkingTokens)
-	} else {
-		stats = fmt.Sprintf("(%ds)", elapsed)
+		parts = append(parts, fmt.Sprintf("%d tokens", m.ThinkingTokens))
 	}
+	if m.ToolCalls > 0 {
+		parts = append(parts, fmt.Sprintf("%d tool calls", m.ToolCalls))
+	}
+	parts = append(parts, "esc to interrupt")
 
-	muted := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	cloudIcon := m.Spinner.View()
-
-	return fmt.Sprintf("%s %s %s", cloudIcon, muted.Render(verb+"…"), muted.Render(stats))
+	return fmt.Sprintf("%s %s %s", m.Spinner.View(), sMuted.Render(label+"…"), sDim.Render("("+strings.Join(parts, " · ")+")"))
 }
 
 // EstimateDeltaTokens approximates token count for a stream delta string.
