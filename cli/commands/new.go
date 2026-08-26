@@ -362,7 +362,7 @@ func (c *NewCommand) Run(ctx *cli.Context) error {
 		envContent += "REDIS_URL=redis://localhost:6379\n"
 	}
 	_ = os.WriteFile(filepath.Join(dir, ".env"), []byte(envContent), 0644)
-	_ = os.WriteFile(filepath.Join(dir, ".air.toml"), []byte(getAirConfigTmpl()), 0644)
+	_ = os.WriteFile(filepath.Join(dir, ".air.toml"), []byte(airConfig()), 0644)
 
 	gitignore := ".env\n*.sqlite\ntmp/\n"
 	if c.kit != "" {

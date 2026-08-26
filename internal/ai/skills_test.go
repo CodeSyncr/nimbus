@@ -6,11 +6,14 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/CodeSyncr/nimbus/cli/auth"
 )
 
 func TestEnsureDefaultSkillsAndLoading(t *testing.T) {
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
+	t.Setenv(auth.ConfigDirEnv, filepath.Join(tmpHome, ".nimbus"))
 
 	// 1. Test provisioning default skills to ~/.nimbus/skills/
 	if err := EnsureDefaultSkills(); err != nil {

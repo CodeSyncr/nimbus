@@ -106,7 +106,9 @@ func (c *AICommand) Run(ctx *cli.Context) error {
 		return nil
 	}
 
-	// 7. Launch Interactive TUI
+	// 7. Launch Interactive TUI. On Windows, put the console into UTF-8 /
+	// virtual-terminal mode first so the glyphs and colours render.
+	enableConsoleUTF8()
 	isOneShot := initialPrompt != "" && !c.interactiveModeEnabled()
 	model := tui.NewModel(agent, initialPrompt, isOneShot)
 
@@ -117,6 +119,10 @@ func (c *AICommand) Run(ctx *cli.Context) error {
 	}
 
 	if m, ok := finalModel.(tui.Model); ok {
+		if m.OneShot && m.FinalSummary != "" {
+			// The alt screen is gone; repeat the outcome on the normal screen.
+			fmt.Fprintln(ctx.Stdout, m.FinalSummary)
+		}
 		if m.Agent.Session != nil {
 			_ = ai.SaveSession(ctx.AppRoot, m.Agent.Session)
 			fmt.Fprintf(ctx.Stdout, "\n⚡ Session saved. Resume anytime with: nimbus ai --resume %s\n\n", m.Agent.Session.ID)
@@ -128,6 +134,29 @@ func (c *AICommand) Run(ctx *cli.Context) error {
 
 func (c *AICommand) executeHeadless(ctx *cli.Context, agent *ai.Agent, prompt string) error {
 	ctxBg := context.Background()
+
+	// Surface the agent's investigation and edits so a headless run (CI,
+	// pipes) still shows what was read and changed.
+	agent.Callbacks = ai.AgentCallbacks{
+		OnStatus: func(text string) {
+			fmt.Fprintf(ctx.Stdout, "» %s\n", text)
+		},
+		OnToolResult: func(toolName string, args map[string]any, output string, err error) {
+			target, _ := args["path"].(string)
+			if target == "" {
+				target, _ = args["command"].(string)
+			}
+			if target == "" {
+				target, _ = args["pattern"].(string)
+			}
+			if err != nil {
+				fmt.Fprintf(ctx.Stdout, "  ✖ %s %s: %v\n", toolName, target, err)
+				return
+			}
+			fmt.Fprintf(ctx.Stdout, "  ✓ %s %s\n", toolName, target)
+		},
+	}
+
 	plan, err := agent.GeneratePlan(ctxBg, prompt)
 	if err != nil {
 		errMsg := strings.ToLower(err.Error())
@@ -140,6 +169,19 @@ func (c *AICommand) executeHeadless(ctx *cli.Context, agent *ai.Agent, prompt st
 
 	if c.dry || c.planOnly {
 		fmt.Fprintf(ctx.Stdout, "Plan generated: %s (%d steps)\n", plan.Summary, len(plan.Steps))
+		return nil
+	}
+
+	// A question or an answer that needs no changes: print it and stop.
+	if len(plan.Steps) == 0 {
+		if plan.NeedsClarification && len(plan.Questions) > 0 {
+			fmt.Fprintln(ctx.Stdout, "The request needs clarification (run interactively to answer):")
+			for _, q := range plan.Questions {
+				fmt.Fprintf(ctx.Stdout, "  - %s\n", q.Question)
+			}
+			return nil
+		}
+		fmt.Fprintln(ctx.Stdout, plan.Summary)
 		return nil
 	}
 

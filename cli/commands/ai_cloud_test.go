@@ -75,6 +75,7 @@ func TestAICommand_CloudGeneration(t *testing.T) {
 
 	// Seed valid credentials
 	t.Setenv("HOME", tmpDir)
+	t.Setenv(auth.ConfigDirEnv, filepath.Join(tmpDir, ".nimbus"))
 	_ = auth.SaveCredentials(&auth.Credentials{
 		AccessToken: "mock-token-xyz",
 		Email:       "pro@nimbusgo.in",
@@ -129,6 +130,7 @@ func TestAICommand_SubscriptionRequired(t *testing.T) {
 	defer server.Close()
 
 	t.Setenv("HOME", tmpDir)
+	t.Setenv(auth.ConfigDirEnv, filepath.Join(tmpDir, ".nimbus"))
 	t.Setenv("NIMBUS_CLOUD_URL", server.URL)
 	_ = auth.SaveCredentials(&auth.Credentials{
 		AccessToken: "mock-free-user",

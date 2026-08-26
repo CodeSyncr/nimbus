@@ -9,204 +9,151 @@ import (
 )
 
 func renderPlanView(m *Model) string {
-	if m.Agent.Session == nil || m.Agent.Session.Plan == nil || len(m.Agent.Session.Plan.Steps) == 0 {
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("#71717A")).Render("No architectural plan currently loaded.")
+	if m.Agent == nil || m.Agent.Session == nil || m.Agent.Session.Plan == nil || len(m.Agent.Session.Plan.Steps) == 0 {
+		return sMuted.Render("  No plan loaded.")
 	}
 
 	plan := m.Agent.Session.Plan
-	width := m.Width - 4
-	if width < 40 {
-		width = 40
+	width := contentWidth(m)
+	inner := width - 6
+	if inner < 34 {
+		inner = 34
 	}
+	wrap := lipgloss.NewStyle().Width(inner)
 
-	cardStyle := lipgloss.NewStyle().
+	card := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#3F3F46")).
+		BorderForeground(cAccent).
 		Padding(1, 2).
-		MarginBottom(1).
-		Width(width)
-
-	headerTitle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("#D97757")).
-		Render("📋 ARCHITECTURAL IMPLEMENTATION PLAN")
-
-	summaryLabel := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("#F4F4F5")).
-		Render("🎯 Goal: ")
-
-	summaryText := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#D4D4D8")).
-		Render(plan.Summary)
-
-	divider := lipgloss.NewStyle().Foreground(lipgloss.Color("#27272A")).Render(strings.Repeat("─", width-6))
+		Width(width - 2)
 
 	var sb strings.Builder
-	sb.WriteString(headerTitle + "\n\n")
-	sb.WriteString(summaryLabel + summaryText + "\n\n")
 
-	if plan.Overview != "" {
-		overviewLabel := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#A1A1AA")).Render("📖 Architecture Overview:\n")
-		overviewText := lipgloss.NewStyle().Foreground(lipgloss.Color("#D4D4D8")).Render(plan.Overview)
-		sb.WriteString(overviewLabel + overviewText + "\n\n")
-	}
-
-	sb.WriteString(divider + "\n\n")
-
-	// Group steps by Phase if phases are defined
-	phaseMap := make(map[string][]ai.PlanStep)
-	phaseOrder := make([]string, 0)
-
-	if len(plan.Phases) > 0 {
-		for _, p := range plan.Phases {
-			phaseOrder = append(phaseOrder, p.Name)
-			phaseMap[p.Name] = make([]ai.PlanStep, 0)
+	// Title row: "Plan  Summary                          3 steps · 2 files · low risk"
+	files := map[string]bool{}
+	maxRisk := "low"
+	for _, s := range plan.Steps {
+		if s.Target != "" && !strings.EqualFold(s.Action, "run_command") {
+			files[s.Target] = true
 		}
-	}
-
-	// Place steps into phase buckets
-	var unassignedSteps []ai.PlanStep
-	for _, step := range plan.Steps {
-		if step.Phase != "" {
-			if _, exists := phaseMap[step.Phase]; !exists {
-				phaseOrder = append(phaseOrder, step.Phase)
-				phaseMap[step.Phase] = make([]ai.PlanStep, 0)
-			}
-			phaseMap[step.Phase] = append(phaseMap[step.Phase], step)
-		} else {
-			// Check if matched by file list in phases
-			matched := false
-			for _, p := range plan.Phases {
-				for _, f := range p.Files {
-					if strings.Contains(step.Target, f) || strings.Contains(f, step.Target) {
-						phaseMap[p.Name] = append(phaseMap[p.Name], step)
-						matched = true
-						break
-					}
-				}
-				if matched {
-					break
-				}
-			}
-			if !matched {
-				unassignedSteps = append(unassignedSteps, step)
-			}
-		}
-	}
-
-	renderStepItem := func(step ai.PlanStep) string {
-		actionColor := "#4ADE80"
-		actionPrefix := "+ CREATE"
-		switch strings.ToLower(step.Action) {
-		case "create_file", "write_file", "create":
-			actionColor = "#4ADE80"
-			actionPrefix = "+ CREATE"
-		case "edit_file", "edit":
-			actionColor = "#D97757"
-			actionPrefix = "~ EDIT  "
-		case "run_command", "bash", "command":
-			actionColor = "#38BDF8"
-			actionPrefix = "⚡ EXEC  "
-		case "delete_file", "delete":
-			actionColor = "#F87171"
-			actionPrefix = "- DELETE"
-		}
-
-		actionTag := lipgloss.NewStyle().
-			Foreground(lipgloss.Color(actionColor)).
-			Bold(true).
-			Render(actionPrefix)
-
-		targetStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#F4F4F5")).
-			Bold(true).
-			Render(step.Target)
-
-		riskTag := ""
-		switch strings.ToLower(step.Risk) {
-		case "medium", "med":
-			riskTag = " " + lipgloss.NewStyle().Foreground(lipgloss.Color("#FBBF24")).Background(lipgloss.Color("#451A03")).Bold(true).Padding(0, 1).Render("MED RISK")
+		switch strings.ToLower(s.Risk) {
 		case "high":
-			riskTag = " " + lipgloss.NewStyle().Foreground(lipgloss.Color("#F87171")).Background(lipgloss.Color("#450A0A")).Bold(true).Padding(0, 1).Render("HIGH RISK")
-		}
-
-		descStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF"))
-		descLine := fmt.Sprintf("          ↳ %s", descStyle.Render(step.Description))
-
-		return fmt.Sprintf("    %s  %s%s\n%s\n", actionTag, targetStyle, riskTag, descLine)
-	}
-
-	// Render Phases & Steps
-	if len(phaseOrder) > 0 {
-		phasesHeader := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#F4F4F5")).Render("🚀 Phased Implementation Breakdown:\n\n")
-		sb.WriteString(phasesHeader)
-
-		for _, phaseName := range phaseOrder {
-			pHeader := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#38BDF8")).Render(fmt.Sprintf("✦ %s", phaseName))
-			sb.WriteString(pHeader + "\n")
-
-			// Find phase description if available
-			for _, p := range plan.Phases {
-				if p.Name == phaseName && p.Description != "" {
-					pDesc := lipgloss.NewStyle().Foreground(lipgloss.Color("#71717A")).Render(fmt.Sprintf("  ↳ %s", p.Description))
-					sb.WriteString(pDesc + "\n")
-					break
-				}
+			maxRisk = "high"
+		case "medium", "med":
+			if maxRisk != "high" {
+				maxRisk = "medium"
 			}
-			sb.WriteString("\n")
-
-			steps := phaseMap[phaseName]
-			if len(steps) > 0 {
-				for _, step := range steps {
-					sb.WriteString(renderStepItem(step) + "\n")
-				}
-			}
-		}
-
-		if len(unassignedSteps) > 0 {
-			sb.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#38BDF8")).Render("✦ Additional Actions") + "\n\n")
-			for _, step := range unassignedSteps {
-				sb.WriteString(renderStepItem(step) + "\n")
-			}
-		}
-	} else {
-		// Fallback clean action list without clutter
-		actionsHeader := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#F4F4F5")).Render("📄 Proposed Actions & File Changes:\n\n")
-		sb.WriteString(actionsHeader)
-		for _, step := range plan.Steps {
-			sb.WriteString(renderStepItem(step) + "\n")
 		}
 	}
+	meta := sMuted.Render(fmt.Sprintf("%d steps · %d files · ", len(plan.Steps), len(files))) + riskStyle(maxRisk).Render(maxRisk+" risk")
+	title := sAccentBold.Render("Plan") + "  " + sBold.Render(plan.Summary)
+	sb.WriteString(wrap.Render(title) + "\n" + meta + "\n")
 
-	// Key Architectural Highlights
-	if len(plan.Details) > 0 {
-		sb.WriteString(divider + "\n\n")
-		detailsHeader := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#A1A1AA")).Render("🔍 Key Architectural Highlights:\n")
-		sb.WriteString(detailsHeader)
-		for _, d := range plan.Details {
-			sb.WriteString(fmt.Sprintf("  • %s\n", lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF")).Render(d)))
+	if plan.Overview != "" && plan.Overview != plan.Summary {
+		sb.WriteString("\n" + wrap.Inherit(sSoft).Render(plan.Overview) + "\n")
+	}
+	sb.WriteString("\n" + sDivider.Render(strings.Repeat("─", inner)) + "\n")
+
+	// Group steps by phase, preserving plan order.
+	type group struct {
+		name, desc string
+		steps      []ai.PlanStep
+	}
+	var groups []*group
+	byName := map[string]*group{}
+	for _, p := range plan.Phases {
+		g := &group{name: p.Name, desc: p.Description}
+		groups = append(groups, g)
+		byName[p.Name] = g
+	}
+	var loose []ai.PlanStep
+	for _, s := range plan.Steps {
+		if s.Phase != "" {
+			g, ok := byName[s.Phase]
+			if !ok {
+				g = &group{name: s.Phase}
+				groups = append(groups, g)
+				byName[s.Phase] = g
+			}
+			g.steps = append(g.steps, s)
+			continue
+		}
+		loose = append(loose, s)
+	}
+
+	n := 0
+	renderStep := func(s ai.PlanStep) {
+		n++
+		tag, color := "CREATE", cGreen
+		switch strings.ToLower(s.Action) {
+		case "edit_file", "edit":
+			tag, color = "EDIT", cAccent
+		case "run_command", "bash", "command":
+			tag, color = "RUN", cPurple
+		case "delete_file", "delete":
+			tag, color = "DELETE", cRed
+		}
+		tagStyle := lipgloss.NewStyle().Foreground(color).Bold(true).Width(7)
+		risk := ""
+		switch strings.ToLower(s.Risk) {
+		case "medium", "med":
+			risk = "  " + riskStyle("medium").Render("medium risk")
+		case "high":
+			risk = "  " + riskStyle("high").Render("high risk")
+		}
+		sb.WriteString(fmt.Sprintf("  %s %s %s%s\n", sDim.Render(fmt.Sprintf("%2d", n)), tagStyle.Render(tag), sBold.Render(s.Target), risk))
+		if s.Description != "" {
+			desc := lipgloss.NewStyle().Width(inner - 13).Inherit(sMuted).Render(s.Description)
+			sb.WriteString(indentLines("             "+glyphArrow+" "+desc, 0, false) + "\n")
+		}
+	}
+
+	for _, g := range groups {
+		if len(g.steps) == 0 {
+			continue
+		}
+		sb.WriteString("\n" + sBlue.Bold(true).Render(g.name))
+		if g.desc != "" {
+			sb.WriteString("  " + sMuted.Render(g.desc))
 		}
 		sb.WriteString("\n")
+		for _, s := range g.steps {
+			renderStep(s)
+		}
+	}
+	if len(loose) > 0 {
+		if len(groups) > 0 {
+			sb.WriteString("\n" + sBlue.Bold(true).Render("Other steps") + "\n")
+		} else {
+			sb.WriteString("\n")
+		}
+		for _, s := range loose {
+			renderStep(s)
+		}
 	}
 
-	keyTag := func(k string, bg string) string {
-		return lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FFFFFF")).
-			Background(lipgloss.Color(bg)).
-			Bold(true).
-			Padding(0, 1).
-			Render(k)
+	if len(plan.Details) > 0 {
+		sb.WriteString("\n" + sDivider.Render(strings.Repeat("─", inner)) + "\n")
+		sb.WriteString(sMuted.Bold(true).Render("Notes") + "\n")
+		for _, d := range plan.Details {
+			sb.WriteString("  " + sAccent.Render("•") + " " + lipgloss.NewStyle().Width(inner-4).Inherit(sSoft).Render(d) + "\n")
+		}
 	}
 
-	helpText := fmt.Sprintf(
-		"%s Approve & Execute Plan        %s Reject / Cancel",
-		keyTag("Enter", "#D97757"),
-		keyTag("Esc", "#3F3F46"),
-	)
+	sb.WriteString("\n" + sDivider.Render(strings.Repeat("─", inner)) + "\n")
+	sb.WriteString(sKey.Render("Enter") + sMuted.Render(" approve & run") + sDim.Render("     ") +
+		sKey.Render("Esc") + sMuted.Render(" reject") + sDim.Render("     ") +
+		sKey.Render("↑/↓") + sMuted.Render(" scroll"))
 
-	sb.WriteString(divider + "\n\n")
-	sb.WriteString(helpText)
+	return "\n" + card.Render(strings.TrimRight(sb.String(), "\n")) + "\n"
+}
 
-	return cardStyle.Render(sb.String())
+func riskStyle(level string) lipgloss.Style {
+	switch level {
+	case "high":
+		return sRed.Bold(true)
+	case "medium":
+		return sYellow.Bold(true)
+	}
+	return sGreen
 }

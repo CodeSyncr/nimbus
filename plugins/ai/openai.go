@@ -2,6 +2,7 @@ package ai
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -67,6 +68,8 @@ func (p *openAIProvider) Generate(ctx context.Context, req *GenerateRequest) (*G
 			Messages:    messages,
 			MaxTokens:   maxTokens,
 			Temperature: req.Temperature,
+			Tools:       toOpenAITools(req.Tools),
+			Stop:        req.Stop,
 		})
 		if err == nil && len(resp.Choices) > 0 {
 			break
@@ -96,10 +99,13 @@ func (p *openAIProvider) Generate(ctx context.Context, req *GenerateRequest) (*G
 		TotalTokens:      resp.Usage.TotalTokens,
 	}
 
+	choice := resp.Choices[0]
 	return &GenerateResponse{
-		Text:  resp.Choices[0].Message.Content,
-		Usage: usage,
-		Model: resp.Model,
+		Text:         choice.Message.Content,
+		ToolCalls:    fromOpenAIToolCalls(choice.Message.ToolCalls),
+		Usage:        usage,
+		Model:        resp.Model,
+		FinishReason: string(choice.FinishReason),
 	}, nil
 }
 
@@ -129,6 +135,8 @@ func (p *openAIProvider) Stream(ctx context.Context, req *GenerateRequest) (*Str
 				Messages:    messages,
 				MaxTokens:   maxTokens,
 				Temperature: req.Temperature,
+				Tools:       toOpenAITools(req.Tools),
+				Stop:        req.Stop,
 				Stream:      true,
 			})
 			if err == nil {
@@ -144,17 +152,60 @@ func (p *openAIProvider) Stream(ctx context.Context, req *GenerateRequest) (*Str
 		}
 		defer stream.Close()
 
+		// Tool-call arguments arrive as fragments spread over many deltas,
+		// keyed by index. Accumulate them and emit the complete calls once
+		// the stream ends so consumers never see partial JSON.
+		pending := map[int]*ToolCall{}
+		pendingArgs := map[int]*strings.Builder{}
+		var order []int
+
+		flushToolCalls := func() {
+			if len(order) == 0 {
+				return
+			}
+			var calls []ToolCall
+			for _, idx := range order {
+				tc := pending[idx]
+				tc.Args = json.RawMessage(pendingArgs[idx].String())
+				calls = append(calls, *tc)
+			}
+			chunks <- StreamChunk{ToolCalls: calls}
+		}
+
 		for {
 			response, err := stream.Recv()
 			if err == io.EOF {
+				flushToolCalls()
 				return
 			}
 			if err != nil {
 				errCh <- fmt.Errorf("ai: openai stream recv: %w", err)
 				return
 			}
-			if len(response.Choices) > 0 && response.Choices[0].Delta.Content != "" {
-				chunks <- StreamChunk{Text: response.Choices[0].Delta.Content}
+			if len(response.Choices) == 0 {
+				continue
+			}
+			delta := response.Choices[0].Delta
+			if delta.Content != "" {
+				chunks <- StreamChunk{Text: delta.Content}
+			}
+			for _, tc := range delta.ToolCalls {
+				idx := 0
+				if tc.Index != nil {
+					idx = *tc.Index
+				}
+				if _, ok := pending[idx]; !ok {
+					pending[idx] = &ToolCall{ID: tc.ID, Name: tc.Function.Name}
+					pendingArgs[idx] = &strings.Builder{}
+					order = append(order, idx)
+				}
+				if tc.ID != "" {
+					pending[idx].ID = tc.ID
+				}
+				if tc.Function.Name != "" {
+					pending[idx].Name = tc.Function.Name
+				}
+				pendingArgs[idx].WriteString(tc.Function.Arguments)
 			}
 		}
 	}()
@@ -175,10 +226,75 @@ func (p *openAIProvider) toOpenAIMessages(req *GenerateRequest) []openai.ChatCom
 		if role == "" {
 			role = openai.ChatMessageRoleUser
 		}
-		msgs = append(msgs, openai.ChatCompletionMessage{
+		msg := openai.ChatCompletionMessage{
 			Role:    role,
 			Content: m.Content,
-		})
+		}
+		switch role {
+		case RoleAssistant:
+			for _, tc := range m.ToolCalls {
+				args := string(tc.Args)
+				if strings.TrimSpace(args) == "" {
+					args = "{}"
+				}
+				msg.ToolCalls = append(msg.ToolCalls, openai.ToolCall{
+					ID:   tc.ID,
+					Type: openai.ToolTypeFunction,
+					Function: openai.FunctionCall{
+						Name:      tc.Name,
+						Arguments: args,
+					},
+				})
+			}
+		case RoleTool:
+			msg.Role = openai.ChatMessageRoleTool
+			msg.ToolCallID = m.ToolCallID
+		}
+		msgs = append(msgs, msg)
 	}
 	return msgs
+}
+
+// toOpenAITools converts provider-neutral ToolSpecs into OpenAI function
+// tool definitions. Returns nil when there are no tools so the field is
+// omitted from the request entirely.
+func toOpenAITools(specs []ToolSpec) []openai.Tool {
+	if len(specs) == 0 {
+		return nil
+	}
+	tools := make([]openai.Tool, 0, len(specs))
+	for _, s := range specs {
+		params := s.Parameters
+		if len(params) == 0 {
+			params = json.RawMessage(`{"type":"object","properties":{}}`)
+		}
+		tools = append(tools, openai.Tool{
+			Type: openai.ToolTypeFunction,
+			Function: &openai.FunctionDefinition{
+				Name:        s.Name,
+				Description: s.Description,
+				Parameters:  params,
+			},
+		})
+	}
+	return tools
+}
+
+func fromOpenAIToolCalls(calls []openai.ToolCall) []ToolCall {
+	if len(calls) == 0 {
+		return nil
+	}
+	out := make([]ToolCall, 0, len(calls))
+	for _, tc := range calls {
+		args := tc.Function.Arguments
+		if strings.TrimSpace(args) == "" {
+			args = "{}"
+		}
+		out = append(out, ToolCall{
+			ID:   tc.ID,
+			Name: tc.Function.Name,
+			Args: json.RawMessage(args),
+		})
+	}
+	return out
 }

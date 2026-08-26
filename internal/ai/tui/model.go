@@ -2,7 +2,10 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -25,9 +28,11 @@ const (
 	ModeCompleted
 )
 
-// ChatItem represents a structured entry in the chat history.
+func (m Mode) busy() bool { return m == ModePlanning || m == ModeExecuting }
+
+// ChatItem represents a structured entry in the transcript.
 type ChatItem struct {
-	Role      string // "user" | "assistant" | "system" | "tool"
+	Role      string // "user" | "assistant" | "tool" | "phase" | "error" | "system"
 	Content   string
 	Timestamp time.Time
 	Plan      *ai.PlanSummary
@@ -35,36 +40,50 @@ type ChatItem struct {
 	ToolName  string
 	ToolArgs  map[string]any
 	IsError   bool
+	Detail    string        // short tool-result summary, e.g. "120 lines"
+	Diff      string        // inline diff shown under create/edit tool lines
+	Elapsed   time.Duration // for phase lines
 }
 
 type (
-	chatReplyMsg   struct{ reply string; err error }
-	planDeltaMsg   struct{ delta string }
-	planDoneMsg    struct{ plan *ai.PlanSummary; err error }
-	execDeltaMsg   struct{ delta string }
-	execDoneMsg    struct{ summary string; err error }
-	toolCallMsg    struct{ name string; args map[string]any }
-	toolResMsg     struct{ name string; out string; err error }
-	toolLogMsg     struct{ Action, Target, Detail string; Err error }
+	chatReplyMsg struct {
+		reply string
+		err   error
+	}
+	planDeltaMsg struct{ delta string }
+	planDoneMsg  struct {
+		plan *ai.PlanSummary
+		err  error
+	}
+	execDeltaMsg struct{ delta string }
+	execDoneMsg  struct {
+		summary string
+		err     error
+	}
+	toolCallMsg struct {
+		name string
+		args map[string]any
+	}
+	toolResMsg struct {
+		name string
+		out  string
+		err  error
+	}
+	toolLogMsg struct {
+		Action, Target, Detail string
+		Err                    error
+		ToolName               string
+		Args                   map[string]any
+	}
 	diffMsg        struct{ path, diff string }
 	requestSentMsg struct{}
+	statusMsg      struct{ text string }
 )
 
 // NimbusCloudSpinner provides an animated cloud icon with shimmering particles.
 var NimbusCloudSpinner = spinner.Spinner{
-	Frames: []string{
-		"☁ ✦",
-		"☁ ✧",
-		"☁ ˖",
-		"☁ ⁺",
-		"☁ ⋆",
-		"☁ ⁺",
-		"☁ ˖",
-		"☁ ✧",
-		"☁ ✦",
-		"☁ ✧",
-	},
-	FPS: time.Second / 10,
+	Frames: []string{"☁ ✦", "☁ ✧", "☁ ˖", "☁ ⁺", "☁ ⋆", "☁ ⁺", "☁ ˖", "☁ ✧", "☁ ✦", "☁ ✧"},
+	FPS:    time.Second / 10,
 }
 
 type Model struct {
@@ -96,6 +115,16 @@ type Model struct {
 	IsCustomInput        bool
 	ExecChan             chan tea.Msg
 
+	// Phase is the agent's current activity ("Exploring the codebase…").
+	Phase      string
+	PhaseStart time.Time
+	ToolCalls  int
+	// FinalSummary is the last completed run's summary (printed after a
+	// one-shot run exits the alt screen).
+	FinalSummary string
+
+	cancel context.CancelFunc
+
 	// Claude-Code-style thinking indicator state
 	IsThinking        bool
 	ThinkingStartTime time.Time
@@ -118,37 +147,39 @@ func (m *Model) stopThinking() {
 	m.IsThinking = false
 	m.ThinkingTokens = 0
 	m.ThinkingVerb = ""
+	m.Phase = ""
+	m.StatusText = ""
 }
 
 func NewModel(agent *ai.Agent, initialPrompt string, oneShot bool) Model {
 	ti := textinput.New()
-	ti.Placeholder = "Ask Nimbus to build, edit, or explain... (e.g. 'create blog resource')"
+	ti.Placeholder = "Ask Nimbus to build, edit, or explain… (e.g. \"add a comments resource to posts\")"
 	ti.Focus()
-	ti.CharLimit = 2000
-	ti.Prompt = "❯ "
-	ti.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#D97757")).Bold(true)
-	ti.PlaceholderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#52525B"))
-	ti.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#F4F4F5"))
-	ti.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("#D97757"))
+	ti.CharLimit = 4000
+	ti.Prompt = glyphPrompt + " "
+	ti.PromptStyle = sAccentBold
+	ti.PlaceholderStyle = sDim
+	ti.TextStyle = sText
+	ti.Cursor.Style = sAccent
 
 	si := textinput.New()
 	si.CharLimit = 500
 	si.Prompt = "   Edit: "
-	si.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#D97757")).Bold(true)
-	si.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#F4F4F5"))
-	si.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("#D97757"))
+	si.PromptStyle = sAccentBold
+	si.TextStyle = sText
+	si.Cursor.Style = sAccent
 
 	ci := textinput.New()
 	ci.CharLimit = 500
-	ci.Placeholder = "Type custom response..."
-	ci.Prompt = "❯ "
-	ci.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#D97757")).Bold(true)
-	ci.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#F4F4F5"))
-	ci.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("#D97757"))
+	ci.Placeholder = "Type your own answer…"
+	ci.Prompt = glyphPrompt + " "
+	ci.PromptStyle = sAccentBold
+	ci.TextStyle = sText
+	ci.Cursor.Style = sAccent
 
 	sp := spinner.New()
 	sp.Spinner = NimbusCloudSpinner
-	sp.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("#38BDF8")).Bold(true)
+	sp.Style = sBlue.Bold(true)
 
 	vp := viewport.New(80, 20)
 
@@ -160,42 +191,66 @@ func NewModel(agent *ai.Agent, initialPrompt string, oneShot bool) Model {
 		StepInput:            si,
 		CustomInput:          ci,
 		Spinner:              sp,
-		SelectedStep:         0,
 		StreamBuffer:         &strings.Builder{},
 		Messages:             make([]ChatItem, 0),
 		CurrentDiffs:         make([]string, 0),
 		History:              make([]string, 0),
-		HistoryIndex:         0,
 		ClarificationAnswers: make(map[string]string),
 		OneShot:              oneShot,
-		Ready:                false,
 	}
 
-	// Welcome message
-	welcome := "✦ **Nimbus AI Copilot** is ready. I can architect features, scaffold resources, review diffs, and run test verification.\n\n" +
-		"💡 *Try asking:* `create a blog resource with comments` or `how to add jwt auth middleware`"
-	m.Messages = append(m.Messages, ChatItem{
-		Role:      "assistant",
-		Content:   welcome,
-		Timestamp: time.Now(),
-	})
+	m.Messages = append(m.Messages, ChatItem{Role: "system", Content: welcomeText(agent), Timestamp: time.Now()})
 
 	if initialPrompt != "" {
 		m.TextInput.SetValue(initialPrompt)
 	}
-
 	return m
 }
 
-func (m Model) Init() tea.Cmd {
-	var cmds []tea.Cmd
-	cmds = append(cmds, textinput.Blink, m.Spinner.Tick)
+// welcomeText summarises what the agent knows about the workspace.
+func welcomeText(agent *ai.Agent) string {
+	if agent == nil || agent.Context == nil {
+		return "Nimbus AI is ready."
+	}
+	c := agent.Context
+	var facts []string
+	if len(c.Controllers) > 0 {
+		facts = append(facts, fmt.Sprintf("%d controllers", len(c.Controllers)))
+	}
+	if len(c.Models) > 0 {
+		facts = append(facts, fmt.Sprintf("%d models", len(c.Models)))
+	}
+	if len(c.Migrations) > 0 {
+		facts = append(facts, fmt.Sprintf("%d migrations", len(c.Migrations)))
+	}
+	if len(c.InstructionFiles) > 0 {
+		facts = append(facts, "instructions from "+strings.Join(c.InstructionFiles, ", "))
+	}
+	if len(c.Skills) > 0 {
+		facts = append(facts, fmt.Sprintf("%d skills", len(c.Skills)))
+	}
+	summary := ""
+	if len(facts) > 0 {
+		summary = "  " + strings.Join(facts, " · ")
+	}
+	name := c.ProjectName
+	if name == "" {
+		name = "this project"
+	}
+	return fmt.Sprintf("Working in %s.%s\nI read the code before planning, show every file I touch, and verify the build. Try: \"add a comments resource to posts\" or \"how does auth work here?\"", name, summary)
+}
 
-	if m.TextInput.Value() != "" && m.OneShot {
-		cmds = append(cmds, m.submitPromptCmd(m.TextInput.Value()))
+func (m Model) Init() tea.Cmd {
+	cmds := []tea.Cmd{textinput.Blink, m.Spinner.Tick}
+	// A prompt given on the command line runs immediately, like `claude "…"`.
+	// (Init has a value receiver, so the transcript is updated in Update.)
+	if v := strings.TrimSpace(m.TextInput.Value()); v != "" {
+		cmds = append(cmds, func() tea.Msg { return submitMsg{prompt: v} })
 	}
 	return tea.Batch(cmds...)
 }
+
+type submitMsg struct{ prompt string }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var (
@@ -220,44 +275,56 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, thinkingTickCmd()
 
+	case submitMsg:
+		// Initial prompt from the command line.
+		m.History = append(m.History, msg.prompt)
+		m.HistoryIndex = len(m.History)
+		m.Messages = append(m.Messages, ChatItem{Role: "user", Content: msg.prompt, Timestamp: time.Now()})
+		m.TextInput.Reset()
+		m.OriginalPrompt = msg.prompt
+		m.updateViewportContent()
+		return m, m.submitPromptCmd(msg.prompt)
+
 	case requestSentMsg:
 		m.IsThinking = true
 		if m.ThinkingStartTime.IsZero() {
 			m.ThinkingStartTime = time.Now()
 		}
-		m.LastVerbChange = time.Now()
-		m.ThinkingVerb = NextRandomVerb(m.LastThinkingVerb)
 		return m, tea.Batch(m.listenForExecEventsCmd(), thinkingTickCmd())
 
 	case tea.WindowSizeMsg:
 		m.Width = msg.Width
 		m.Height = msg.Height
-		headerView := renderHeader(&m)
-		footerView := renderFooter(&m)
-		headerHeight := lipgloss.Height(headerView)
-		footerHeight := lipgloss.Height(footerView)
-		vpHeight := msg.Height - headerHeight - footerHeight
-		if vpHeight < 4 {
-			vpHeight = 4
-		}
-		if !m.Ready {
-			m.Viewport = viewport.New(msg.Width-4, vpHeight)
-			m.Ready = true
-		} else {
-			m.Viewport.Width = msg.Width - 4
-			m.Viewport.Height = vpHeight
-		}
-		m.TextInput.Width = msg.Width - 10
+		m.resizeViewport()
+		m.TextInput.Width = msg.Width - 8
 		m.StepInput.Width = msg.Width - 16
+		m.CustomInput.Width = msg.Width - 12
+		if !m.Ready {
+			m.Ready = true
+		}
 		m.updateViewportContent()
 
 	case tea.KeyMsg:
-		switch msg.Type {
-		case tea.KeyCtrlC:
+		if msg.Type == tea.KeyCtrlC {
+			if m.Mode.busy() && m.cancel != nil {
+				m.interrupt()
+				return m, nil
+			}
 			return m, tea.Quit
 		}
 
 		switch m.Mode {
+		case ModePlanning, ModeExecuting:
+			switch msg.Type {
+			case tea.KeyEsc:
+				m.interrupt()
+				return m, nil
+			case tea.KeyUp, tea.KeyDown, tea.KeyPgUp, tea.KeyPgDown:
+				m.Viewport, cmd = m.Viewport.Update(msg)
+				return m, cmd
+			}
+			return m, nil
+
 		case ModeChat:
 			switch msg.Type {
 			case tea.KeyEnter:
@@ -265,249 +332,105 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if val == "" {
 					return m, nil
 				}
-				if val == "/exit" || val == "/quit" || val == "exit" || val == "quit" || val == "q" {
-					return m, tea.Quit
-				}
-				if val == "/clear" || val == "clear" {
-					m.Messages = make([]ChatItem, 0)
-					m.StreamBuffer = &strings.Builder{}
+				if handled, quit := m.handleSlashCommand(val); handled {
 					m.TextInput.Reset()
 					m.updateViewportContent()
-					return m, nil
-				}
-				if val == "/help" || val == "help" {
-					m.Messages = append(m.Messages, ChatItem{
-						Role:      "assistant",
-						Content:   "**Nimbus AI Commands:**\n- `/skills` : List active agent skills\n- `/context` : View scanned project context\n- `/clear` : Clear chat history\n- `/exit` : Quit Nimbus AI\n- `nimbus ai --resume <id>` : Resume previous session",
-						Timestamp: time.Now(),
-					})
-					m.TextInput.Reset()
-					m.updateViewportContent()
-					return m, nil
-				}
-				if val == "/skills" {
-					skillsContent := "**Loaded Agent Skills (`~/.nimbus/skills`):**\n\n"
-					if len(m.Agent.Context.Skills) == 0 {
-						skillsContent += "No skills loaded."
-					} else {
-						for _, s := range m.Agent.Context.Skills {
-							skillsContent += fmt.Sprintf("• **`%s`** (%s)\n  %s\n\n", s.Name, s.Source, s.Description)
-						}
+					if quit {
+						return m, tea.Quit
 					}
-					m.Messages = append(m.Messages, ChatItem{
-						Role:      "assistant",
-						Content:   strings.TrimSpace(skillsContent),
-						Timestamp: time.Now(),
-					})
-					m.TextInput.Reset()
-					m.updateViewportContent()
 					return m, nil
 				}
-				if val == "/context" {
-					m.Messages = append(m.Messages, ChatItem{
-						Role:      "assistant",
-						Content:   m.Agent.Context.FormatSystemContext(),
-						Timestamp: time.Now(),
-					})
-					m.TextInput.Reset()
-					m.updateViewportContent()
-					return m, nil
-				}
-
 				m.History = append(m.History, val)
 				m.HistoryIndex = len(m.History)
-				m.Messages = append(m.Messages, ChatItem{
-					Role:      "user",
-					Content:   val,
-					Timestamp: time.Now(),
-				})
+				m.Messages = append(m.Messages, ChatItem{Role: "user", Content: val, Timestamp: time.Now()})
 				m.TextInput.Reset()
-				m.updateViewportContent()
 				m.OriginalPrompt = val
+				m.updateViewportContent()
 				return m, m.submitPromptCmd(val)
 
 			case tea.KeyUp:
 				if len(m.History) > 0 && m.HistoryIndex > 0 {
 					m.HistoryIndex--
 					m.TextInput.SetValue(m.History[m.HistoryIndex])
+					m.TextInput.CursorEnd()
 				}
+				return m, nil
 			case tea.KeyDown:
 				if m.HistoryIndex < len(m.History)-1 {
 					m.HistoryIndex++
 					m.TextInput.SetValue(m.History[m.HistoryIndex])
-				} else if m.HistoryIndex >= len(m.History)-1 {
+					m.TextInput.CursorEnd()
+				} else {
 					m.HistoryIndex = len(m.History)
 					m.TextInput.Reset()
 				}
+				return m, nil
+			case tea.KeyPgUp, tea.KeyPgDown:
+				m.Viewport, cmd = m.Viewport.Update(msg)
+				return m, cmd
 			}
 
 		case ModeClarification:
-			if m.ClarificationPlan == nil || len(m.ClarificationPlan.Questions) == 0 {
-				m.Mode = ModeChat
-				return m, nil
-			}
-
-			q := m.ClarificationPlan.Questions[m.CurrentQuestionIdx]
-
-			if m.IsCustomInput {
-				switch msg.Type {
-				case tea.KeyEnter:
-					ans := strings.TrimSpace(m.CustomInput.Value())
-					if ans == "" && q.Default != "" {
-						ans = q.Default
-					}
-					if ans != "" {
-						m.ClarificationAnswers[q.ID] = ans
-						m.IsCustomInput = false
-						m.CustomInput.Reset()
-						if m.CurrentQuestionIdx < len(m.ClarificationPlan.Questions)-1 {
-							m.CurrentQuestionIdx++
-							m.SelectedOptionIdx = 0
-						} else {
-							return m.finishClarification()
-						}
-					}
-				case tea.KeyEsc:
-					m.IsCustomInput = false
-					m.CustomInput.Reset()
-				default:
-					m.CustomInput, cmd = m.CustomInput.Update(msg)
-					return m, cmd
-				}
-				return m, nil
-			}
-
-			switch msg.String() {
-			case "q", "ctrl+c":
-				return m, tea.Quit
-			case "up", "k":
-				if m.SelectedOptionIdx > 0 {
-					m.SelectedOptionIdx--
-				}
-			case "down", "j":
-				if m.SelectedOptionIdx < len(q.Options)-1 {
-					m.SelectedOptionIdx++
-				}
-			case "c":
-				m.IsCustomInput = true
-				m.CustomInput.Focus()
-				return m, nil
-			case "1", "2", "3", "4", "5", "6", "7", "8", "9":
-				idx := int(msg.String()[0] - '1')
-				if idx >= 0 && idx < len(q.Options) {
-					m.SelectedOptionIdx = idx
-					m.ClarificationAnswers[q.ID] = q.Options[idx]
-					if m.CurrentQuestionIdx < len(m.ClarificationPlan.Questions)-1 {
-						m.CurrentQuestionIdx++
-						m.SelectedOptionIdx = 0
-					} else {
-						return m.finishClarification()
-					}
-				}
-			case "enter":
-				selectedAns := ""
-				if m.SelectedOptionIdx >= 0 && m.SelectedOptionIdx < len(q.Options) {
-					selectedAns = q.Options[m.SelectedOptionIdx]
-				} else if q.Default != "" {
-					selectedAns = q.Default
-				}
-				if selectedAns != "" {
-					m.ClarificationAnswers[q.ID] = selectedAns
-					if m.CurrentQuestionIdx < len(m.ClarificationPlan.Questions)-1 {
-						m.CurrentQuestionIdx++
-						m.SelectedOptionIdx = 0
-					} else {
-						return m.finishClarification()
-					}
-				}
-			case "esc":
-				m.Mode = ModeChat
-				m.StatusText = "Clarification cancelled."
-				m.Messages = append(m.Messages, ChatItem{
-					Role:      "assistant",
-					Content:   "Clarification cancelled. You can enter a new request or provide more details.",
-					Timestamp: time.Now(),
-				})
-				m.updateViewportContent()
-			}
+			return m.updateClarification(msg)
 
 		case ModePlanReview:
 			switch msg.String() {
-			case "q", "ctrl+c":
+			case "q":
 				return m, tea.Quit
-			case "r", "esc":
+			case "r", "esc", "n":
 				m.Mode = ModeChat
-				m.StatusText = "Plan rejected. Enter a new request."
-				m.Messages = append(m.Messages, ChatItem{
-					Role:      "assistant",
-					Content:   "Plan rejected. You can provide additional clarification or ask another question.",
-					Timestamp: time.Now(),
-				})
+				m.Messages = append(m.Messages, ChatItem{Role: "system", Content: "Plan rejected. Tell me what to change, or ask for something else.", Timestamp: time.Now()})
 				m.updateViewportContent()
-			case "enter":
+				return m, nil
+			case "enter", "y", "a":
 				if m.Agent.Session.Plan != nil {
 					for i := range m.Agent.Session.Plan.Steps {
 						m.Agent.Session.Plan.Steps[i].Approved = true
 					}
 				}
 				m.Mode = ModeExecuting
-				m.StatusText = "Executing approved architectural plan..."
 				m.CurrentDiffs = make([]string, 0)
-				execCmd := m.executeApprovedPlanCmd() // sets m.ExecChan before m is captured in return
-				return m, execCmd
+				m.Messages = append(m.Messages, ChatItem{Role: "system", Content: "Plan approved.", Timestamp: time.Now()})
+				m.updateViewportContent()
+				return m, m.executeApprovedPlanCmd()
+			case "up", "down", "pgup", "pgdown", "k", "j":
+				m.Viewport, cmd = m.Viewport.Update(msg)
+				return m, cmd
 			}
+			return m, nil
 
 		case ModeCompleted:
-			switch msg.Type {
-			case tea.KeyEnter, tea.KeyEsc:
-				if m.OneShot {
-					return m, tea.Quit
-				}
-				m.Mode = ModeChat
-				m.StatusText = "Ready for next request."
-				m.updateViewportContent()
-			}
+			m.Mode = ModeChat
 		}
 
 	case chatReplyMsg:
 		m.Mode = ModeChat
-		m.StatusText = ""
 		m.stopThinking()
 		if msg.err != nil {
-			m.Messages = append(m.Messages, ChatItem{
-				Role:      "assistant",
-				Content:   fmt.Sprintf("❌ **Error:** %v", msg.err),
-				Timestamp: time.Now(),
-				IsError:   true,
-			})
+			m.Messages = append(m.Messages, ChatItem{Role: "error", Content: msg.err.Error(), Timestamp: time.Now(), IsError: true})
 		} else {
-			m.Messages = append(m.Messages, ChatItem{
-				Role:      "assistant",
-				Content:   msg.reply,
-				Timestamp: time.Now(),
-			})
+			m.Messages = append(m.Messages, ChatItem{Role: "assistant", Content: msg.reply, Timestamp: time.Now()})
 		}
 		m.updateViewportContent()
 
 	case planDeltaMsg:
 		m.StreamBuffer.WriteString(msg.delta)
 
+	case statusMsg:
+		m.setPhase(msg.text)
+		m.updateViewportContent()
+		return m, m.listenForExecEventsCmd()
+
 	case planDoneMsg:
+		m.finishPhase()
 		m.stopThinking()
+		m.StreamBuffer = &strings.Builder{}
 		if msg.err != nil {
 			m.Mode = ModeChat
-			m.ErrorMessage = fmt.Sprintf("Planning Error: %v", msg.err)
-			m.Messages = append(m.Messages, ChatItem{
-				Role:      "assistant",
-				Content:   fmt.Sprintf("❌ **Planning Error:** %v", msg.err),
-				Timestamp: time.Now(),
-				IsError:   true,
-			})
+			m.appendError(msg.err)
 			m.updateViewportContent()
 			return m, nil
 		}
-
-		// Check if AI model decided clarification is needed
 		if msg.plan != nil && msg.plan.NeedsClarification && len(msg.plan.Questions) > 0 {
 			m.Mode = ModeClarification
 			m.ClarificationPlan = msg.plan
@@ -516,101 +439,95 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.ClarificationAnswers = make(map[string]string)
 			m.IsCustomInput = false
 			m.CustomInput.Reset()
-			m.StatusText = "Please answer a few questions to help refine the architectural plan."
 			return m, nil
 		}
-
-		// If the plan has no steps, the AI returned a conversational response
-		// Display it as a chat message instead of entering Plan Review
 		if msg.plan == nil || len(msg.plan.Steps) == 0 {
+			// Conversational answer.
 			m.Mode = ModeChat
-			m.StatusText = ""
-			reply := "I couldn't generate a specific plan for that request."
-			if msg.plan != nil && msg.plan.Summary != "" {
+			reply := "I couldn't work out a plan for that request."
+			if msg.plan != nil && strings.TrimSpace(msg.plan.Summary) != "" {
 				reply = msg.plan.Summary
 			}
-			m.Messages = append(m.Messages, ChatItem{
-				Role:      "assistant",
-				Content:   reply,
-				Timestamp: time.Now(),
-			})
+			m.Messages = append(m.Messages, ChatItem{Role: "assistant", Content: reply, Timestamp: time.Now()})
 			m.updateViewportContent()
 			return m, nil
 		}
 		m.Mode = ModePlanReview
 		m.SelectedStep = 0
-		m.StatusText = "Plan synthesized. Review and approve steps below."
+		m.Viewport.SetContent(renderPlanView(&m))
+		m.Viewport.GotoTop()
 
 	case toolCallMsg:
-		target := ""
-		if p, ok := msg.args["path"].(string); ok {
-			target = p
-		} else if c, ok := msg.args["command"].(string); ok {
-			target = c
-		}
-		m.StatusText = fmt.Sprintf("⚡ %s %s...", msg.name, target)
+		target := toolTarget(msg.args)
+		m.StatusText = fmt.Sprintf("%s %s", toolVerb(msg.name, msg.args), target)
 		return m, m.listenForExecEventsCmd()
 
 	case toolLogMsg:
-		if msg.Err != nil {
-			m.StatusText = fmt.Sprintf("❌ Failed to %s %s", strings.ToLower(msg.Action), msg.Target)
-			m.Messages = append(m.Messages, ChatItem{
-				Role:      "tool",
-				ToolName:  msg.Action,
-				Content:   fmt.Sprintf("%s (Error: %v)", msg.Target, msg.Err),
-				Timestamp: time.Now(),
-				IsError:   true,
-			})
-		} else {
-			m.StatusText = fmt.Sprintf("✓ %s %s", msg.Action, msg.Target)
-			m.Messages = append(m.Messages, ChatItem{
-				Role:      "tool",
-				ToolName:  msg.Action,
-				Content:   msg.Target,
-				Timestamp: time.Now(),
-			})
+		m.ToolCalls++
+		item := ChatItem{
+			Role:      "tool",
+			ToolName:  msg.ToolName,
+			ToolArgs:  msg.Args,
+			Content:   msg.Target,
+			Detail:    toolDetail(msg.ToolName, msg.Detail, msg.Err),
+			Timestamp: time.Now(),
 		}
+		if msg.Err != nil {
+			item.IsError = true
+			item.Detail = msg.Err.Error()
+		} else if isCommandFailure(msg.ToolName, msg.Detail) {
+			item.IsError = true
+		}
+		m.Messages = append(m.Messages, item)
+		m.StatusText = ""
 		m.updateViewportContent()
 		return m, m.listenForExecEventsCmd()
 
 	case diffMsg:
 		m.CurrentDiffs = append(m.CurrentDiffs, msg.diff)
+		// Attach to the tool line it belongs to (the most recent write/edit).
+		for i := len(m.Messages) - 1; i >= 0; i-- {
+			if m.Messages[i].Role == "tool" && m.Messages[i].Diff == "" && isWriteTool(m.Messages[i].ToolName) {
+				m.Messages[i].Diff = msg.diff
+				m.Messages[i].Detail = diffStats(msg.diff)
+				break
+			}
+		}
+		m.updateViewportContent()
 		return m, m.listenForExecEventsCmd()
 
 	case execDeltaMsg:
 		m.StreamBuffer.WriteString(msg.delta)
 		m.ThinkingTokens += EstimateDeltaTokens(msg.delta)
+		m.updateViewportContent()
 		return m, m.listenForExecEventsCmd()
 
 	case execDoneMsg:
-		m.Mode = ModeCompleted
+		m.finishPhase()
 		m.stopThinking()
+		m.StreamBuffer = &strings.Builder{}
+		m.Mode = ModeChat
 		if msg.err != nil {
-			m.ErrorMessage = fmt.Sprintf("Execution Error: %v", msg.err)
-			m.Messages = append(m.Messages, ChatItem{
-				Role:      "assistant",
-				Content:   fmt.Sprintf("❌ **Execution Error:** %v", msg.err),
-				Timestamp: time.Now(),
-				IsError:   true,
-			})
+			m.appendError(msg.err)
 		} else {
-			m.StatusText = "✓ Execution completed successfully!"
-			summary := msg.summary
+			summary := strings.TrimSpace(msg.summary)
 			if summary == "" {
-				summary = "✨ All architectural plan steps have been executed and saved to workspace."
+				summary = "Done — all approved steps were executed."
 			}
-			m.Messages = append(m.Messages, ChatItem{
-				Role:      "assistant",
-				Content:   summary,
-				Timestamp: time.Now(),
-				Diffs:     m.CurrentDiffs,
-			})
+			m.FinalSummary = summary
+			m.Messages = append(m.Messages, ChatItem{Role: "assistant", Content: summary, Timestamp: time.Now()})
 		}
 		m.updateViewportContent()
+		if m.OneShot {
+			return m, tea.Quit
+		}
+		return m, nil
 	}
 
-	m.TextInput, cmd = m.TextInput.Update(msg)
-	cmds = append(cmds, cmd)
+	if m.Mode == ModeChat {
+		m.TextInput, cmd = m.TextInput.Update(msg)
+		cmds = append(cmds, cmd)
+	}
 
 	m.Spinner, cmd = m.Spinner.Update(msg)
 	cmds = append(cmds, cmd)
@@ -621,14 +538,195 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
+// handleSlashCommand executes /commands typed in chat. Returns (handled, quit).
+func (m *Model) handleSlashCommand(val string) (bool, bool) {
+	switch strings.ToLower(val) {
+	case "/exit", "/quit", "exit", "quit", "q":
+		return true, true
+	case "/clear", "clear":
+		m.Messages = make([]ChatItem, 0)
+		m.StreamBuffer = &strings.Builder{}
+		return true, false
+	case "/help", "help", "?":
+		m.Messages = append(m.Messages, ChatItem{Role: "system", Timestamp: time.Now(), Content: strings.Join([]string{
+			"Commands",
+			"  /context   what I know about this project",
+			"  /skills    available agent skills",
+			"  /session   session id and memory",
+			"  /clear     clear the transcript",
+			"  /exit      quit",
+			"",
+			"Keys",
+			"  Enter send · ↑/↓ history · PgUp/PgDn scroll · Esc interrupt a running task · Ctrl+C quit",
+		}, "\n")})
+		return true, false
+	case "/skills":
+		var sb strings.Builder
+		if len(m.Agent.Context.Skills) == 0 {
+			sb.WriteString("No skills loaded.")
+		} else {
+			sb.WriteString("Agent skills (loaded on demand when relevant):\n")
+			for _, s := range m.Agent.Context.Skills {
+				sb.WriteString(fmt.Sprintf("  • %s — %s\n", s.Name, s.Description))
+			}
+		}
+		m.Messages = append(m.Messages, ChatItem{Role: "system", Content: strings.TrimRight(sb.String(), "\n"), Timestamp: time.Now()})
+		return true, false
+	case "/context":
+		m.Messages = append(m.Messages, ChatItem{Role: "assistant", Content: m.Agent.Context.FormatSystemContext(), Timestamp: time.Now()})
+		return true, false
+	case "/session":
+		s := m.Agent.Session
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("Session %s · %d turns remembered\n", s.ID, len(s.Turns)))
+		if mem := s.ConversationSummary(); mem != "" {
+			sb.WriteString(mem)
+		}
+		sb.WriteString(fmt.Sprintf("\nResume later with: nimbus ai --resume %s", s.ID))
+		m.Messages = append(m.Messages, ChatItem{Role: "system", Content: sb.String(), Timestamp: time.Now()})
+		return true, false
+	}
+	return false, false
+}
+
+func (m *Model) updateClarification(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	if m.ClarificationPlan == nil || len(m.ClarificationPlan.Questions) == 0 {
+		m.Mode = ModeChat
+		return m, nil
+	}
+	q := m.ClarificationPlan.Questions[m.CurrentQuestionIdx]
+
+	advance := func(ans string) (tea.Model, tea.Cmd) {
+		m.ClarificationAnswers[q.ID] = ans
+		if m.CurrentQuestionIdx < len(m.ClarificationPlan.Questions)-1 {
+			m.CurrentQuestionIdx++
+			m.SelectedOptionIdx = 0
+			return m, nil
+		}
+		return m.finishClarification()
+	}
+
+	if m.IsCustomInput {
+		switch msg.Type {
+		case tea.KeyEnter:
+			ans := strings.TrimSpace(m.CustomInput.Value())
+			if ans == "" {
+				ans = q.Default
+			}
+			if ans != "" {
+				m.IsCustomInput = false
+				m.CustomInput.Reset()
+				return advance(ans)
+			}
+		case tea.KeyEsc:
+			m.IsCustomInput = false
+			m.CustomInput.Reset()
+		default:
+			m.CustomInput, cmd = m.CustomInput.Update(msg)
+			return m, cmd
+		}
+		return m, nil
+	}
+
+	switch msg.String() {
+	case "ctrl+c":
+		return m, tea.Quit
+	case "up", "k":
+		if m.SelectedOptionIdx > 0 {
+			m.SelectedOptionIdx--
+		}
+	case "down", "j":
+		if m.SelectedOptionIdx < len(q.Options)-1 {
+			m.SelectedOptionIdx++
+		}
+	case "c", "o":
+		m.IsCustomInput = true
+		m.CustomInput.Focus()
+	case "1", "2", "3", "4", "5", "6", "7", "8", "9":
+		idx := int(msg.String()[0] - '1')
+		if idx >= 0 && idx < len(q.Options) {
+			m.SelectedOptionIdx = idx
+			return advance(q.Options[idx])
+		}
+	case "enter":
+		ans := q.Default
+		if m.SelectedOptionIdx >= 0 && m.SelectedOptionIdx < len(q.Options) {
+			ans = q.Options[m.SelectedOptionIdx]
+		}
+		if ans != "" {
+			return advance(ans)
+		}
+	case "esc":
+		m.Mode = ModeChat
+		m.Messages = append(m.Messages, ChatItem{Role: "system", Content: "Cancelled. Add more detail to your request and try again.", Timestamp: time.Now()})
+		m.updateViewportContent()
+	}
+	return m, nil
+}
+
+// interrupt cancels the running agent task.
+func (m *Model) interrupt() {
+	if m.cancel != nil {
+		m.cancel()
+	}
+	m.StatusText = "Interrupting…"
+}
+
+func (m *Model) appendError(err error) {
+	if errors.Is(err, context.Canceled) || strings.Contains(err.Error(), "context canceled") {
+		m.Messages = append(m.Messages, ChatItem{Role: "system", Content: "Interrupted.", Timestamp: time.Now()})
+		return
+	}
+	m.Messages = append(m.Messages, ChatItem{Role: "error", Content: err.Error(), Timestamp: time.Now(), IsError: true})
+}
+
+// setPhase records a new agent phase as a transcript line.
+func (m *Model) setPhase(text string) {
+	text = strings.TrimSpace(text)
+	if text == "" || text == m.Phase {
+		return
+	}
+	m.finishPhase()
+	m.Phase = text
+	m.PhaseStart = time.Now()
+	m.StatusText = ""
+	m.Messages = append(m.Messages, ChatItem{Role: "phase", Content: strings.TrimRight(text, "…."), Timestamp: time.Now()})
+}
+
+// finishPhase stamps the elapsed time onto the current phase line.
+func (m *Model) finishPhase() {
+	if m.Phase == "" {
+		return
+	}
+	for i := len(m.Messages) - 1; i >= 0; i-- {
+		if m.Messages[i].Role == "phase" {
+			m.Messages[i].Elapsed = time.Since(m.PhaseStart)
+			break
+		}
+	}
+	m.Phase = ""
+}
+
+func (m *Model) resizeViewport() {
+	headerHeight := lipgloss.Height(renderHeader(m))
+	footerHeight := lipgloss.Height(renderFooter(m))
+	vpHeight := m.Height - headerHeight - footerHeight
+	if vpHeight < 4 {
+		vpHeight = 4
+	}
+	if !m.Ready {
+		m.Viewport = viewport.New(m.Width, vpHeight)
+	} else {
+		m.Viewport.Width = m.Width
+		m.Viewport.Height = vpHeight
+	}
+}
+
 func (m *Model) submitChatCmd(prompt string) tea.Cmd {
 	m.Mode = ModeChat
-	m.StatusText = "Thinking..."
-	m.ErrorMessage = ""
-
 	chatCmd := func() tea.Msg {
-		ctx := context.Background()
-		reply, err := m.Agent.Client.Chat(ctx, prompt, m.Agent.Model, m.Agent.Context)
+		reply, err := m.Agent.Client.Chat(context.Background(), prompt, m.Agent.Model, m.Agent.Context)
 		return chatReplyMsg{reply: reply, err: err}
 	}
 	return tea.Batch(chatCmd, m.startThinking())
@@ -637,122 +735,64 @@ func (m *Model) submitChatCmd(prompt string) tea.Cmd {
 func (m *Model) submitPromptCmd(prompt string) tea.Cmd {
 	m.Mode = ModePlanning
 	m.StreamBuffer = &strings.Builder{}
-	m.StatusText = "Synthesizing architectural plan..."
 	m.ErrorMessage = ""
+	m.ToolCalls = 0
 
-	planCmd := func() tea.Msg {
-		ctx := context.Background()
+	ch, ctx := m.wireAgentCallbacks()
+	go func() {
 		plan, err := m.Agent.GeneratePlan(ctx, prompt)
-		return planDoneMsg{plan: plan, err: err}
-	}
-
-	return tea.Batch(planCmd, m.startThinking())
+		ch <- planDoneMsg{plan: plan, err: err}
+	}()
+	return tea.Batch(m.listenForExecEventsCmd(), m.startThinking())
 }
 
 func (m *Model) regenerateStepCmd(stepIdx int, newDesc string) tea.Cmd {
 	regenCmd := func() tea.Msg {
-		ctx := context.Background()
-		plan, err := m.Agent.RegenerateStep(ctx, stepIdx, newDesc)
+		plan, err := m.Agent.RegenerateStep(context.Background(), stepIdx, newDesc)
 		return planDoneMsg{plan: plan, err: err}
 	}
 	return tea.Batch(regenCmd, m.startThinking())
 }
 
 func (m *Model) executeApprovedPlanCmd() tea.Cmd {
-	ch := make(chan tea.Msg, 100)
-	m.ExecChan = ch
-
-	// Wire agent callbacks to channel for real-time TUI progress
-	m.Agent.Callbacks = ai.AgentCallbacks{
-		OnRequestSent: func() {
-			ch <- requestSentMsg{}
-		},
-		OnStreamDelta: func(delta string) {
-			ch <- execDeltaMsg{delta: delta}
-		},
-		OnToolCall: func(toolName string, args map[string]any) {
-			action := "ANALYZING"
-			switch strings.ToLower(toolName) {
-			case "write_file", "create_file", "create", "write":
-				action = "CREATING"
-			case "edit_file", "edit":
-				action = "MODIFYING"
-			case "load_skill", "read_skill", "skill":
-				action = "LOADING SKILL"
-			case "read_file", "read", "grep", "list_dir":
-				action = "ANALYZING"
-			case "bash", "command", "run_command":
-				action = "EXECUTING"
-			case "delete_file", "delete":
-				action = "DELETING"
-			}
-			ch <- toolCallMsg{name: action, args: args}
-		},
-		OnToolResult: func(toolName string, args map[string]any, output string, err error) {
-			action := "ANALYZED"
-			target := ""
-			if p, ok := args["path"].(string); ok && p != "" {
-				target = p
-			} else if s, ok := args["skill_name"].(string); ok && s != "" {
-				target = s
-			} else if n, ok := args["name"].(string); ok && n != "" {
-				target = n
-			} else if f, ok := args["file"].(string); ok && f != "" {
-				target = f
-			} else if c, ok := args["command"].(string); ok && c != "" {
-				target = c
-			} else if p, ok := args["pattern"].(string); ok && p != "" {
-				target = p
-			} else if t, ok := args["target"].(string); ok && t != "" {
-				target = t
-			}
-
-			switch strings.ToLower(toolName) {
-			case "write_file", "create_file", "create", "write":
-				if strings.Contains(output, "MODIFIED") {
-					action = "MODIFIED"
-				} else {
-					action = "CREATED"
-				}
-			case "edit_file", "edit":
-				action = "MODIFIED"
-			case "load_skill", "read_skill", "skill":
-				action = "LOADED SKILL"
-			case "read_file", "read", "grep", "list_dir":
-				action = "ANALYZED"
-			case "bash", "command", "run_command":
-				action = "EXECUTED"
-			case "delete_file", "delete":
-				action = "DELETED"
-			}
-
-			ch <- toolLogMsg{
-				Action: action,
-				Target: target,
-				Detail: output,
-				Err:    err,
-			}
-		},
-		OnDiffGenerated: func(filePath, diff string) {
-			ch <- diffMsg{path: filePath, diff: diff}
-		},
-	}
-
+	ch, ctx := m.wireAgentCallbacks()
 	go func() {
-		ctx := context.Background()
 		summary, err := m.Agent.ExecuteApprovedPlan(ctx, m.Agent.Session.Plan)
 		ch <- execDoneMsg{summary: summary, err: err}
 	}()
-
 	return tea.Batch(m.listenForExecEventsCmd(), m.startThinking())
 }
 
+// wireAgentCallbacks creates the event channel and cancellable context for a
+// planning or execution run and points the agent's callbacks at it.
+func (m *Model) wireAgentCallbacks() (chan tea.Msg, context.Context) {
+	ch := make(chan tea.Msg, 256)
+	m.ExecChan = ch
+	ctx, cancel := context.WithCancel(context.Background())
+	m.cancel = cancel
+
+	m.Agent.Callbacks = ai.AgentCallbacks{
+		OnRequestSent: func() { ch <- requestSentMsg{} },
+		OnStatus:      func(text string) { ch <- statusMsg{text: text} },
+		OnStreamDelta: func(delta string) { ch <- execDeltaMsg{delta: delta} },
+		OnToolCall: func(toolName string, args map[string]any) {
+			ch <- toolCallMsg{name: toolName, args: args}
+		},
+		OnToolResult: func(toolName string, args map[string]any, output string, err error) {
+			ch <- toolLogMsg{ToolName: toolName, Args: args, Target: toolTarget(args), Detail: output, Err: err}
+		},
+		OnDiffGenerated: func(filePath, diff string) { ch <- diffMsg{path: filePath, diff: diff} },
+	}
+	return ch, ctx
+}
+
 func (m *Model) listenForExecEventsCmd() tea.Cmd {
+	ch := m.ExecChan
 	return func() tea.Msg {
-		if m.ExecChan == nil {
+		if ch == nil {
 			return nil
 		}
-		msg, ok := <-m.ExecChan
+		msg, ok := <-ch
 		if !ok {
 			return nil
 		}
@@ -763,58 +803,173 @@ func (m *Model) listenForExecEventsCmd() tea.Cmd {
 func (m Model) finishClarification() (Model, tea.Cmd) {
 	var sb strings.Builder
 	sb.WriteString(m.OriginalPrompt)
-	sb.WriteString("\n\nArchitectural Choices & Developer Preferences:")
+	sb.WriteString("\n\nDecisions:")
 	for _, q := range m.ClarificationPlan.Questions {
-		ans := m.ClarificationAnswers[q.ID]
-		if ans != "" {
+		if ans := m.ClarificationAnswers[q.ID]; ans != "" {
 			sb.WriteString(fmt.Sprintf("\n- %s: %s", q.Question, ans))
 		}
 	}
-
-	refinedPrompt := sb.String()
-	m.Mode = ModePlanning
-	m.StatusText = "Synthesizing architectural plan with your specified tech stack..."
-	return m, m.submitPromptCmd(refinedPrompt)
+	m.Messages = append(m.Messages, ChatItem{Role: "system", Content: "Thanks — planning with your choices.", Timestamp: time.Now()})
+	m.updateViewportContent()
+	return m, m.submitPromptCmd(sb.String())
 }
 
 func (m *Model) updateViewportContent() {
+	if m.Mode == ModePlanReview {
+		m.Viewport.SetContent(renderPlanView(m))
+		return
+	}
 	m.Viewport.SetContent(renderChatHistory(m))
 	m.Viewport.GotoBottom()
 }
 
+// ---------------------------------------------------------------------------
+// Tool-line helpers
+// ---------------------------------------------------------------------------
+
+var reLinesInfo = regexp.MustCompile(`\((\d+) lines`)
+
+// toolVerb maps a tool to the verb shown on its transcript line.
+func toolVerb(name string, args map[string]any) string {
+	switch strings.ToLower(name) {
+	case "read_file", "read":
+		return "Read"
+	case "grep", "search":
+		return "Search"
+	case "find_files", "glob":
+		return "Glob"
+	case "list_dir":
+		return "List"
+	case "write_file", "create_file", "create", "write":
+		return "Write"
+	case "edit_file", "edit":
+		return "Edit"
+	case "delete_file", "delete":
+		return "Delete"
+	case "bash", "command", "run_command", "shell":
+		return "Bash"
+	case "load_skill", "read_skill", "skill", "query_skill":
+		return "Skill"
+	}
+	return strings.Title(strings.ReplaceAll(name, "_", " "))
+}
+
+func toolTarget(args map[string]any) string {
+	for _, k := range []string{"path", "command", "pattern", "skill_name", "name", "file", "target"} {
+		if v, ok := args[k].(string); ok && strings.TrimSpace(v) != "" {
+			v = strings.TrimSpace(v)
+			if k == "pattern" {
+				return "\"" + v + "\""
+			}
+			return v
+		}
+	}
+	return ""
+}
+
+func isWriteTool(name string) bool {
+	switch strings.ToLower(name) {
+	case "write_file", "create_file", "create", "write", "edit_file", "edit", "delete_file", "delete":
+		return true
+	}
+	return false
+}
+
+func isCommandFailure(name, out string) bool {
+	switch strings.ToLower(name) {
+	case "bash", "command", "run_command", "shell":
+		return strings.HasPrefix(out, "Command failed") || strings.HasPrefix(out, "Command timed out")
+	}
+	return false
+}
+
+// toolDetail summarises a tool result for the transcript line.
+func toolDetail(name, out string, err error) string {
+	if err != nil {
+		return ""
+	}
+	lower := strings.ToLower(name)
+	switch lower {
+	case "read_file", "read":
+		if m := reLinesInfo.FindStringSubmatch(out); len(m) == 2 {
+			return m[1] + " lines"
+		}
+	case "grep", "search":
+		if strings.HasPrefix(out, "No matches") {
+			return "no matches"
+		}
+		return strconv.Itoa(countLines(out)) + " matches"
+	case "find_files", "glob":
+		if strings.HasPrefix(out, "No files") {
+			return "no files"
+		}
+		return strconv.Itoa(countLines(out)) + " files"
+	case "list_dir":
+		n := countLines(out) - 1
+		if n < 0 {
+			n = 0
+		}
+		return strconv.Itoa(n) + " entries"
+	case "bash", "command", "run_command", "shell":
+		if strings.HasPrefix(out, "Command failed") {
+			return "failed"
+		}
+		if strings.HasPrefix(out, "Command timed out") {
+			return "timed out"
+		}
+		return "ok"
+	case "load_skill", "read_skill", "skill", "query_skill":
+		return "loaded"
+	case "delete_file", "delete":
+		return "deleted"
+	case "write_file", "create_file", "create", "write":
+		if strings.HasPrefix(out, "MODIFIED") {
+			return "rewrote"
+		}
+		return "created"
+	case "edit_file", "edit":
+		return "edited"
+	}
+	return ""
+}
+
+func countLines(s string) int {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0
+	}
+	return strings.Count(s, "\n") + 1
+}
+
+// diffStats returns "+a −b" for a unified diff.
+func diffStats(diff string) string {
+	add, del := 0, 0
+	for _, l := range strings.Split(diff, "\n") {
+		switch {
+		case strings.HasPrefix(l, "+++"), strings.HasPrefix(l, "---"):
+		case strings.HasPrefix(l, "+"):
+			add++
+		case strings.HasPrefix(l, "-"):
+			del++
+		}
+	}
+	return fmt.Sprintf("+%d −%d", add, del)
+}
+
 func isPlanIntent(prompt string) bool {
 	lower := strings.TrimSpace(strings.ToLower(prompt))
-
-	// Analysis, question, inspection, greeting -> direct AI response
-	if strings.Contains(lower, "analyze") ||
-		strings.Contains(lower, "analyse") ||
-		strings.Contains(lower, "explain") ||
-		strings.Contains(lower, "what") ||
-		strings.Contains(lower, "how") ||
-		strings.Contains(lower, "why") ||
-		strings.Contains(lower, "tell me") ||
-		strings.Contains(lower, "check") ||
-		strings.Contains(lower, "review") ||
-		strings.Contains(lower, "inspect") ||
-		strings.Contains(lower, "who") ||
-		strings.Contains(lower, "help") ||
-		lower == "hi" || lower == "hello" || lower == "hey" ||
-		strings.HasSuffix(lower, "?") {
+	for _, q := range []string{"analyze", "analyse", "explain", "what", "how", "why", "tell me", "check", "review", "inspect", "who", "help"} {
+		if strings.Contains(lower, q) {
+			return false
+		}
+	}
+	if strings.HasSuffix(lower, "?") {
 		return false
 	}
-
-	// Explicit code scaffolding / generation commands
-	return strings.Contains(lower, "create") ||
-		strings.Contains(lower, "generate") ||
-		strings.Contains(lower, "scaffold") ||
-		strings.Contains(lower, "make:") ||
-		strings.Contains(lower, "make ") ||
-		strings.Contains(lower, "add model") ||
-		strings.Contains(lower, "add controller") ||
-		strings.Contains(lower, "add migration") ||
-		strings.Contains(lower, "add route") ||
-		strings.Contains(lower, "build ") ||
-		strings.Contains(lower, "implement ") ||
-		strings.Contains(lower, "delete file") ||
-		strings.Contains(lower, "remove file")
+	for _, k := range []string{"create", "generate", "scaffold", "make:", "make ", "add ", "build ", "implement ", "delete file", "remove file", "fix ", "refactor", "update "} {
+		if strings.Contains(lower, k) {
+			return true
+		}
+	}
+	return false
 }

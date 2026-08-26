@@ -6,28 +6,52 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
 // ProjectContext contains scanned information about the current Nimbus project.
 type ProjectContext struct {
-	AppRoot          string            `json:"app_root"`
-	ProjectName      string            `json:"project_name"`
-	GoModName        string            `json:"go_mod_name,omitempty"`
-	GoVersion        string            `json:"go_version,omitempty"`
-	NimbusModules    []string          `json:"nimbus_modules,omitempty"`
-	NimbusJSON       string            `json:"nimbus_json,omitempty"`
-	DirectoryTree    string            `json:"directory_tree"`
-	GitBranch        string            `json:"git_branch,omitempty"`
-	GitDiffSummary   string            `json:"git_diff_summary,omitempty"`
-	RootFiles        []string          `json:"root_files,omitempty"`
-	Models           []string          `json:"models,omitempty"`
-	Controllers      []string          `json:"controllers,omitempty"`
-	Migrations       []string          `json:"migrations,omitempty"`
-	RoutesSummary    string            `json:"routes_summary,omitempty"`
-	Skills           []Skill           `json:"skills,omitempty"`
-	ActiveSkillFrame string            `json:"active_skill_frame,omitempty"`
+	AppRoot        string   `json:"app_root"`
+	ProjectName    string   `json:"project_name"`
+	GoModName      string   `json:"go_mod_name,omitempty"`
+	GoVersion      string   `json:"go_version,omitempty"`
+	NimbusModules  []string `json:"nimbus_modules,omitempty"`
+	NimbusJSON     string   `json:"nimbus_json,omitempty"`
+	DirectoryTree  string   `json:"directory_tree"`
+	GitBranch      string   `json:"git_branch,omitempty"`
+	GitDiffSummary string   `json:"git_diff_summary,omitempty"`
+	RootFiles      []string `json:"root_files,omitempty"`
+	Models         []string `json:"models,omitempty"`
+	Controllers    []string `json:"controllers,omitempty"`
+	Migrations     []string `json:"migrations,omitempty"`
+	RoutesSummary  string   `json:"routes_summary,omitempty"`
+	Skills         []Skill  `json:"skills,omitempty"`
+	// ActiveSkillFrame holds the most recently loaded skill so the server can
+	// keep it in the system prompt rather than the message history.
+	ActiveSkillFrame string `json:"active_skill_frame,omitempty"`
+	// Instructions holds project-level guidance for the agent, read from
+	// AGENTS.md / NIMBUS.md / CLAUDE.md / .nimbus/instructions.md. It is the
+	// project's persistent memory: conventions, do's and don'ts, commands.
+	Instructions string `json:"instructions,omitempty"`
+	// InstructionFiles lists which instruction files were found.
+	InstructionFiles []string `json:"instruction_files,omitempty"`
+	// Stack summarises non-Go tooling detected (package.json, Vite, Tailwind…).
+	Stack []string `json:"stack,omitempty"`
+	// OS is the host operating system, so shell commands can be phrased correctly.
+	OS string `json:"os,omitempty"`
 }
+
+// instructionFileCandidates are checked in order; every one that exists is
+// included so teams can keep both a generic AGENTS.md and Nimbus-specific notes.
+var instructionFileCandidates = []string{
+	"AGENTS.md",
+	"NIMBUS.md",
+	"CLAUDE.md",
+	filepath.Join(".nimbus", "instructions.md"),
+}
+
+const maxInstructionBytes = 12 * 1024
 
 // ScanProject scans the given project directory and constructs a ProjectContext.
 func ScanProject(appRoot string) (*ProjectContext, error) {
@@ -40,23 +64,17 @@ func ScanProject(appRoot string) (*ProjectContext, error) {
 		AppRoot:       absRoot,
 		ProjectName:   filepath.Base(absRoot),
 		NimbusModules: make([]string, 0),
-		RootFiles:     make([]string, 0),
 		Models:        make([]string, 0),
 		Controllers:   make([]string, 0),
 		Migrations:    make([]string, 0),
 		Skills:        make([]Skill, 0),
+		OS:            hostOS(),
 	}
 
-	// Scan top-level files in AppRoot
-	if entries, err := os.ReadDir(absRoot); err == nil {
-		for _, e := range entries {
-			if !e.IsDir() && !strings.HasPrefix(e.Name(), ".") {
-				ctx.RootFiles = append(ctx.RootFiles, e.Name())
-			}
-		}
-	}
+	// 0. Top-level files (quick orientation for non-Nimbus projects too)
+	ctx.RootFiles = scanRootFiles(absRoot)
 
-	// 1. Read go.mod if present
+	// 1. Read go.mod
 	goModPath := filepath.Join(absRoot, "go.mod")
 	if data, err := os.ReadFile(goModPath); err == nil {
 		lines := strings.Split(string(data), "\n")
@@ -102,7 +120,108 @@ func ScanProject(appRoot string) (*ProjectContext, error) {
 		ctx.Skills = skills
 	}
 
+	// 9. Project instructions (persistent agent memory) and stack hints
+	ctx.Instructions, ctx.InstructionFiles = loadProjectInstructions(absRoot)
+	ctx.Stack = detectStack(absRoot)
+
 	return ctx, nil
+}
+
+// Refresh re-reads the cheap, fast-changing parts of the context (git state,
+// directory tree, instructions) so later phases see files created earlier.
+func (p *ProjectContext) Refresh() {
+	if p == nil || p.AppRoot == "" {
+		return
+	}
+	p.DirectoryTree = buildDirectoryTree(p.AppRoot, 3)
+	p.RootFiles = scanRootFiles(p.AppRoot)
+	p.GitBranch = getGitBranch(p.AppRoot)
+	p.GitDiffSummary = getGitDiffSummary(p.AppRoot)
+	p.Models = scanGoFiles(filepath.Join(p.AppRoot, "app", "models"))
+	p.Controllers = scanGoFiles(filepath.Join(p.AppRoot, "app", "controllers"))
+	p.Migrations = scanGoFiles(filepath.Join(p.AppRoot, "database", "migrations"))
+	if data, err := os.ReadFile(filepath.Join(p.AppRoot, "start", "routes.go")); err == nil {
+		p.RoutesSummary = summarizeRoutes(string(data))
+	}
+	p.Instructions, p.InstructionFiles = loadProjectInstructions(p.AppRoot)
+}
+
+func hostOS() string {
+	switch runtime.GOOS {
+	case "darwin":
+		return "macos"
+	default:
+		return runtime.GOOS
+	}
+}
+
+func scanRootFiles(root string) []string {
+	files := make([]string, 0)
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return files
+	}
+	for _, e := range entries {
+		if !e.IsDir() && !strings.HasPrefix(e.Name(), ".") {
+			files = append(files, e.Name())
+		}
+	}
+	return files
+}
+
+// loadProjectInstructions concatenates every instruction file present.
+func loadProjectInstructions(root string) (string, []string) {
+	var sb strings.Builder
+	var found []string
+	for _, rel := range instructionFileCandidates {
+		data, err := os.ReadFile(filepath.Join(root, rel))
+		if err != nil {
+			continue
+		}
+		text := strings.TrimSpace(string(data))
+		if text == "" {
+			continue
+		}
+		if len(text) > maxInstructionBytes {
+			text = text[:maxInstructionBytes] + "\n… (truncated)"
+		}
+		found = append(found, rel)
+		sb.WriteString(fmt.Sprintf("### %s\n%s\n\n", filepath.ToSlash(rel), text))
+	}
+	return strings.TrimSpace(sb.String()), found
+}
+
+// detectStack reports non-Go tooling so the agent respects the real stack.
+func detectStack(root string) []string {
+	var stack []string
+	exists := func(rel string) bool {
+		_, err := os.Stat(filepath.Join(root, rel))
+		return err == nil
+	}
+	if exists("go.mod") {
+		stack = append(stack, "go")
+	}
+	if exists("package.json") {
+		stack = append(stack, "node")
+		if data, err := os.ReadFile(filepath.Join(root, "package.json")); err == nil {
+			s := string(data)
+			for _, dep := range []string{"vite", "react", "vue", "svelte", "@inertiajs", "tailwindcss", "typescript"} {
+				if strings.Contains(s, "\""+dep) {
+					stack = append(stack, strings.TrimPrefix(dep, "@"))
+				}
+			}
+		}
+	}
+	if exists("inertia") {
+		stack = append(stack, "inertia")
+	}
+	if exists(filepath.Join("resources", "views")) {
+		stack = append(stack, "html-templates")
+	}
+	if exists("Dockerfile") {
+		stack = append(stack, "docker")
+	}
+	return stack
 }
 
 // FormatSystemContext formats the ProjectContext into a rich markdown block for AI system prompts.
@@ -117,6 +236,12 @@ func (p *ProjectContext) FormatSystemContext() string {
 	if p.GoVersion != "" {
 		sb.WriteString(fmt.Sprintf("- **Go Version:** `%s`\n", p.GoVersion))
 	}
+	if p.OS != "" {
+		sb.WriteString(fmt.Sprintf("- **Host OS:** `%s`\n", p.OS))
+	}
+	if len(p.Stack) > 0 {
+		sb.WriteString(fmt.Sprintf("- **Stack:** %s\n", strings.Join(p.Stack, ", ")))
+	}
 	if p.GitBranch != "" {
 		sb.WriteString(fmt.Sprintf("- **Git Branch:** `%s`\n", p.GitBranch))
 	}
@@ -128,7 +253,6 @@ func (p *ProjectContext) FormatSystemContext() string {
 	if len(p.NimbusModules) > 0 {
 		sb.WriteString(fmt.Sprintf("- **Imported Nimbus Modules:** %s\n", strings.Join(p.NimbusModules, ", ")))
 	}
-
 
 	if len(p.Models) > 0 {
 		sb.WriteString(fmt.Sprintf("- **Models:** `%s`\n", strings.Join(p.Models, "`, `")))
@@ -156,6 +280,10 @@ func (p *ProjectContext) FormatSystemContext() string {
 	sb.WriteString(p.DirectoryTree)
 	sb.WriteString("\n```\n\n")
 
+	if p.Instructions != "" {
+		sb.WriteString(fmt.Sprintf("### Project Instructions (%s)\n%s\n\n", strings.Join(p.InstructionFiles, ", "), p.Instructions))
+	}
+
 	if len(p.Skills) > 0 {
 		sb.WriteString(FormatSkillsSummary(p.Skills))
 	}
@@ -168,7 +296,6 @@ func (p *ProjectContext) FormatSystemContext() string {
 
 	return sb.String()
 }
-
 
 // detectNimbusModules checks for nimbus/str, nimbus/collect, nimbus/timex, nimbus/pipeline, etc.
 func detectNimbusModules(appRoot string) []string {
@@ -248,9 +375,9 @@ func summarizeRoutes(content string) string {
 			relevant = append(relevant, line)
 		}
 	}
-	if len(relevant) > 25 {
-		relevant = relevant[:25]
-		relevant = append(relevant, "\t// ... (more routes truncated)")
+	if len(relevant) > 40 {
+		relevant = relevant[:40]
+		relevant = append(relevant, "\t// ... (more routes truncated — read start/routes.go for the full list)")
 	}
 	return strings.Join(relevant, "\n")
 }
@@ -272,12 +399,11 @@ func buildDirectoryTree(root string, maxDepth int) string {
 		var filtered []os.DirEntry
 		for _, e := range entries {
 			name := e.Name()
-			if strings.HasPrefix(name, ".") || name == "node_modules" || name == "vendor" || name == "bin" || name == "storage" {
+			if strings.HasPrefix(name, ".") || name == "node_modules" || name == "vendor" || name == "bin" || name == "storage" || name == "tmp" {
 				continue
 			}
 			filtered = append(filtered, e)
 		}
-
 
 		for i, e := range filtered {
 			isLast := i == len(filtered)-1

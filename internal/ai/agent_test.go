@@ -33,6 +33,12 @@ func (m *mockAIClient) StreamExecute(ctx context.Context, prompt string, plan *P
 	return m.ExecuteResponse, nil
 }
 
+// Turn is unsupported on this legacy mock so the agent exercises the
+// plan/execute fallback path.
+func (m *mockAIClient) Turn(ctx context.Context, req *TurnRequest, onDelta StreamHandler) (*MessageResponse, error) {
+	return nil, ErrTurnUnsupported
+}
+
 func TestAgentPlanningAndExecution(t *testing.T) {
 	tempDir, err := os.MkdirTemp("", "nimbus_agent_test_*")
 	if err != nil {

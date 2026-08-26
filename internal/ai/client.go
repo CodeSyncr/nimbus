@@ -19,7 +19,7 @@ import (
 
 // Message represents a chat message.
 type Message struct {
-	Role    string `json:"role"` // "user" | "assistant" | "system"
+	Role    string `json:"role"`    // "user" | "assistant" | "system"
 	Content any    `json:"content"` // string or []ContentBlock
 }
 
@@ -38,12 +38,42 @@ type ContentBlock struct {
 // StreamHandler receives streaming delta chunks.
 type StreamHandler func(delta string)
 
+// TurnMode selects the server-side system prompt for an agent turn.
+type TurnMode string
+
+const (
+	TurnModeExplore TurnMode = "explore"
+	TurnModePlan    TurnMode = "plan"
+	TurnModeExecute TurnMode = "execute"
+	TurnModeChat    TurnMode = "chat"
+)
+
+// TurnRequest is one model turn of the agent loop: the server composes the
+// system prompt for Mode from the project context and returns text and/or
+// tool calls; the CLI executes tools locally and calls again.
+type TurnRequest struct {
+	Mode     TurnMode
+	Model    string
+	Prompt   string // the user's original request
+	Messages []Message
+	Tools    []ToolDefinition
+	Plan     *PlanSummary
+	Context  *ProjectContext
+}
+
+// ErrTurnUnsupported is returned when the cloud server predates the agent
+// turn endpoint; callers fall back to the legacy plan/execute endpoints.
+var ErrTurnUnsupported = errors.New("nimbus cloud server does not support agent turns (upgrade the server)")
+
 // AIClient is the interface for communicating with Nimbus Cloud AI backend.
 type AIClient interface {
 	Chat(ctx context.Context, prompt, model string, projCtx *ProjectContext) (string, error)
 	GeneratePlan(ctx context.Context, prompt string, projCtx *ProjectContext, model string) (*PlanSummary, error)
 	RegenerateStep(ctx context.Context, stepIndex int, newDesc string, currentPlan *PlanSummary, projCtx *ProjectContext, model string) (*PlanSummary, error)
 	StreamExecute(ctx context.Context, prompt string, plan *PlanSummary, messages []Message, tools []ToolDefinition, projCtx *ProjectContext, onDelta StreamHandler) (*MessageResponse, error)
+	// Turn runs a single agentic model turn. Implementations that cannot
+	// support it must return ErrTurnUnsupported.
+	Turn(ctx context.Context, req *TurnRequest, onDelta StreamHandler) (*MessageResponse, error)
 }
 
 // MessageResponse holds the response from the Nimbus Cloud AI.
@@ -284,13 +314,59 @@ func (c *NimbusCloudClient) RegenerateStep(ctx context.Context, stepIndex int, n
 	return res.Plan, nil
 }
 
+// Turn calls POST /api/v1/ai/turn: one agentic model turn with native tools.
+func (c *NimbusCloudClient) Turn(ctx context.Context, tr *TurnRequest, onDelta StreamHandler) (*MessageResponse, error) {
+	apiURL := c.ServerURL + "/api/v1/ai/turn"
+
+	payload := map[string]any{
+		"mode":              string(tr.Mode),
+		"model":             tr.Model,
+		"prompt":            tr.Prompt,
+		"messages":          compactMessagesForWire(tr.Messages),
+		"tools":             tr.Tools,
+		"plan":              tr.Plan,
+		"project_context":   tr.Context,
+		"framework_version": version.Nimbus,
+		"stream":            true,
+	}
+
+	jsonBytes, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(jsonBytes))
+	if err != nil {
+		return nil, err
+	}
+	c.setHeaders(req)
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("connection error to Nimbus Cloud (%s): %w", c.ServerURL, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusMethodNotAllowed {
+		return nil, ErrTurnUnsupported
+	}
+	if err := c.checkAuthStatus(resp.StatusCode); err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, errors.New(cleanErrorMessage(resp.StatusCode, body))
+	}
+
+	return parseMessageResponse(resp, onDelta)
+}
+
 // StreamExecute streams step execution and tool guidance from Nimbus Cloud.
 func (c *NimbusCloudClient) StreamExecute(ctx context.Context, prompt string, plan *PlanSummary, messages []Message, tools []ToolDefinition, projCtx *ProjectContext, onDelta StreamHandler) (*MessageResponse, error) {
 	apiURL := c.ServerURL + "/api/v1/ai/execute"
 
-	// Compact message history: strip file content from past write_file tool_use blocks
-	// to prevent payload bloat across many iterations. The server only needs input.path
-	// to track which files have been written — not the full file content.
+	// Compact message history so payload size stays bounded across many
+	// iterations while recent tool output stays fully visible to the model.
 	compactedMessages := compactMessagesForWire(messages)
 
 	payload := map[string]any{
@@ -329,9 +405,15 @@ func (c *NimbusCloudClient) StreamExecute(ctx context.Context, prompt string, pl
 		return nil, errors.New(cleanErrorMessage(resp.StatusCode, body))
 	}
 
+	return parseMessageResponse(resp, onDelta)
+}
+
+// parseMessageResponse decodes either an SSE stream or a JSON body into a
+// MessageResponse. SSE events: {"type":"text","text":…} / {"text":…},
+// {"type":"tool_use","id","name","input"}, {"type":"error","error":…}, [DONE].
+func parseMessageResponse(resp *http.Response, onDelta StreamHandler) (*MessageResponse, error) {
 	contentType := resp.Header.Get("Content-Type")
 
-	// If streaming SSE
 	if strings.Contains(contentType, "text/event-stream") {
 		scanner := bufio.NewScanner(resp.Body)
 		// Allocate generous 20MB buffer for large code file transfers
@@ -354,36 +436,37 @@ func (c *NimbusCloudClient) StreamExecute(ctx context.Context, prompt string, pl
 				break
 			}
 
-			// Check for tool_use event
-			var toolEvent struct {
-				Type  string         `json:"type"`
-				ID    string         `json:"id"`
-				Name  string         `json:"name"`
-				Input map[string]any `json:"input"`
-			}
-			if err := json.Unmarshal([]byte(data), &toolEvent); err == nil && (toolEvent.Type == "tool_use" || toolEvent.Name != "") {
-				if toolEvent.Type == "" {
-					toolEvent.Type = "tool_use"
-				}
-				if toolEvent.Name != "" && toolEvent.Input != nil {
-					response.Content = append(response.Content, ContentBlock{
-						Type:  "tool_use",
-						ID:    toolEvent.ID,
-						Name:  toolEvent.Name,
-						Input: toolEvent.Input,
-					})
-					continue
-				}
-			}
-
-			// Check for text delta
 			var event struct {
-				Text  string `json:"text"`
-				Delta *struct {
+				Type       string         `json:"type"`
+				ID         string         `json:"id"`
+				Name       string         `json:"name"`
+				Input      map[string]any `json:"input"`
+				Text       string         `json:"text"`
+				Error      string         `json:"error"`
+				StopReason string         `json:"stop_reason"`
+				Delta      *struct {
 					Text string `json:"text"`
 				} `json:"delta"`
 			}
-			if err := json.Unmarshal([]byte(data), &event); err == nil {
+			if err := json.Unmarshal([]byte(data), &event); err != nil {
+				continue
+			}
+			switch {
+			case event.Type == "error" || (event.Error != "" && event.Type == ""):
+				if event.Error == "" {
+					event.Error = "unknown server error"
+				}
+				return nil, errors.New(event.Error)
+			case event.Type == "tool_use" || (event.Name != "" && event.Input != nil):
+				response.Content = append(response.Content, ContentBlock{
+					Type:  "tool_use",
+					ID:    event.ID,
+					Name:  event.Name,
+					Input: event.Input,
+				})
+			case event.Type == "done":
+				response.StopReason = event.StopReason
+			default:
 				txt := event.Text
 				if txt == "" && event.Delta != nil {
 					txt = event.Delta.Text
@@ -415,19 +498,28 @@ func (c *NimbusCloudClient) StreamExecute(ctx context.Context, prompt string, pl
 	}
 
 	var jsonResp struct {
-		Success bool           `json:"success"`
-		Reply   string         `json:"reply"`
-		Content []ContentBlock `json:"content"`
-		Error   string         `json:"error,omitempty"`
+		Success    bool           `json:"success"`
+		Reply      string         `json:"reply"`
+		Content    []ContentBlock `json:"content"`
+		StopReason string         `json:"stop_reason"`
+		Error      string         `json:"error,omitempty"`
 	}
 	if err := json.Unmarshal(body, &jsonResp); err == nil {
 		if !jsonResp.Success && jsonResp.Error != "" {
 			return nil, errors.New(jsonResp.Error)
 		}
 		if len(jsonResp.Content) > 0 {
+			if onDelta != nil {
+				for _, b := range jsonResp.Content {
+					if b.Type == "text" && b.Text != "" {
+						onDelta(b.Text)
+					}
+				}
+			}
 			return &MessageResponse{
-				Role:    "assistant",
-				Content: jsonResp.Content,
+				Role:       "assistant",
+				Content:    jsonResp.Content,
+				StopReason: jsonResp.StopReason,
 			}, nil
 		}
 		if jsonResp.Reply != "" {
@@ -486,67 +578,86 @@ func cleanErrorMessage(statusCode int, body []byte) string {
 	return raw
 }
 
-// compactMessagesForWire strips large file content from write_file tool_use blocks
-// compactMessagesForWire strips large file content and raw skill dumps from message history
-// before sending to the server. The server only needs input metadata to track state.
-// This prevents exponential payload bloat across multi-turn tool loops.
+// History compaction limits. Recent tool output must reach the model intact
+// (a read_file result cut to 100 characters made the agent effectively
+// blind); only older output is elided, and the model can re-run a tool.
+const (
+	keepFullToolResults    = 8
+	maxToolResultChars     = 48 * 1024
+	elidedToolResultChars  = 240
+	keepWriteContentTurns  = 2
+	elidedWriteContentNote = "[content omitted from history — the file was written to disk; read_file to see it]"
+)
+
+// compactMessagesForWire bounds payload growth across iterations while
+// preserving what the model needs: the newest tool results in full, older
+// ones as short previews, and write_file bodies only for the last few turns.
 func compactMessagesForWire(messages []Message) []Message {
+	// Index tool results from newest to oldest, and assistant turns likewise.
+	resultRank := map[int]map[int]int{} // msgIdx -> blockIdx -> rank (0 = newest)
+	rank := 0
+	for i := len(messages) - 1; i >= 0; i-- {
+		blocks, ok := messages[i].Content.([]ContentBlock)
+		if !ok {
+			continue
+		}
+		for j := len(blocks) - 1; j >= 0; j-- {
+			if blocks[j].Type == "tool_result" {
+				if resultRank[i] == nil {
+					resultRank[i] = map[int]int{}
+				}
+				resultRank[i][j] = rank
+				rank++
+			}
+		}
+	}
+	assistantRank := map[int]int{}
+	arank := 0
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == "assistant" {
+			assistantRank[i] = arank
+			arank++
+		}
+	}
+
 	compacted := make([]Message, len(messages))
 	for i, msg := range messages {
 		compacted[i] = msg
-		switch content := msg.Content.(type) {
-		case []ContentBlock:
-			stripped := make([]ContentBlock, len(content))
-			for j, cb := range content {
-				stripped[j] = cb
-				name := strings.ToLower(cb.Name)
-				if cb.Type == "tool_use" && (name == "write_file" || name == "create_file" || name == "create" || name == "write") {
-					// Keep only path, drop content to avoid payload bloat
-					newInput := map[string]any{}
-					if p, ok := cb.Input["path"].(string); ok {
-						newInput["path"] = p
-					}
-					stripped[j] = ContentBlock{
-						Type:  cb.Type,
-						ID:    cb.ID,
-						Name:  cb.Name,
-						Input: newInput,
-					}
-				} else if cb.Type == "tool_use" && (name == "load_skill" || name == "read_skill" || name == "query_skill") {
-					newInput := map[string]any{}
-					if s, ok := cb.Input["skill_name"].(string); ok {
-						newInput["skill_name"] = s
-					} else if s, ok := cb.Input["name"].(string); ok {
-						newInput["skill_name"] = s
-					}
-					if q, ok := cb.Input["query"].(string); ok {
-						newInput["query"] = q
-					}
-					stripped[j] = ContentBlock{
-						Type:  cb.Type,
-						ID:    cb.ID,
-						Name:  cb.Name,
-						Input: newInput,
-					}
-				} else if cb.Type == "tool_result" {
-					// Trim verbose tool result content (skills & file writes)
-					result := cb.Content
-					if strings.Contains(result, "# Skill:") || strings.Contains(result, "# Skill Query:") {
-						result = "[Skill content mounted into active system frame]"
-					} else if len(result) > 120 {
-						result = result[:120] + "... (truncated)"
-					}
-					stripped[j] = ContentBlock{
-						Type:      cb.Type,
-						ToolUseID: cb.ToolUseID,
-						Content:   result,
-						IsError:   cb.IsError,
-					}
-				}
-			}
-			compacted[i] = Message{Role: msg.Role, Content: stripped}
+		blocks, ok := msg.Content.([]ContentBlock)
+		if !ok {
+			continue
 		}
+		stripped := make([]ContentBlock, len(blocks))
+		for j, cb := range blocks {
+			stripped[j] = cb
+			name := strings.ToLower(cb.Name)
+			switch {
+			case cb.Type == "tool_use" && (name == "write_file" || name == "create_file" || name == "create" || name == "write"):
+				if assistantRank[i] < keepWriteContentTurns {
+					continue
+				}
+				newInput := map[string]any{}
+				if p, ok := cb.Input["path"].(string); ok {
+					newInput["path"] = p
+				}
+				newInput["content"] = elidedWriteContentNote
+				stripped[j] = ContentBlock{Type: cb.Type, ID: cb.ID, Name: cb.Name, Input: newInput}
+			case cb.Type == "tool_result":
+				result := cb.Content
+				isSkill := strings.HasPrefix(result, "# Skill:") || strings.HasPrefix(result, "# Skill Query:")
+				if resultRank[i][j] < keepFullToolResults || isSkill {
+					// Skill content is never elided: the legacy server reads
+					// loaded skills back out of the history on every turn.
+					if len(result) > maxToolResultChars {
+						result = result[:maxToolResultChars] + "\n… [truncated]"
+					}
+				} else if len(result) > elidedToolResultChars {
+					result = result[:elidedToolResultChars] + "\n… [earlier output elided; run the tool again if you need it]"
+				}
+				stripped[j] = ContentBlock{Type: cb.Type, ToolUseID: cb.ToolUseID, Content: result, IsError: cb.IsError}
+			}
+		}
+		compacted[i] = Message{Role: msg.Role, Content: stripped}
 	}
 	return compacted
 }
-
