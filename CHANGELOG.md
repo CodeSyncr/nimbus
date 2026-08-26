@@ -4,6 +4,27 @@ All notable changes to Nimbus are documented in this file.
 
 This project follows Semantic Versioning.
 
+## [Unreleased]
+
+### Changed
+- **`nimbus ai` now investigates before it acts.** Every request runs an explore → plan → execute → verify loop instead of generating files blind:
+  - *Explore:* the agent reads the codebase with read-only tools (`find_files`, `grep`, `read_file` with line ranges, `list_dir` with depth) and writes a findings report before any plan is made.
+  - *Plan:* the plan is grounded in those findings; questions are answered directly instead of forcing a plan.
+  - *Execute:* the model reads files before editing them, uses targeted `edit_file` changes (CRLF-tolerant, `replace_all`), and runs the build.
+  - *Verify:* after execution `go build ./...` / `go vet ./...` run automatically and failures are fed back for up to three repair rounds.
+- **Conversation memory.** Sessions remember each request, plan, outcome and the files it changed; follow-up prompts see that history, and `--resume` restores it.
+- **Project instructions.** `AGENTS.md`, `NIMBUS.md`, `CLAUDE.md` and `.nimbus/instructions.md` are loaded into the agent's context as persistent project guidance.
+- **History compaction no longer blinds the model.** Tool output sent back to the model was being cut to 100 characters (so `read_file` and build errors were unreadable); recent results are now kept in full and only older ones are elided.
+- New `/api/v1/ai/turn` client protocol (single agentic model turn with native tools); older servers fall back to the previous `/ai/plan` + `/ai/execute` flow automatically.
+- `bash` tool works on stock Windows (falls back to `cmd /C` when `sh` is unavailable), captures head+tail of long output, and has a 120s timeout.
+
+### Added
+- **`plugins/ai`: native tool calling for the OpenAI provider** (function tools, `tool_calls` parsing, `role: tool` results, streamed tool-call accumulation). The Anthropic provider now sends proper `tool_use` / `tool_result` blocks instead of flattening them to text.
+
+### Fixed
+- **`nimbus serve` on Windows:** Air runs the built binary through `cmd /c`, which refuses extension-less files, so `./tmp/main` failed with `'...\tmp\main' is not recognized as an internal or external command`. Generated `.air.toml` now uses `./tmp/main.exe` on Windows, and `serve` patches existing configs in place before launching Air.
+- **`nimbus serve` shutdown on Windows:** Ctrl+C now kills the whole Air/app process tree instead of only the top-level `go run` wrapper, so the dev port is no longer left bound by an orphaned app.
+
 ## [1.5.3] - 2026-08-23
 
 ### Added

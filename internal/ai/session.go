@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -24,6 +25,20 @@ type Session struct {
 	AppliedSteps []int             `json:"applied_steps"`
 	LoadedSkills map[string]string `json:"loaded_skills,omitempty"`
 	Status       string            `json:"status"` // "planning" | "reviewing" | "executing" | "completed"
+	// Findings is the exploration report produced for the current request.
+	Findings string `json:"findings,omitempty"`
+	// Turns is the conversation memory: one record per completed request,
+	// carried into later prompts so follow-ups build on earlier work.
+	Turns []TurnRecord `json:"turns,omitempty"`
+}
+
+// TurnRecord summarises one completed request/response cycle.
+type TurnRecord struct {
+	At           time.Time `json:"at"`
+	Prompt       string    `json:"prompt"`
+	PlanSummary  string    `json:"plan_summary,omitempty"`
+	Outcome      string    `json:"outcome,omitempty"`
+	FilesChanged []string  `json:"files_changed,omitempty"`
 }
 
 // ClarificationQuestion represents an interactive decision required from the user.
@@ -81,8 +96,58 @@ func NewSession(model string) *Session {
 		History:      make([]Message, 0),
 		AppliedSteps: make([]int, 0),
 		LoadedSkills: make(map[string]string),
+		Turns:        make([]TurnRecord, 0),
 		Status:       "planning",
 	}
+}
+
+const (
+	maxMemoryTurns       = 8
+	maxMemoryOutcomeChar = 700
+)
+
+// RecordTurn appends a conversation-memory entry for a finished request.
+func (s *Session) RecordTurn(prompt, planSummary, outcome string, files []string) {
+	if s == nil {
+		return
+	}
+	outcome = strings.TrimSpace(outcome)
+	if len(outcome) > maxMemoryOutcomeChar {
+		outcome = outcome[:maxMemoryOutcomeChar] + "…"
+	}
+	s.Turns = append(s.Turns, TurnRecord{
+		At:           time.Now(),
+		Prompt:       strings.TrimSpace(prompt),
+		PlanSummary:  strings.TrimSpace(planSummary),
+		Outcome:      outcome,
+		FilesChanged: files,
+	})
+}
+
+// ConversationSummary renders recent turns for inclusion in prompts, so the
+// model knows what was asked and done earlier in this session.
+func (s *Session) ConversationSummary() string {
+	if s == nil || len(s.Turns) == 0 {
+		return ""
+	}
+	turns := s.Turns
+	if len(turns) > maxMemoryTurns {
+		turns = turns[len(turns)-maxMemoryTurns:]
+	}
+	var sb strings.Builder
+	for i, t := range turns {
+		sb.WriteString(fmt.Sprintf("%d. User asked: %s\n", i+1, t.Prompt))
+		if t.PlanSummary != "" {
+			sb.WriteString(fmt.Sprintf("   Plan: %s\n", t.PlanSummary))
+		}
+		if t.Outcome != "" {
+			sb.WriteString(fmt.Sprintf("   Outcome: %s\n", t.Outcome))
+		}
+		if len(t.FilesChanged) > 0 {
+			sb.WriteString(fmt.Sprintf("   Files changed: %s\n", strings.Join(t.FilesChanged, ", ")))
+		}
+	}
+	return strings.TrimSpace(sb.String())
 }
 
 // SaveSession persists the session JSON under .nimbus/ai-sessions/<id>.json.
@@ -113,6 +178,9 @@ func LoadSession(appRoot, sessionID string) (*Session, error) {
 	var session Session
 	if err := json.Unmarshal(data, &session); err != nil {
 		return nil, fmt.Errorf("failed to decode session '%s': %w", sessionID, err)
+	}
+	if session.LoadedSkills == nil {
+		session.LoadedSkills = make(map[string]string)
 	}
 	return &session, nil
 }

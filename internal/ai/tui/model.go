@@ -48,6 +48,7 @@ type (
 	toolLogMsg     struct{ Action, Target, Detail string; Err error }
 	diffMsg        struct{ path, diff string }
 	requestSentMsg struct{}
+	statusMsg      struct{ text string }
 )
 
 // NimbusCloudSpinner provides an animated cloud icon with shimmering particles.
@@ -492,6 +493,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case planDeltaMsg:
 		m.StreamBuffer.WriteString(msg.delta)
 
+	case statusMsg:
+		m.StatusText = msg.text
+		return m, m.listenForExecEventsCmd()
+
 	case planDoneMsg:
 		m.stopThinking()
 		if msg.err != nil {
@@ -637,16 +642,19 @@ func (m *Model) submitChatCmd(prompt string) tea.Cmd {
 func (m *Model) submitPromptCmd(prompt string) tea.Cmd {
 	m.Mode = ModePlanning
 	m.StreamBuffer = &strings.Builder{}
-	m.StatusText = "Synthesizing architectural plan..."
+	m.StatusText = "Exploring the codebase..."
 	m.ErrorMessage = ""
 
-	planCmd := func() tea.Msg {
+	// Planning now investigates the codebase with tools first; stream those
+	// tool events into the chat like execution does.
+	ch := m.wireAgentCallbacks()
+	go func() {
 		ctx := context.Background()
 		plan, err := m.Agent.GeneratePlan(ctx, prompt)
-		return planDoneMsg{plan: plan, err: err}
-	}
+		ch <- planDoneMsg{plan: plan, err: err}
+	}()
 
-	return tea.Batch(planCmd, m.startThinking())
+	return tea.Batch(m.listenForExecEventsCmd(), m.startThinking())
 }
 
 func (m *Model) regenerateStepCmd(stepIdx int, newDesc string) tea.Cmd {
@@ -659,13 +667,30 @@ func (m *Model) regenerateStepCmd(stepIdx int, newDesc string) tea.Cmd {
 }
 
 func (m *Model) executeApprovedPlanCmd() tea.Cmd {
-	ch := make(chan tea.Msg, 100)
+	ch := m.wireAgentCallbacks()
+
+	go func() {
+		ctx := context.Background()
+		summary, err := m.Agent.ExecuteApprovedPlan(ctx, m.Agent.Session.Plan)
+		ch <- execDoneMsg{summary: summary, err: err}
+	}()
+
+	return tea.Batch(m.listenForExecEventsCmd(), m.startThinking())
+}
+
+// wireAgentCallbacks creates the event channel for a planning or execution
+// run and points the agent's callbacks at it so tool activity, status and
+// streamed text reach the TUI in real time.
+func (m *Model) wireAgentCallbacks() chan tea.Msg {
+	ch := make(chan tea.Msg, 256)
 	m.ExecChan = ch
 
-	// Wire agent callbacks to channel for real-time TUI progress
 	m.Agent.Callbacks = ai.AgentCallbacks{
 		OnRequestSent: func() {
 			ch <- requestSentMsg{}
+		},
+		OnStatus: func(text string) {
+			ch <- statusMsg{text: text}
 		},
 		OnStreamDelta: func(delta string) {
 			ch <- execDeltaMsg{delta: delta}
@@ -679,7 +704,7 @@ func (m *Model) executeApprovedPlanCmd() tea.Cmd {
 				action = "MODIFYING"
 			case "load_skill", "read_skill", "skill":
 				action = "LOADING SKILL"
-			case "read_file", "read", "grep", "list_dir":
+			case "read_file", "read", "grep", "list_dir", "find_files", "glob", "search":
 				action = "ANALYZING"
 			case "bash", "command", "run_command":
 				action = "EXECUTING"
@@ -718,7 +743,7 @@ func (m *Model) executeApprovedPlanCmd() tea.Cmd {
 				action = "MODIFIED"
 			case "load_skill", "read_skill", "skill":
 				action = "LOADED SKILL"
-			case "read_file", "read", "grep", "list_dir":
+			case "read_file", "read", "grep", "list_dir", "find_files", "glob", "search":
 				action = "ANALYZED"
 			case "bash", "command", "run_command":
 				action = "EXECUTED"
@@ -737,14 +762,7 @@ func (m *Model) executeApprovedPlanCmd() tea.Cmd {
 			ch <- diffMsg{path: filePath, diff: diff}
 		},
 	}
-
-	go func() {
-		ctx := context.Background()
-		summary, err := m.Agent.ExecuteApprovedPlan(ctx, m.Agent.Session.Plan)
-		ch <- execDoneMsg{summary: summary, err: err}
-	}()
-
-	return tea.Batch(m.listenForExecEventsCmd(), m.startThinking())
+	return ch
 }
 
 func (m *Model) listenForExecEventsCmd() tea.Cmd {

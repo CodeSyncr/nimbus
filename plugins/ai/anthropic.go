@@ -135,6 +135,14 @@ type anthropicContent struct {
 	Type   string                `json:"type"`
 	Text   string                `json:"text,omitempty"`
 	Source *anthropicImageSource `json:"source,omitempty"`
+	// tool_use blocks (assistant turns)
+	ID    string          `json:"id,omitempty"`
+	Name  string          `json:"name,omitempty"`
+	Input json.RawMessage `json:"input,omitempty"`
+	// tool_result blocks (user turns)
+	ToolUseID string `json:"tool_use_id,omitempty"`
+	Content   string `json:"content,omitempty"`
+	IsError   bool   `json:"is_error,omitempty"`
 }
 
 type anthropicImageSource struct {
@@ -400,11 +408,44 @@ func (p *anthropicProvider) buildRequest(req *GenerateRequest, stream bool) *ant
 			role = "assistant"
 		}
 		content := []anthropicContent{}
-		if msg.Content != "" {
-			content = append(content, anthropicContent{Type: "text", Text: msg.Content})
+		if msg.Role == RoleTool {
+			// Tool results are user-role tool_result blocks that must
+			// reference the assistant's tool_use id.
+			result := msg.Content
+			if result == "" {
+				result = "(no output)"
+			}
+			content = append(content, anthropicContent{
+				Type:      "tool_result",
+				ToolUseID: msg.ToolCallID,
+				Content:   result,
+				IsError:   strings.HasPrefix(result, "Error:"),
+			})
+		} else {
+			if msg.Content != "" {
+				content = append(content, anthropicContent{Type: "text", Text: msg.Content})
+			}
+			content = append(content, anthropicImageBlocks(msg.Images)...)
+			for _, tc := range msg.ToolCalls {
+				input := tc.Args
+				if len(strings.TrimSpace(string(input))) == 0 {
+					input = json.RawMessage(`{}`)
+				}
+				content = append(content, anthropicContent{
+					Type:  "tool_use",
+					ID:    tc.ID,
+					Name:  tc.Name,
+					Input: input,
+				})
+			}
 		}
-		content = append(content, anthropicImageBlocks(msg.Images)...)
 		if len(content) == 0 {
+			continue
+		}
+		// The API requires strictly alternating roles: fold consecutive
+		// same-role messages (e.g. several tool results) into one turn.
+		if n := len(ar.Messages); n > 0 && ar.Messages[n-1].Role == role {
+			ar.Messages[n-1].Content = append(ar.Messages[n-1].Content, content...)
 			continue
 		}
 		ar.Messages = append(ar.Messages, anthropicMessage{Role: role, Content: content})
