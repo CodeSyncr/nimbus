@@ -10,6 +10,11 @@
 *.dll
 *.so
 *.dylib
+# Locally built plugin command binaries (never publish these into the module —
+# a released tag is immutable, and a host-specific binary is dead weight in it)
+plugins/*/cmd/*/[a-z]*
+!plugins/*/cmd/*/*.go
+!plugins/*/cmd/*/*.md
 # Coverage & profiling output
 *.out
 *.prof

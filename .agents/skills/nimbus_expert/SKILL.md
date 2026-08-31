@@ -62,6 +62,7 @@ Use this skill when:
 - [Supabase](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/supabase_plugin.md): Supabase services integration.
 - [Cashier](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/cashier_plugin.md): Multi-gateway payments (Stripe, Razorpay, PayU) with default selection & paywall.
 - [Passport](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/passport_plugin.md): OAuth2 authorization server (authorization_code+PKCE, client_credentials, refresh) with introspection & scopes.
+- [Captcha](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/captcha.md): Automated AI captcha solving (CapSolver alternative via Nimbus Cloud) & bot verification middleware.
 - [Admin](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/admin_plugin.md): Nova/Filament-style reflection-driven CRUD admin panel over your models.
 
 ### Development
