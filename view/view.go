@@ -1137,6 +1137,21 @@ func init() {
 	Default = New("resources/views", nil)
 }
 
+// Root returns the directory this engine loads templates from.
+func (e *Engine) Root() string {
+	if e == nil {
+		return ""
+	}
+	return e.root
+}
+
+// DefaultRoot returns the default engine's template directory, or "" when no
+// engine has been set up. The startup view uses it to decide whether the app
+// renders views at all.
+func DefaultRoot() string {
+	return Default.Root()
+}
+
 // SetRoot sets the default engine root and clears cache.
 func SetRoot(root string) {
 	Default = New(root, Default.funcs)

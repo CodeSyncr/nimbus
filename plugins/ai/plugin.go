@@ -97,10 +97,13 @@ func (p *Plugin) DefaultConfig() map[string]any {
 
 func (p *Plugin) loadConfig(app *nimbus.App) *Config {
 	cfg := &Config{
-		Provider:  "openai",
-		Model:     "gpt-4o",
-		Timeout:   60,
-		MaxTokens: 1024,
+		Provider: "openai",
+		Model:    "gpt-4o",
+		Timeout:  60,
+		// 1024 was far too small for agent work: a single file write or a
+		// plan runs past it, and the response comes back cut mid-sentence
+		// with nothing to say it was truncated. Override with AI_MAX_TOKENS.
+		MaxTokens: 8192,
 	}
 
 	if pluginCfg := app.PluginConfig("ai"); pluginCfg != nil {
@@ -132,6 +135,8 @@ func (p *Plugin) loadConfig(app *nimbus.App) *Config {
 	cfg.AnthropicAPIURL = os.Getenv("ANTHROPIC_API_URL")
 	cfg.CohereKey = os.Getenv("COHERE_API_KEY")
 	cfg.GeminiKey = os.Getenv("GEMINI_API_KEY")
+	cfg.ImageProvider = os.Getenv("AI_IMAGE_PROVIDER")
+	cfg.ImageModel = os.Getenv("AI_IMAGE_MODEL")
 	cfg.MistralKey = os.Getenv("MISTRAL_API_KEY")
 	cfg.XAIKey = os.Getenv("XAI_API_KEY")
 	cfg.JinaKey = os.Getenv("JINA_API_KEY")

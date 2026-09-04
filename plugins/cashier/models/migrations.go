@@ -19,5 +19,25 @@ func Migrations() []database.Migration {
 			Up:   func(db *lucid.DB) error { return db.AutoMigrate(&Subscription{}) },
 			Down: func(db *lucid.DB) error { return db.Migrator().DropTable(&Subscription{}) },
 		},
+		{
+			Name: "2026_07_15_000003_create_cashier_purchases",
+			Up:   func(db *lucid.DB) error { return db.AutoMigrate(&Purchase{}) },
+			Down: func(db *lucid.DB) error { return db.Migrator().DropTable(&Purchase{}) },
+		},
+		{
+			Name: "2026_07_15_000004_create_cashier_refunds",
+			Up:   func(db *lucid.DB) error { return db.AutoMigrate(&Refund{}) },
+			Down: func(db *lucid.DB) error { return db.Migrator().DropTable(&Refund{}) },
+		},
+		{
+			Name: "2026_07_15_000005_extend_cashier_subscriptions",
+			Up:   func(db *lucid.DB) error { return db.AutoMigrate(&Subscription{}) },
+			Down: func(db *lucid.DB) error { return nil },
+		},
+		{
+			Name: "2026_09_02_000006_subscription_entitlement_context",
+			Up:   func(db *lucid.DB) error { return db.AutoMigrate(&Subscription{}) },
+			Down: func(db *lucid.DB) error { return nil },
+		},
 	}
 }

@@ -1,7 +1,11 @@
 package tui
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -134,5 +138,135 @@ func TestTUIModelAndViews(t *testing.T) {
 	}
 	if !strings.Contains(planOut, "CREATE") {
 		t.Errorf("expected CREATE action tag, got: %s", planOut)
+	}
+}
+
+// A file change is announced by its shape, not pasted in full: a run of edits
+// has to stay readable in the transcript.
+func TestToolLineCollapsesDiffsByDefault(t *testing.T) {
+	var diff strings.Builder
+	diff.WriteString("--- a/main.go\n+++ b/main.go\n")
+	for i := 0; i < 40; i++ {
+		diff.WriteString(fmt.Sprintf("+line %d\n", i))
+	}
+	item := ChatItem{
+		Role: "tool", ToolName: "edit_file", Content: "main.go",
+		ToolArgs: map[string]any{"path": "main.go"}, Detail: "edited", Diff: diff.String(),
+	}
+
+	collapsed := renderToolLine(item, 100, "", false)
+	if strings.Count(collapsed, "\n") > collapsedDiffLines+4 {
+		t.Errorf("collapsed diff is %d lines; it should stay compact:\n%s", strings.Count(collapsed, "\n"), collapsed)
+	}
+	if !strings.Contains(collapsed, "+40") {
+		t.Errorf("collapsed view should state the change shape:\n%s", collapsed)
+	}
+	if !strings.Contains(collapsed, "ctrl+o") {
+		t.Errorf("collapsed view should say how to expand:\n%s", collapsed)
+	}
+
+	expanded := renderToolLine(item, 100, "", true)
+	if strings.Count(expanded, "\n") <= strings.Count(collapsed, "\n") {
+		t.Error("ctrl+o should reveal more of the diff")
+	}
+}
+
+// Links are only emitted for terminals that render them, and only for paths
+// that exist — a dead link is worse than plain text.
+func TestFilePathsLinkOnlyWhenUseful(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "real.go"), []byte("package main\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("NIMBUS_HYPERLINKS", "1")
+	linkOnce = sync.Once{}
+	if got := linkFile(dir, "real.go", "real.go"); !strings.Contains(got, "\x1b]8;;file://") {
+		t.Errorf("existing file was not linked: %q", got)
+	}
+	if got := linkFile(dir, "ghost.go", "ghost.go"); got != "ghost.go" {
+		t.Errorf("missing file should not be linked: %q", got)
+	}
+
+	t.Setenv("NIMBUS_HYPERLINKS", "0")
+	linkOnce = sync.Once{}
+	if got := linkFile(dir, "real.go", "real.go"); got != "real.go" {
+		t.Errorf("links disabled but got escapes: %q", got)
+	}
+	linkOnce = sync.Once{}
+}
+
+// The transcript should read in the order things happened: what the model was
+// thinking, then the actions that thinking led to — not all the narration
+// dumped at the end of the run.
+func TestNarrationIsCommittedBeforeTheToolsItExplains(t *testing.T) {
+	m := Model{StreamBuffer: &strings.Builder{}, Messages: []ChatItem{}}
+	m.segmentStart = time.Now().Add(-3 * time.Second)
+
+	// The model narrates, then calls a tool.
+	m.StreamBuffer.WriteString("I'll add the greeter to main.go.")
+	m.recordThought()
+	m.flushNarration()
+
+	if len(m.Messages) != 2 {
+		t.Fatalf("expected a thought line and the narration, got %d items", len(m.Messages))
+	}
+	if m.Messages[0].Role != "phase" || m.Messages[0].Content != "Thought" {
+		t.Errorf("first item should be the thought record, got %+v", m.Messages[0])
+	}
+	if m.Messages[0].Elapsed < 2*time.Second {
+		t.Errorf("thought duration not measured: %v", m.Messages[0].Elapsed)
+	}
+	if m.Messages[1].Role != "assistant" || !strings.Contains(m.Messages[1].Content, "greeter") {
+		t.Errorf("narration was not committed: %+v", m.Messages[1])
+	}
+	if m.StreamBuffer.Len() != 0 {
+		t.Error("buffer should be empty after flushing")
+	}
+
+	// A second flush with nothing buffered must not add an empty message.
+	m.flushNarration()
+	if len(m.Messages) != 2 {
+		t.Errorf("empty flush added a message: %d", len(m.Messages))
+	}
+}
+
+// One stretch of thinking produces one record, however many tools follow.
+func TestThoughtRecordedOncePerStretch(t *testing.T) {
+	m := Model{StreamBuffer: &strings.Builder{}}
+	m.segmentStart = time.Now().Add(-2 * time.Second)
+
+	m.recordThought()
+	m.recordThought()
+	m.recordThought()
+
+	if len(m.Messages) != 1 {
+		t.Errorf("expected 1 thought line, got %d", len(m.Messages))
+	}
+}
+
+// Instant replies are not worth a "Thought for 0s" line.
+func TestSubSecondThinkingIsNotRecorded(t *testing.T) {
+	m := Model{StreamBuffer: &strings.Builder{}}
+	m.segmentStart = time.Now()
+
+	m.recordThought()
+	if len(m.Messages) != 0 {
+		t.Errorf("sub-second thinking should be silent, got %+v", m.Messages)
+	}
+}
+
+// The rendered line reads as a record, not a label.
+func TestThoughtLineRendersReadably(t *testing.T) {
+	m := Model{
+		Width: 100, Height: 40, Ready: true,
+		StreamBuffer: &strings.Builder{},
+		Messages: []ChatItem{
+			{Role: "phase", Content: "Thought", Elapsed: 8 * time.Second},
+		},
+	}
+	out := renderChatHistory(&m)
+	if !strings.Contains(out, "Thought for 8s") {
+		t.Errorf("expected 'Thought for 8s' in:\n%s", out)
 	}
 }

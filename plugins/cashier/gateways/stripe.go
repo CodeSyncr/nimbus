@@ -138,6 +138,42 @@ func (s *StripeGateway) VerifyWebhook(payload []byte, headers http.Header) (*con
 	return &contracts.WebhookEvent{Gateway: s.Name(), Type: env.Type, ID: env.ID, Raw: payload}, nil
 }
 
+// doWithHeaders is do() with caller-supplied headers, used for the
+// Idempotency-Key that makes a retried write safe.
+func (s *StripeGateway) doWithHeaders(ctx context.Context, method, path string, headers map[string]string, form url.Values, out any) error {
+	if s.cfg.SecretKey == "" {
+		return fmt.Errorf("cashier/stripe: secret key not set")
+	}
+	var body io.Reader
+	if form != nil {
+		body = strings.NewReader(form.Encode())
+	}
+	req, err := http.NewRequestWithContext(ctx, method, s.baseURL+path, body)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+s.cfg.SecretKey)
+	if form != nil {
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	resp, err := s.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("cashier/stripe: error %d: %s", resp.StatusCode, string(raw))
+	}
+	if out != nil {
+		return json.Unmarshal(raw, out)
+	}
+	return nil
+}
+
 func (s *StripeGateway) do(ctx context.Context, method, path string, form url.Values, out any) error {
 	if s.cfg.SecretKey == "" {
 		return fmt.Errorf("cashier/stripe: secret key not set")

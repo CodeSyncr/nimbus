@@ -10,60 +10,19 @@ import (
 	"github.com/CodeSyncr/nimbus/cli/auth"
 )
 
-func TestEnsureDefaultSkillsAndLoading(t *testing.T) {
+// TestUserSkillPipeline covers the local skill pathway that remains in the
+// CLI: a skill the user writes in their project is discovered, readable, and
+// loadable through the tool.
+//
+// Provisioning Nimbus's own library to ~/.nimbus/skills was removed — that
+// library is Nimbus Cloud property and is applied server-side now. See
+// TestNoProprietarySkillsShipInTheClient.
+func TestUserSkillPipeline(t *testing.T) {
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
 	t.Setenv(auth.ConfigDirEnv, filepath.Join(tmpHome, ".nimbus"))
 
-	// 1. Test provisioning default skills to ~/.nimbus/skills/
-	if err := EnsureDefaultSkills(); err != nil {
-		t.Fatalf("EnsureDefaultSkills failed: %v", err)
-	}
-
-	skillsDir := filepath.Join(tmpHome, ".nimbus", "skills")
-	frontendSkillPath := filepath.Join(skillsDir, "frontend-design", "SKILL.md")
-	if _, err := os.Stat(frontendSkillPath); err != nil {
-		t.Errorf("expected frontend-design skill to be provisioned at %s: %v", frontendSkillPath, err)
-	}
-
-	nimbusSkillPath := filepath.Join(skillsDir, "nimbus-expert", "SKILL.md")
-	if _, err := os.Stat(nimbusSkillPath); err != nil {
-		t.Errorf("expected nimbus-expert skill to be provisioned at %s: %v", nimbusSkillPath, err)
-	}
-
-	// 2. Test LoadSkills from global directory (Tier 1: index only)
-	loaded, err := LoadSkills("")
-	if err != nil {
-		t.Fatalf("LoadSkills failed: %v", err)
-	}
-
-	var foundFrontend, foundNimbus, foundGo bool
-	for _, s := range loaded {
-		if s.Name == "frontend-design" {
-			foundFrontend = true
-			if !strings.Contains(s.Description, "distinctive") {
-				t.Errorf("unexpected description for frontend-design: %s", s.Description)
-			}
-		}
-		if s.Name == "nimbus-expert" || s.Name == "nimbus_expert" {
-			foundNimbus = true
-		}
-		if s.Name == "go-architect" {
-			foundGo = true
-		}
-	}
-
-	if !foundFrontend {
-		t.Errorf("frontend-design skill not found in loaded skills: %+v", loaded)
-	}
-	if !foundNimbus {
-		t.Errorf("nimbus-expert skill not found in loaded skills: %+v", loaded)
-	}
-	if !foundGo {
-		t.Errorf("go-architect skill not found in loaded skills: %+v", loaded)
-	}
-
-	// 3. Test Project Level Override
+	// A project-level skill authored by the user.
 	tmpProject := t.TempDir()
 	projSkillDir := filepath.Join(tmpProject, ".nimbus", "skills", "frontend-design")
 	_ = os.MkdirAll(projSkillDir, 0755)
@@ -92,7 +51,7 @@ description: Custom project-level design guidelines for this app.
 		t.Errorf("expected project-level skill override for frontend-design")
 	}
 
-	// 4. Test Tier 2: ReadSkillContent on-demand
+	// Its body is readable on demand.
 	body, err := ReadSkillContent(tmpProject, "frontend-design")
 	if err != nil {
 		t.Fatalf("ReadSkillContent failed: %v", err)
@@ -101,7 +60,7 @@ description: Custom project-level design guidelines for this app.
 		t.Errorf("expected custom body content, got: %s", body)
 	}
 
-	// 5. Test ToolExecutor load_skill tool call
+	// And the load_skill tool serves it.
 	executor := NewToolExecutor(tmpProject)
 	toolOut, diff, err := executor.ExecuteTool(context.Background(), "load_skill", map[string]any{
 		"skill_name": "frontend-design",
@@ -116,7 +75,7 @@ description: Custom project-level design guidelines for this app.
 		t.Errorf("expected skill instructions in tool output, got: %s", toolOut)
 	}
 
-	// 6. Test FormatSkillsSummary
+	// The summary lists the user's own skills.
 	summary := FormatSkillsSummary(projLoaded)
 	if !strings.Contains(summary, "Available Agent Skills") {
 		t.Errorf("expected Available Agent Skills header, got: %s", summary)

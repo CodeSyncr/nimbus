@@ -26,6 +26,7 @@ package cashier
 
 import (
 	"context"
+	"errors"
 	"os"
 
 	"github.com/CodeSyncr/nimbus"
@@ -50,7 +51,28 @@ type (
 type Cashier struct {
 	Gateways *GatewayManager
 	Paywall  *Paywall
+	// Subscriptions mirrors gateway subscriptions locally for fast access
+	// checks. Nil disables mirroring — the gateway stays the source of truth,
+	// but every check then has to reach the provider.
+	Subscriptions SubscriptionStore
+	// IAP verifies Apple and Google in-app purchases. Nil until a verifier is
+	// registered.
+	IAP *IAPManager
+	// Catalog maps products to entitlements and holds paywall offerings
+	// (RevenueCat's Products/Entitlements/Offerings).
+	Catalog *Catalog
+	// Lifecycle turns payment facts into entitlement changes and canonical
+	// subscriber events (RevenueCat's event stream).
+	Lifecycle *Lifecycle
 }
+
+// ErrCloudRequired is returned by features that belong to the Cashier Cloud
+// product — the subscription suite and in-app purchase verification.
+var ErrCloudRequired = errors.New("cashier: this feature requires a Cashier Cloud key (set Config.CloudKey or CASHIER_CLOUD_KEY)")
+
+// CloudEnabled reports whether the Cashier Cloud subscription suite is active
+// on this facade.
+func (c *Cashier) CloudEnabled() bool { return c.Lifecycle != nil }
 
 // Charge starts a payment on the named gateway (empty → the default gateway).
 func (c *Cashier) Charge(ctx context.Context, gatewayName string, p ChargeParams) (*Charge, error) {
@@ -101,10 +123,35 @@ func NewPlugin(cfg Config) *Plugin {
 	if def != "" {
 		cfg.Manager.SetDefault(def)
 	}
+	// The subscription suite — catalogue, offerings, lifecycle — is a Cashier
+	// Cloud product. Without a cloud key the plugin stays payments-only and
+	// the subscription config fields are ignored.
+	if cfg.CloudKey == "" {
+		cfg.CloudKey = os.Getenv("CASHIER_CLOUD_KEY")
+	}
+	var catalog *Catalog
+	var lifecycle *Lifecycle
+	if cfg.CloudKey != "" {
+		catalog = NewCatalog()
+		for _, p := range cfg.Products {
+			catalog.RegisterProduct(p)
+		}
+		for _, o := range cfg.Offerings {
+			catalog.RegisterOffering(o)
+		}
+		if cfg.CurrentOffering != "" {
+			catalog.SetCurrentOffering(cfg.CurrentOffering)
+		}
+		lifecycle = NewLifecycle(catalog, cfg.Paywall, cfg.GracePeriod, cfg.OnSubscriberEvent)
+	}
+
 	return &Plugin{
-		BasePlugin: nimbus.BasePlugin{PluginName: "cashier", PluginVersion: "1.0.0"},
-		Cashier:    &Cashier{Gateways: cfg.Manager, Paywall: cfg.Paywall},
-		cfg:        cfg,
+		BasePlugin: nimbus.BasePlugin{PluginName: "cashier", PluginVersion: "1.1.0"},
+		Cashier: &Cashier{
+			Gateways: cfg.Manager, Paywall: cfg.Paywall, Subscriptions: cfg.Subscriptions,
+			IAP: cfg.IAP, Catalog: catalog, Lifecycle: lifecycle,
+		},
+		cfg: cfg,
 	}
 }
 
@@ -136,6 +183,8 @@ func (p *Plugin) Register(app *nimbus.App) error {
 	app.Container.Singleton("cashier", func() *Cashier { return p.Cashier })
 	app.Container.Singleton("cashier.manager", func() *GatewayManager { return p.Cashier.Gateways })
 	app.Container.Singleton("cashier.paywall", func() *Paywall { return p.Cashier.Paywall })
+	app.Container.Singleton("cashier.catalog", func() *Catalog { return p.Cashier.Catalog })
+	app.Container.Singleton("cashier.lifecycle", func() *Lifecycle { return p.Cashier.Lifecycle })
 	return nil
 }
 
@@ -149,5 +198,6 @@ func (p *Plugin) DefaultConfig() map[string]any {
 		"default_gateway": p.Cashier.Gateways.DefaultName(),
 		"gateways":        p.Cashier.Gateways.Names(),
 		"webhook_prefix":  p.cfg.WebhookPrefix,
+		"cloud_enabled":   p.Cashier.CloudEnabled(),
 	}
 }

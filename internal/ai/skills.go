@@ -1,7 +1,6 @@
 package ai
 
 import (
-	"embed"
 	"fmt"
 	"io/fs"
 	"os"
@@ -12,9 +11,6 @@ import (
 
 	"github.com/CodeSyncr/nimbus/cli/auth"
 )
-
-//go:embed default_skills/*
-var defaultSkillsFS embed.FS
 
 // Skill represents a lightweight index entry for an agent skill.
 type Skill struct {
@@ -31,48 +27,18 @@ var (
 )
 
 // EnsureDefaultSkills writes embedded default skills to ~/.nimbus/skills/ if not already present.
-func EnsureDefaultSkills() error {
-	configDir, err := auth.ConfigDir()
-	if err != nil {
-		home, hErr := os.UserHomeDir()
-		if hErr != nil {
-			return hErr
-		}
-		configDir = filepath.Join(home, ".nimbus")
-	}
-
-	skillsDir := filepath.Join(configDir, "skills")
-	if err := os.MkdirAll(skillsDir, 0755); err != nil {
-		return err
-	}
-
-	// Walk embedded filesystem and copy missing skills
-	return fs.WalkDir(defaultSkillsFS, "default_skills", func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			return nil
-		}
-
-		relPath, err := filepath.Rel("default_skills", path)
-		if err != nil {
-			return err
-		}
-
-		targetPath := filepath.Join(skillsDir, relPath)
-		if mkErr := os.MkdirAll(filepath.Dir(targetPath), 0755); mkErr != nil {
-			return mkErr
-		}
-
-		content, readErr := defaultSkillsFS.ReadFile(path)
-		if readErr != nil {
-			return readErr
-		}
-
-		return os.WriteFile(targetPath, content, 0644)
-	})
-}
+// EnsureDefaultSkills is retained as a no-op.
+//
+// The Nimbus skill library is Nimbus Cloud intellectual property and now
+// lives on the server, which selects the relevant skill for each turn and
+// folds it into the model's instructions. It used to be embedded in this
+// binary and written to ~/.nimbus/skills on every run, which shipped the
+// whole library to every machine that installed the CLI.
+//
+// Skills the user writes themselves — in the project or in ~/.nimbus/skills —
+// are unaffected: they stay local and are still discovered by LoadSkills and
+// read by the load_skill tool.
+func EnsureDefaultSkills() error { return nil }
 
 // LoadSkills discovers and builds a lightweight index of skills (name + description only).
 func LoadSkills(appRoot string) ([]Skill, error) {
@@ -90,23 +56,9 @@ func LoadSkills(appRoot string) ([]Skill, error) {
 		scanSkillsDirectory(globalSkillsDir, "global", skillsMap)
 	}
 
-	// 3. Fallback to embedded default skills if nothing on disk
-	if len(skillsMap) == 0 {
-		_ = fs.WalkDir(defaultSkillsFS, "default_skills", func(path string, d fs.DirEntry, err error) error {
-			if err != nil || d.IsDir() || !strings.HasSuffix(path, "SKILL.md") {
-				return nil
-			}
-			contentBytes, readErr := defaultSkillsFS.ReadFile(path)
-			if readErr != nil {
-				return nil
-			}
-			skill := parseSkillHeader(string(contentBytes), path, "embedded")
-			if skill.Name != "" {
-				skillsMap[skill.Name] = skill
-			}
-			return nil
-		})
-	}
+	// Nimbus's own skills are deliberately absent: they are Nimbus Cloud
+	// property, live on the server, and are applied there. Only skills the
+	// user wrote are discoverable locally.
 
 	var result []Skill
 	for _, s := range skillsMap {
@@ -209,25 +161,13 @@ func ReadSkillContent(appRoot, skillName string) (string, error) {
 		}
 	}
 
-	// 3. Check embedded default skills
-	embeddedPath := fmt.Sprintf("default_skills/%s/SKILL.md", skillName)
-	if data, err := defaultSkillsFS.ReadFile(embeddedPath); err == nil {
-		return extractSkillBody(string(data)), nil
-	}
-
 	// Case-insensitive fallback across all available skills
 	skills, err := LoadSkills(appRoot)
 	if err == nil {
 		for _, s := range skills {
 			if strings.EqualFold(s.Name, skillName) {
-				if s.Source == "embedded" {
-					if data, readErr := defaultSkillsFS.ReadFile(s.Path); readErr == nil {
-						return extractSkillBody(string(data)), nil
-					}
-				} else {
-					if data, readErr := os.ReadFile(s.Path); readErr == nil {
-						return extractSkillBody(string(data)), nil
-					}
+				if data, readErr := os.ReadFile(s.Path); readErr == nil {
+					return extractSkillBody(string(data)), nil
 				}
 			}
 		}
@@ -335,4 +275,3 @@ func extractTopSummary(body string) string {
 	}
 	return body
 }
-

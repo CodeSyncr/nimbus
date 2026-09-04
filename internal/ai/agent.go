@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 )
 
 // AgentState represents the state of the agent.
@@ -37,6 +38,8 @@ type AgentCallbacks struct {
 	OnToolCall           func(toolName string, args map[string]any)
 	OnToolResult         func(toolName string, args map[string]any, output string, err error)
 	OnExecutionCompleted func(summary string)
+	// OnUsage reports the tokens a turn consumed and the session total.
+	OnUsage func(turn *TokenUsage, session SessionUsage)
 }
 
 // Loop limits.
@@ -66,12 +69,21 @@ type Agent struct {
 	// turnSupport caches whether the server implements /ai/turn:
 	// 0 unknown, 1 supported, -1 unsupported (legacy endpoints are used).
 	turnSupport int
+	// agentModeUnsupported records that this server predates the "agent"
+	// turn mode, so the conversational loop falls back to chat mode.
+	agentModeUnsupported bool
 	// changedFiles collects paths touched by write/edit/delete tools during
 	// the current execution, for the conversation memory.
 	changedFiles map[string]bool
 	// lastToolSig / repeatCount detect a model stuck re-issuing one call.
 	lastToolSig string
 	repeatCount int
+	// settings is the resolved configuration for this run. See ApplySettings.
+	settings Settings
+	// compactStalledAt records the size at which a compaction attempt
+	// reclaimed nothing, so the next one waits for real growth instead of
+	// paying for a summary every iteration. Zero means not stalled.
+	compactStalledAt int
 }
 
 // NewAgent creates a new Nimbus AI Agent.
@@ -91,10 +103,56 @@ func NewAgent(client AIClient, tools *ToolExecutor, projCtx *ProjectContext, ses
 		Model:     model,
 		State:     StateIdle,
 		Callbacks: AgentCallbacks{},
+		settings:  DefaultSettings(),
 	}
 	a.Verifier = a.defaultVerifier
+
+	// Surface transport retries as ordinary status: a stalled run that is
+	// quietly backing off looks identical to a hung one otherwise.
+	if r, ok := client.(RetryReporter); ok {
+		r.SetRetryHook(func(attempt int, reason string) {
+			a.status(fmt.Sprintf("Connection problem (%s) — retrying, attempt %d of %d", reason, attempt+1, maxAttempts))
+		})
+	}
 	return a
 }
+
+// ApplySettings wires resolved settings into the agent and the pieces it owns.
+//
+// One place does this so a setting cannot be half-applied — read by the screen
+// that shows it but never reaching the code that acts on it, which is the
+// usual way a configuration screen becomes a lie.
+func (a *Agent) ApplySettings(s Settings) {
+	a.settings = s
+
+	if a.Session != nil {
+		a.Session.SetLimits(s.ContextLimit, s.CompactThresholdPercent)
+		if s.Model != "" {
+			a.Session.Model = s.Model
+		}
+	}
+	if s.Model != "" {
+		a.Model = s.Model
+	}
+	if a.Tools != nil {
+		a.Tools.SetPermissionMode(ParsePermissionMode(s.PermissionMode))
+		a.Tools.MaxCommandOutput = s.MaxCommandOutput
+	}
+
+	// Verification is a function rather than a flag, so turning it off means
+	// removing it; defaultVerifier is restored rather than remembered, since
+	// a caller that installed its own (the tests do) sets it after this.
+	if s.VerifyBuilds {
+		if a.Verifier == nil {
+			a.Verifier = a.defaultVerifier
+		}
+	} else {
+		a.Verifier = nil
+	}
+}
+
+// Settings returns the settings currently in force.
+func (a *Agent) Settings() Settings { return a.settings }
 
 // PlanSystemPrompt documents the plan JSON contract the CLI expects. The
 // authoritative prompts live on Nimbus Cloud; this is kept for reference and
@@ -144,8 +202,18 @@ func (a *Agent) saveSession() {
 
 // turn runs one model turn, tracking whether the server supports it.
 func (a *Agent) turn(ctx context.Context, mode TurnMode, messages []Message, tools []ToolDefinition, plan *PlanSummary) (*MessageResponse, error) {
+	// A client that never resolved would otherwise crash the terminal on the
+	// first turn, in a goroutine, with a nil dereference.
+	if a.Client == nil {
+		return nil, errors.New("no AI client is configured for this session")
+	}
 	if a.turnSupport < 0 {
 		return nil, ErrTurnUnsupported
+	}
+	// Servers older than the conversational loop reject "agent"; chat is the
+	// closest mode they understand and keeps the CLI working against them.
+	if mode == TurnModeAgent && a.agentModeUnsupported {
+		mode = TurnModeChat
 	}
 	a.requestSent()
 	resp, err := a.Client.Turn(ctx, &TurnRequest{
@@ -161,10 +229,41 @@ func (a *Agent) turn(ctx context.Context, mode TurnMode, messages []Message, too
 		if errors.Is(err, ErrTurnUnsupported) {
 			a.turnSupport = -1
 		}
+		// An older server answers an unknown mode with 400; retry once in a
+		// mode it knows rather than failing the user's request.
+		if mode == TurnModeAgent && isUnknownModeErr(err) {
+			a.agentModeUnsupported = true
+			return a.turn(ctx, TurnModeChat, messages, tools, plan)
+		}
 		return nil, err
 	}
 	a.turnSupport = 1
+
+	// One place to account for spend: every model turn passes through here.
+	if a.Session != nil {
+		a.Session.Usage.Add(resp.Usage)
+	}
+	if a.Callbacks.OnUsage != nil && resp.Usage != nil {
+		a.Callbacks.OnUsage(resp.Usage, a.Session.Usage)
+	}
 	return resp, nil
+}
+
+// isUnknownModeErr detects a server that does not know the requested mode.
+// Servers phrase this differently ("unknown mode", "bad mode",
+// "unsupported mode"), so the check is on the shape of the complaint; the
+// cost of a false positive is one extra attempt in chat mode.
+func isUnknownModeErr(err error) bool {
+	msg := strings.ToLower(err.Error())
+	if !strings.Contains(msg, "mode") {
+		return false
+	}
+	for _, marker := range []string{"unknown", "bad", "unsupported", "invalid", "not supported"} {
+		if strings.Contains(msg, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 // ---------------------------------------------------------------------------
@@ -284,7 +383,15 @@ func (a *Agent) planWithTurns(ctx context.Context, userPrompt string) (*PlanSumm
 		if strings.TrimSpace(lastText) == "" {
 			return nil, errors.New("the model returned an empty plan")
 		}
-		// Not JSON: treat as a conversational answer.
+		// A plan that was cut off is still JSON-shaped, and echoing it puts a
+		// wall of broken JSON on screen as though it were the answer. Say what
+		// happened instead.
+		if looksLikeTruncatedJSON(lastText) {
+			return nil, errors.New(
+				"the plan came back incomplete — the model hit its output limit mid-response. " +
+					"Ask again, narrow the request, or raise AI_MAX_TOKENS on the server")
+		}
+		// Genuinely not JSON: a conversational answer.
 		return &PlanSummary{Summary: strings.TrimSpace(lastText), Overview: strings.TrimSpace(lastText), Steps: []PlanStep{}}, nil
 	}
 	return plan, nil
@@ -545,70 +652,157 @@ func (a *Agent) executeLegacy(ctx context.Context, plan *PlanSummary) (string, e
 
 // runToolCalls executes tool_use blocks, fires callbacks, tracks changed
 // files, and returns the matching tool_result blocks.
+// parallelToolLimit bounds how many read-only tools run at once. It is a
+// courtesy to the filesystem and to a server behind fetch_url, not a
+// correctness constraint.
+const parallelToolLimit = 8
+
+// isParallelSafe reports whether a tool only observes the workspace.
+//
+// These can run together because none of them changes anything another could
+// see: no file is written, no command runs, and the executor's own mutable
+// state — the read cache and the injection taint — is behind a mutex.
+// Everything else stays sequential, because the model issuing a write and
+// then a read of the same path expects to see what it just wrote.
+func isParallelSafe(name string) bool {
+	switch strings.ToLower(name) {
+	case "read_file", "read", "list_dir", "find_files", "glob", "grep", "search", "fetch_url":
+		return true
+	}
+	return false
+}
+
+// toolOutcome is what one tool invocation produced.
+type toolOutcome struct {
+	out  string
+	diff string
+	err  error
+}
+
+// runToolCalls executes a model turn's tool calls and returns their results in
+// the order they were asked for.
+//
+// A turn commonly opens with several reads at once — the model locating a
+// handful of files before deciding anything — and running those one after
+// another made the whole batch as slow as its parts combined. Maximal runs of
+// read-only calls now execute together; anything else runs alone and in
+// order. Results, callbacks and diffs stay strictly in the model's order
+// either way, so nothing downstream can tell which path a call took.
 func (a *Agent) runToolCalls(ctx context.Context, toolBlocks []ContentBlock) []ContentBlock {
-	var toolResults []ContentBlock
-	for _, tb := range toolBlocks {
-		if a.Callbacks.OnToolCall != nil {
-			a.Callbacks.OnToolCall(tb.Name, tb.Input)
+	outcomes := make([]toolOutcome, len(toolBlocks))
+	toolResults := make([]ContentBlock, 0, len(toolBlocks))
+
+	for i := 0; i < len(toolBlocks); {
+		j := i
+		for j < len(toolBlocks) && isParallelSafe(toolBlocks[j].Name) {
+			j++
+		}
+		// A lone read-only call is not worth a goroutine.
+		if j-i < 2 {
+			j = i + 1
 		}
 
-		var out, diff string
-		var err error
+		group := toolBlocks[i:j]
+		for _, tb := range group {
+			if a.Callbacks.OnToolCall != nil {
+				a.Callbacks.OnToolCall(tb.Name, tb.Input)
+			}
+		}
 
-		if isSkillTool(tb.Name) {
-			skillName, _ := tb.Input["skill_name"].(string)
-			if skillName == "" {
-				skillName, _ = tb.Input["name"].(string)
-			}
-			skillName = strings.TrimSpace(skillName)
-			if a.Session.LoadedSkills == nil {
-				a.Session.LoadedSkills = make(map[string]string)
-			}
-			// query_skill results depend on the query, so only full loads are cached.
-			cacheable := tb.Name != "query_skill"
-			if cached, ok := a.Session.LoadedSkills[skillName]; ok && cached != "" && cacheable {
-				out = cached
-			} else {
-				out, diff, err = a.Tools.ExecuteTool(ctx, tb.Name, tb.Input)
-				if err == nil && out != "" && cacheable {
-					a.Session.LoadedSkills[skillName] = out
-					a.saveSession()
-				}
-			}
-			if err == nil && out != "" && a.Context != nil {
-				// Mount the active skill into the system frame so the server can
-				// keep it in the system prompt across turns.
-				a.Context.ActiveSkillFrame = out
-			}
+		if len(group) == 1 {
+			outcomes[i] = a.runOneTool(ctx, group[0])
 		} else {
-			out, diff, err = a.Tools.ExecuteTool(ctx, tb.Name, tb.Input)
+			a.runToolGroup(ctx, group, outcomes[i:j])
 		}
 
-		if err == nil {
-			a.trackChange(tb.Name, tb.Input)
+		// Reporting happens after the group, in the model's order, so the
+		// transcript reads the same whether or not the calls overlapped.
+		for k, tb := range group {
+			res := outcomes[i+k]
+			if res.err == nil {
+				a.trackChange(tb.Name, tb.Input)
+			}
+			if a.Callbacks.OnToolResult != nil {
+				a.Callbacks.OnToolResult(tb.Name, tb.Input, res.out, res.err)
+			}
+			if res.diff != "" && a.Callbacks.OnDiffGenerated != nil {
+				path, _ := tb.Input["path"].(string)
+				a.Callbacks.OnDiffGenerated(path, res.diff)
+			}
+
+			block := ContentBlock{Type: "tool_result", ToolUseID: tb.ID, Content: res.out}
+			if res.err != nil {
+				block.IsError = true
+				block.Content = fmt.Sprintf("Error: %v", res.err)
+			}
+			toolResults = append(toolResults, block)
 		}
 
-		if a.Callbacks.OnToolResult != nil {
-			a.Callbacks.OnToolResult(tb.Name, tb.Input, out, err)
-		}
-
-		if diff != "" && a.Callbacks.OnDiffGenerated != nil {
-			path, _ := tb.Input["path"].(string)
-			a.Callbacks.OnDiffGenerated(path, diff)
-		}
-
-		resBlock := ContentBlock{
-			Type:      "tool_result",
-			ToolUseID: tb.ID,
-			Content:   out,
-		}
-		if err != nil {
-			resBlock.IsError = true
-			resBlock.Content = fmt.Sprintf("Error: %v", err)
-		}
-		toolResults = append(toolResults, resBlock)
+		i = j
 	}
 	return toolResults
+}
+
+// runToolGroup executes read-only calls concurrently, writing each result to
+// its own slot so the caller keeps the model's ordering.
+func (a *Agent) runToolGroup(ctx context.Context, group []ContentBlock, into []toolOutcome) {
+	limit := parallelToolLimit
+	if len(group) < limit {
+		limit = len(group)
+	}
+	sem := make(chan struct{}, limit)
+
+	var wg sync.WaitGroup
+	for idx := range group {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			into[idx] = a.runOneTool(ctx, group[idx])
+		}(idx)
+	}
+	wg.Wait()
+}
+
+// runOneTool executes a single call. It reports no progress and fires no
+// callbacks: those are the caller's, so that they stay ordered even when this
+// runs on several goroutines at once.
+func (a *Agent) runOneTool(ctx context.Context, tb ContentBlock) toolOutcome {
+	if !isSkillTool(tb.Name) {
+		out, diff, err := a.Tools.ExecuteTool(ctx, tb.Name, tb.Input)
+		return toolOutcome{out: out, diff: diff, err: err}
+	}
+
+	// Skills are never in a parallel group: loading one writes the session and
+	// the system frame, so it runs alone and this needs no lock.
+	skillName, _ := tb.Input["skill_name"].(string)
+	if skillName == "" {
+		skillName, _ = tb.Input["name"].(string)
+	}
+	skillName = strings.TrimSpace(skillName)
+	if a.Session.LoadedSkills == nil {
+		a.Session.LoadedSkills = make(map[string]string)
+	}
+
+	// query_skill results depend on the query, so only full loads are cached.
+	cacheable := tb.Name != "query_skill"
+	var res toolOutcome
+	if cached, ok := a.Session.LoadedSkills[skillName]; ok && cached != "" && cacheable {
+		res.out = cached
+	} else {
+		res.out, res.diff, res.err = a.Tools.ExecuteTool(ctx, tb.Name, tb.Input)
+		if res.err == nil && res.out != "" && cacheable {
+			a.Session.LoadedSkills[skillName] = res.out
+			a.saveSession()
+		}
+	}
+	if res.err == nil && res.out != "" && a.Context != nil {
+		// Mount the active skill into the system frame so the server can keep
+		// it in the system prompt across turns.
+		a.Context.ActiveSkillFrame = res.out
+	}
+	return res
 }
 
 func isSkillTool(name string) bool {
@@ -694,6 +888,42 @@ func (a *Agent) defaultVerifier(ctx context.Context) (string, bool) {
 // ---------------------------------------------------------------------------
 
 var reJSONFence = regexp.MustCompile("(?s)```(?:json)?\\s*(\\{.*?\\})\\s*```")
+
+// looksLikeTruncatedJSON reports whether text was meant to be a plan but never
+// finished: it opens like JSON (optionally inside a fence) and its braces
+// never balance.
+func looksLikeTruncatedJSON(text string) bool {
+	trimmed := strings.TrimSpace(text)
+	trimmed = strings.TrimPrefix(trimmed, "```json")
+	trimmed = strings.TrimPrefix(trimmed, "```")
+	trimmed = strings.TrimSpace(trimmed)
+
+	if !strings.HasPrefix(trimmed, "{") {
+		return false
+	}
+	// Balanced braces mean it is complete JSON that failed to decode for some
+	// other reason; unbalanced means it stopped partway.
+	depth := 0
+	inString := false
+	escaped := false
+	for _, r := range trimmed {
+		switch {
+		case escaped:
+			escaped = false
+		case r == '\\':
+			escaped = true
+		case r == '"':
+			inString = !inString
+		case inString:
+			// braces inside strings do not count
+		case r == '{':
+			depth++
+		case r == '}':
+			depth--
+		}
+	}
+	return depth > 0 || inString
+}
 
 // parsePlanJSON extracts the plan object from model output. It accepts a
 // plan with steps, a clarification request, or a summary-only answer; it

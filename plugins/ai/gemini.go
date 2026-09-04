@@ -25,19 +25,29 @@ func newGeminiProvider(cfg *Config) (Provider, error) {
 	if model == "" {
 		model = "gemini-2.0-flash"
 	}
-	return &geminiProvider{apiKey: cfg.GeminiKey, model: model}, nil
+	return &geminiProvider{
+		apiKey:     cfg.GeminiKey,
+		model:      model,
+		imageModel: cfg.ImageModel,
+	}, nil
 }
 
 type geminiProvider struct {
 	apiKey string
 	model  string
+	// imageModel is the default for image generation, independent of the text
+	// model: pictures come from a different endpoint and usually a different
+	// model. See gemini_image.go.
+	imageModel string
+	// baseURL overrides the API root (tests point it at a local server).
+	baseURL string
 }
 
 func (p *geminiProvider) Name() string { return "gemini" }
 
 type geminiRequest struct {
-	Contents         []geminiContent         `json:"contents"`
-	GenerationConfig geminiGenerationConfig  `json:"generationConfig,omitempty"`
+	Contents          []geminiContent        `json:"contents"`
+	GenerationConfig  geminiGenerationConfig `json:"generationConfig,omitempty"`
 	SystemInstruction *geminiContent         `json:"system_instruction,omitempty"`
 }
 

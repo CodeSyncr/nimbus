@@ -105,3 +105,45 @@ Default store is `MemoryEntitlementStore`; implement `EntitlementStore` for a DB
 ## Adding a Gateway
 
 Add a file in `gateways/` implementing `contracts.PaymentGateway` (`Name`, `CreateCharge`, `VerifyPayment`, `VerifyWebhook`) and register it in the manager. PhonePe, Cashfree, Paytm, PayPal slot in the same way. A gateway that can't verify a bare payment (like PayU) returns `contracts.ErrUnsupported` from `VerifyPayment` and validates via `VerifyWebhook` with the full callback form.
+
+## RevenueCat-Style Subscriptions (Catalog, Lifecycle, CustomerInfo)
+
+**Product split:** the self-hosted plugin is free payments-only — gateways, charges, webhooks, refunds, basic paywall. The subscription suite below (catalog/entitlements, offerings, lifecycle, CustomerInfo) and Apple/Google IAP verification are **Cashier Cloud** features, activated by `Config.CloudKey` (or `CASHIER_CLOUD_KEY`) — the `cshr_live_…` key from the Cashier console. Without a key, `NewPlugin` ignores the subscription config fields, `Cashier.CloudEnabled()` is false, `CustomerInfo` returns empty, and features return `cashier.ErrCloudRequired` where applicable.
+
+Cashier replicates RevenueCat's core model: **products** (what a customer buys) unlock named **entitlements** (what they can access), the **lifecycle** turns payment facts into entitlement changes and canonical subscriber events, and **CustomerInfo** is the one aggregate answering "what does this subscriber have?".
+
+```go
+app.Use(cashier.NewPlugin(cashier.Config{
+    FromEnv: true,
+    Products: []cashier.Product{
+        {ID: "pro_monthly", Name: "Pro", Amount: 149900, Currency: "INR",
+         PeriodMonths: 1, Entitlements: []string{"premium"}},
+        {ID: "pro_annual", Name: "Pro Annual", Amount: 1499900, Currency: "INR",
+         PeriodMonths: 12, Entitlements: []string{"premium"}},
+    },
+    Offerings: []cashier.Offering{{ID: "default", Packages: []cashier.Package{
+        {ID: "monthly", ProductID: "pro_monthly"}, {ID: "annual", ProductID: "pro_annual"},
+    }}},
+    GracePeriod: 72 * time.Hour, // billing issues extend access this long
+    OnSubscriberEvent: func(e cashier.SubscriberEvent) { /* analytics, email */ },
+}))
+```
+
+When offerings exist, `GET <WebhookPrefix>/offerings` serves the current offering with resolved products — the client asks "what should the paywall sell?" instead of hard-coding product ids. Unregistered products fall back to an entitlement named after themselves, so plan-slug paywalls keep working.
+
+**Lifecycle** (`cash.Lifecycle`, or container `cashier.lifecycle`) — report what happened; it updates entitlements and emits the canonical event (`initial_purchase`, `renewal`, `product_change`, `cancellation`, `uncancellation`, `billing_issue`, `expiration`, `subscription_paused`, `subscription_extended`, `non_renewing_purchase`, `promotional_grant`/`_revoke`, `transfer`):
+
+```go
+lc := cash.Lifecycle
+lc.RecordPurchase(userID, "pro_monthly", endsAt, cashier.PeriodNormal) // detects initial vs renewal vs plan change
+lc.RecordCancellation(userID, "pro_monthly", cashier.ReasonUnsubscribe) // renewal off, access kept to expiry
+lc.RecordUncancellation(userID, "pro_monthly")
+lc.RecordBillingIssue(userID, "pro_monthly")   // opens the grace period instead of revoking
+lc.RecordExpiration(userID, "pro_monthly", cashier.ReasonBillingError) // revoke now + emit
+lc.GrantPromotional(userID, "premium", until)  // comp access without a payment
+lc.Transfer(anonID, userID)                    // move entitlements between subjects
+```
+
+**CustomerInfo** — `cash.CustomerInfo(subject)` returns every entitlement with `Active`, `WillRenew`, `PeriodType` (`trial|intro|normal|promotional|grace`), `Source` (`purchase|promotional`), `ProductID` and expiry, plus mirrored gateway subscriptions. Gate features with `info.HasEntitlement("premium")`.
+
+Cancellation semantics match RevenueCat: cancelling only turns `WillRenew` off — access survives until expiry, and `expiration` is a separate, later event. A failed renewal opens the grace period rather than cutting access.

@@ -20,6 +20,7 @@ package ai
 import (
 	"context"
 	"fmt"
+	"strings"
 )
 
 // ---------------------------------------------------------------------------
@@ -79,12 +80,40 @@ func (b *ImageBuilder) WithClient(c *Client) *ImageBuilder {
 func (b *ImageBuilder) Generate(ctx context.Context) (*ImageResponse, error) {
 	client := b.client
 	if client == nil {
-		client = GetClient()
+		client = imageClient()
 	}
 
 	ip, ok := client.provider.(ImageProvider)
 	if !ok {
-		return nil, fmt.Errorf("ai: provider %q does not support image generation", client.config.Provider)
+		return nil, fmt.Errorf(
+			"ai: provider %q does not generate images. Set AI_IMAGE_PROVIDER to one that does (gemini), or configure that provider's key",
+			client.config.Provider)
 	}
 	return ip.GenerateImage(ctx, &b.req)
+}
+
+// imageClient resolves the client that serves image requests.
+//
+// Images and text are separate choices: AI_IMAGE_PROVIDER may name a different
+// provider from the one answering prompts, so an app can reason with one model
+// and draw with another. Without it, the text provider is used — which works
+// when that provider also generates images.
+func imageClient() *Client {
+	base := GetClient()
+	want := strings.TrimSpace(base.config.ImageProvider)
+	if want == "" || strings.EqualFold(want, base.config.Provider) {
+		return base
+	}
+
+	// Same configuration, different provider: keys are all present on Config.
+	cfg := *base.config
+	cfg.Provider = want
+	imageOnly, err := NewClient(&cfg)
+	if err != nil {
+		// A misconfigured image provider should not take text generation down
+		// with it; fall back and let the caller see the clearer error from the
+		// interface check.
+		return base
+	}
+	return imageOnly
 }

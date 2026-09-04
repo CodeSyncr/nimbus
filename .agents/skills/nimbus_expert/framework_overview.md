@@ -32,7 +32,7 @@ Nimbus is an AdonisJS-style web framework for Go, prioritizing "convention over 
 3.  **Plugin Initialization**: Register and boot plugins (`Register` + `Boot`).
 4.  **Routing & Capabilities**: Mount routes, merge middleware, register CLI commands, crons, and health checks.
 5.  **WarmUp Phase**: Run `OnWarmup` hooks, assemble the app completely, and dispatch `events.AppWarmed`.
-6.  **Run / HTTP Server**: Run `OnStart` hooks, start schedulers, dispatch `events.AppReady`, and serve HTTP traffic.
+6.  **Run / HTTP Server**: Run `OnStart` hooks, start schedulers, dispatch `events.AppStarted` then `events.AppReady`, and serve HTTP traffic. See [events](events.md) for the full constant list.
 
 ## Application Modes & Warmup
 
@@ -65,7 +65,9 @@ routes := app.Router.Routes()
 
 ### HTTP Context (`*http.Context`)
 -   Unified, developer-friendly interface for HTTP request lifecycle and response building.
--   First-party helpers: `c.JSON()`, `c.View()`, `c.Param()`, `c.Redirect()`, `c.Validate()`.
+-   First-party helpers: `c.JSON()`, `c.View()`, `c.Param()`, `c.Redirect()`, `c.Bind()`.
+-   There is **no** `c.Validate()`. Validation is a separate call — `validation.BindAndValidate(c, req)` or `validation.BindAndValidateSchema(c, req)`. See [validation](validation.md).
+-   Full method reference: [http_context](http_context.md).
 -   Built-in user context and authentication guards.
 
 ### Service Provider

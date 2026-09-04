@@ -25,6 +25,7 @@ import (
 	"github.com/CodeSyncr/nimbus/events"
 	"github.com/CodeSyncr/nimbus/health"
 	nhttp "github.com/CodeSyncr/nimbus/http"
+	"github.com/CodeSyncr/nimbus/internal/startupview"
 	"github.com/CodeSyncr/nimbus/locale"
 	"github.com/CodeSyncr/nimbus/openapi"
 	"github.com/CodeSyncr/nimbus/router"
@@ -667,6 +668,9 @@ func (a *App) Run() error {
 	if a.GetMode() == ModeWarmup {
 		return fmt.Errorf("nimbus: cannot run application in %s mode", a.GetMode())
 	}
+	// Measured from here to the moment the listener is up, which is what
+	// "Ready in" means to someone watching the terminal.
+	bootStart := time.Now()
 	configureGOGCFromEnv()
 	startPprofIfEnabled()
 	if !a.IsWarmedUp() {
@@ -684,7 +688,7 @@ func (a *App) Run() error {
 		return err
 	}
 	a.Config.App.Port = port
-	a.printStartup("http", port)
+	a.printStartup("http", port, time.Since(bootStart))
 
 	a.mu.Lock()
 	a.state = StateStarting
@@ -756,6 +760,7 @@ func (a *App) Run() error {
 // Listens for SIGINT/SIGTERM and gracefully shuts down to release the port.
 // Calling RunTLS on an app configured with ModeWarmup returns an error.
 func (a *App) RunTLS(certFile, keyFile string) error {
+	bootStart := time.Now()
 	if a.GetMode() == ModeWarmup {
 		return fmt.Errorf("nimbus: cannot run application in %s mode", a.GetMode())
 	}
@@ -769,7 +774,7 @@ func (a *App) RunTLS(certFile, keyFile string) error {
 		return err
 	}
 	a.Config.App.Port = port
-	a.printStartup("https", port)
+	a.printStartup("https", port, time.Since(bootStart))
 
 	a.mu.Lock()
 	a.state = StateStarting
@@ -854,28 +859,18 @@ func (a *App) listen() (net.Listener, string, error) {
 	return ln, freePort, nil
 }
 
-func (a *App) printStartup(scheme, port string) {
-	env := a.Config.App.Env
-	if env == "" {
-		env = "development"
-	}
-	name := a.Config.App.Name
-	if name == "" {
-		name = "nimbus"
-	}
+func (a *App) printStartup(scheme, port string, booted time.Duration) {
+	info := a.startupInfo(scheme, port, booted)
 
-	// When running under `nimbus serve`, emit a machine-readable marker
-	// that the CLI's airFilter parses for beautiful display.
+	// Under `nimbus serve` stdout is a pipe into Air, so the app can neither
+	// colour the view nor tell the CLI when to stop its spinner. It hands the
+	// whole report over as one marker line and the CLI draws it instead.
 	if os.Getenv("NIMBUS_SERVE") == "1" {
-		fmt.Fprintf(os.Stdout, "__NIMBUS_READY__|%s|%s|%s|%s|%d\n", scheme, port, name, env, len(a.plugins))
+		fmt.Fprintln(os.Stdout, info.Marker())
 		return
 	}
 
-	// Direct run — human-readable output.
-	url := fmt.Sprintf("%s://localhost:%s", scheme, port)
-	fmt.Printf("\n  \033[32m✓\033[0m  \033[1m%s\033[0m is ready\n\n", name)
-	fmt.Printf("  \033[32m➜\033[0m  Local: \033[1;36m%s\033[0m\n", url)
-	fmt.Printf("  \033[2m     env: %s · %d plugin(s)\033[0m\n\n", env, len(a.plugins))
+	fmt.Fprint(os.Stdout, startupview.Render(info))
 }
 
 // configureGOGCFromEnv reads NIMBUS_GOGC and applies it via debug.SetGCPercent.

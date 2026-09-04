@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/CodeSyncr/nimbus/http"
 	"github.com/CodeSyncr/nimbus/validation"
@@ -27,6 +28,7 @@ type Router struct {
 	namedRoutes     map[string]*Route
 	allRoutes       []*Route
 	fallbackHandler HandlerFunc
+	compileTime     time.Duration
 }
 
 // New creates a new Router backed by Chi.
@@ -168,6 +170,7 @@ func pathToChi(path string) string {
 }
 
 func (r *Router) addRoute(method, path string, handler HandlerFunc, groupMiddleware []Middleware) *Route {
+	start := time.Now()
 	chiPath := pathToChi(path)
 
 	// Capture metadata for Telescope / debugging.
@@ -215,8 +218,14 @@ func (r *Router) addRoute(method, path string, handler HandlerFunc, groupMiddlew
 	}
 	rt := &Route{router: r, method: method, path: path}
 	r.allRoutes = append(r.allRoutes, rt)
+	r.compileTime += time.Since(start)
 	return rt
 }
+
+// CompileTime reports the total time spent building the route table: resolving
+// handler and middleware names, wrapping the chains, and mounting them on Chi.
+// The startup view prints it so a slow boot can be attributed.
+func (r *Router) CompileTime() time.Duration { return r.compileTime }
 
 func withRouteMeta(method, path, handlerName string, middleware []string, next HandlerFunc) HandlerFunc {
 	return func(c *http.Context) error {

@@ -979,7 +979,6 @@ USER nimbus
 EXPOSE {{.Port}}
 ENV PORT={{.Port}}
 ENV APP_ENV=production
-ENV NIMBUS_SERVE=1
 
 HEALTHCHECK --interval={{.Health.Interval}}s --timeout={{.Health.Timeout}}s --retries=3 \
   CMD curl -fs http://localhost:{{.Port}}{{.Health.Path}} || exit 1

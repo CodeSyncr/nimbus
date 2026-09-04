@@ -2,8 +2,8 @@ package ai
 
 import (
 	"bufio"
-	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
-	"time"
 
 	"github.com/CodeSyncr/nimbus/cli/auth"
 	"github.com/CodeSyncr/nimbus/internal/version"
@@ -42,6 +41,10 @@ type StreamHandler func(delta string)
 type TurnMode string
 
 const (
+	// TurnModeAgent is the default: one continuous conversation in which the
+	// model decides whether to answer, investigate, or change code. The other
+	// modes drive the older staged pipeline, still used by --plan-only.
+	TurnModeAgent   TurnMode = "agent"
 	TurnModeExplore TurnMode = "explore"
 	TurnModePlan    TurnMode = "plan"
 	TurnModeExecute TurnMode = "execute"
@@ -83,6 +86,27 @@ type MessageResponse struct {
 	Role       string         `json:"role"`
 	Content    []ContentBlock `json:"content"`
 	StopReason string         `json:"stop_reason"`
+	Usage      *TokenUsage    `json:"usage,omitempty"`
+}
+
+// TokenUsage reports what a request consumed. It is populated when the server
+// sends a "usage" field (JSON) or a usage SSE event; older servers omit it and
+// the CLI simply reports no usage rather than guessing.
+type TokenUsage struct {
+	InputTokens  int `json:"input_tokens"`
+	OutputTokens int `json:"output_tokens"`
+	// CostUSD is what the turn cost, when the server prices it. The CLI does
+	// not price locally: the server picks the model behind "optimal", so a
+	// client-side guess would put a wrong number against real money.
+	CostUSD float64 `json:"cost_usd,omitempty"`
+}
+
+// Total returns all tokens billed for the request.
+func (u *TokenUsage) Total() int {
+	if u == nil {
+		return 0
+	}
+	return u.InputTokens + u.OutputTokens
 }
 
 func (m *MessageResponse) TextContent() string {
@@ -110,6 +134,10 @@ type NimbusCloudClient struct {
 	ServerURL  string
 	Token      string
 	HTTPClient *http.Client
+
+	// OnRetry is called before each retry so the UI can explain the pause
+	// instead of appearing to hang. See retry.go.
+	OnRetry retryNotifier
 }
 
 // NewNimbusCloudClient initializes client using local authentication credentials.
@@ -126,8 +154,19 @@ func NewNimbusCloudClient(serverURL string) (*NimbusCloudClient, error) {
 	return &NimbusCloudClient{
 		ServerURL:  strings.TrimRight(serverURL, "/"),
 		Token:      token,
-		HTTPClient: &http.Client{Timeout: 600 * time.Second},
+		HTTPClient: newHTTPClient(),
 	}, nil
+}
+
+// RetryReporter is implemented by clients that can announce transient
+// retries, so the UI can explain a pause instead of looking frozen.
+type RetryReporter interface {
+	SetRetryHook(func(attempt int, reason string))
+}
+
+// SetRetryHook implements RetryReporter.
+func (c *NimbusCloudClient) SetRetryHook(fn func(attempt int, reason string)) {
+	c.OnRetry = fn
 }
 
 // ResolveClient returns the appropriate AIClient. All intelligence is routed through nimbusgo.space.
@@ -151,15 +190,9 @@ func (c *NimbusCloudClient) Chat(ctx context.Context, prompt, model string, proj
 		return "", err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(jsonBytes))
+	resp, err := c.postJSON(ctx, apiURL, jsonBytes)
 	if err != nil {
 		return "", err
-	}
-	c.setHeaders(req)
-
-	resp, err := c.HTTPClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("connection error to Nimbus Cloud (%s): %w", c.ServerURL, err)
 	}
 	defer resp.Body.Close()
 
@@ -206,15 +239,9 @@ func (c *NimbusCloudClient) GeneratePlan(ctx context.Context, prompt string, pro
 		return nil, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(jsonBytes))
+	resp, err := c.postJSON(ctx, apiURL, jsonBytes)
 	if err != nil {
 		return nil, err
-	}
-	c.setHeaders(req)
-
-	resp, err := c.HTTPClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("connection error to Nimbus Cloud (%s): %w", c.ServerURL, err)
 	}
 	defer resp.Body.Close()
 
@@ -271,15 +298,9 @@ func (c *NimbusCloudClient) RegenerateStep(ctx context.Context, stepIndex int, n
 		return nil, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(jsonBytes))
+	resp, err := c.postJSON(ctx, apiURL, jsonBytes)
 	if err != nil {
 		return nil, err
-	}
-	c.setHeaders(req)
-
-	resp, err := c.HTTPClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("connection error to Nimbus Cloud (%s): %w", c.ServerURL, err)
 	}
 	defer resp.Body.Close()
 
@@ -335,15 +356,9 @@ func (c *NimbusCloudClient) Turn(ctx context.Context, tr *TurnRequest, onDelta S
 		return nil, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(jsonBytes))
+	resp, err := c.postJSONStream(ctx, apiURL, jsonBytes)
 	if err != nil {
 		return nil, err
-	}
-	c.setHeaders(req)
-
-	resp, err := c.HTTPClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("connection error to Nimbus Cloud (%s): %w", c.ServerURL, err)
 	}
 	defer resp.Body.Close()
 
@@ -384,15 +399,9 @@ func (c *NimbusCloudClient) StreamExecute(ctx context.Context, prompt string, pl
 		return nil, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(jsonBytes))
+	resp, err := c.postJSONStream(ctx, apiURL, jsonBytes)
 	if err != nil {
 		return nil, err
-	}
-	c.setHeaders(req)
-
-	resp, err := c.HTTPClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("connection error to Nimbus Cloud (%s): %w", c.ServerURL, err)
 	}
 	defer resp.Body.Close()
 
@@ -447,11 +456,20 @@ func parseMessageResponse(resp *http.Response, onDelta StreamHandler) (*MessageR
 				Delta      *struct {
 					Text string `json:"text"`
 				} `json:"delta"`
+				Usage *TokenUsage `json:"usage"`
 			}
 			if err := json.Unmarshal([]byte(data), &event); err != nil {
 				continue
 			}
+			// Usage may ride along on any event; the server typically sends
+			// it with "done". Keep the last non-empty report.
+			if event.Usage != nil && event.Usage.Total() > 0 {
+				response.Usage = event.Usage
+			}
+
 			switch {
+			case event.Type == "usage":
+				// usage-only event: already captured above
 			case event.Type == "error" || (event.Error != "" && event.Type == ""):
 				if event.Error == "" {
 					event.Error = "unknown server error"
@@ -502,6 +520,7 @@ func parseMessageResponse(resp *http.Response, onDelta StreamHandler) (*MessageR
 		Reply      string         `json:"reply"`
 		Content    []ContentBlock `json:"content"`
 		StopReason string         `json:"stop_reason"`
+		Usage      *TokenUsage    `json:"usage,omitempty"`
 		Error      string         `json:"error,omitempty"`
 	}
 	if err := json.Unmarshal(body, &jsonResp); err == nil {
@@ -518,6 +537,7 @@ func parseMessageResponse(resp *http.Response, onDelta StreamHandler) (*MessageR
 			}
 			return &MessageResponse{
 				Role:       "assistant",
+				Usage:      jsonResp.Usage,
 				Content:    jsonResp.Content,
 				StopReason: jsonResp.StopReason,
 			}, nil
@@ -527,7 +547,8 @@ func parseMessageResponse(resp *http.Response, onDelta StreamHandler) (*MessageR
 				onDelta(jsonResp.Reply)
 			}
 			return &MessageResponse{
-				Role: "assistant",
+				Role:  "assistant",
+				Usage: jsonResp.Usage,
 				Content: []ContentBlock{
 					{Type: "text", Text: jsonResp.Reply},
 				},
@@ -660,4 +681,80 @@ func compactMessagesForWire(messages []Message) []Message {
 		compacted[i] = Message{Role: msg.Role, Content: stripped}
 	}
 	return compacted
+}
+
+// ---------------------------------------------------------------------------
+// Image generation
+// ---------------------------------------------------------------------------
+
+// GeneratedImage is one image returned by Nimbus Cloud.
+type GeneratedImage struct {
+	Data  []byte // decoded bytes, ready to write to disk
+	Model string // the model that drew it
+}
+
+// GenerateImage asks Nimbus Cloud for an image.
+//
+// The provider keys live on the server, so the CLI never talks to an image
+// provider directly: it posts a prompt and receives bytes. Which model draws
+// the picture is server-side configuration, and changing it does not require a
+// new CLI.
+func (c *NimbusCloudClient) GenerateImage(ctx context.Context, prompt, size, model string) (*GeneratedImage, error) {
+	payload := map[string]any{"prompt": prompt}
+	if size != "" {
+		payload["size"] = size
+	}
+	if model != "" {
+		payload["model"] = model
+	}
+	jsonBytes, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := c.postJSON(ctx, c.ServerURL+"/api/v1/ai/image", jsonBytes)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if err := c.checkAuthStatus(resp.StatusCode); err != nil {
+		return nil, err
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, errors.New(cleanErrorMessage(resp.StatusCode, body))
+	}
+
+	var res struct {
+		Success bool   `json:"success"`
+		Model   string `json:"model"`
+		Error   string `json:"error,omitempty"`
+		Images  []struct {
+			B64JSON string `json:"b64_json"`
+			URL     string `json:"url"`
+		} `json:"images"`
+	}
+	if err := json.Unmarshal(body, &res); err != nil {
+		return nil, fmt.Errorf("invalid image response from %s: %s", c.ServerURL, string(body))
+	}
+	if !res.Success || len(res.Images) == 0 {
+		if res.Error != "" {
+			return nil, errors.New(res.Error)
+		}
+		return nil, errors.New("the server returned no image")
+	}
+
+	raw := res.Images[0].B64JSON
+	if raw == "" {
+		return nil, errors.New("the server returned an image with no data")
+	}
+	decoded, err := base64.StdEncoding.DecodeString(raw)
+	if err != nil {
+		return nil, fmt.Errorf("could not decode the generated image: %w", err)
+	}
+	return &GeneratedImage{Data: decoded, Model: res.Model}, nil
 }

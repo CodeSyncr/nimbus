@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"github.com/CodeSyncr/nimbus/internal/ai"
 	"math/rand"
 	"strings"
 	"time"
@@ -81,8 +82,17 @@ func RenderThinkingStatus(m *Model) string {
 	}
 
 	parts := []string{fmt.Sprintf("%ds", elapsed)}
-	if m.ThinkingTokens > 0 {
-		parts = append(parts, fmt.Sprintf("%d tokens", m.ThinkingTokens))
+	// Prefer what the server actually billed; the stream estimate is only a
+	// stand-in for servers that report no usage.
+	switch {
+	case m.SessionUsage.Reported():
+		tokens := ai.FormatTokens(m.SessionUsage.Total()) + " tokens"
+		if m.SessionUsage.CostUSD > 0 {
+			tokens += fmt.Sprintf(" · $%.4f", m.SessionUsage.CostUSD)
+		}
+		parts = append(parts, tokens)
+	case m.ThinkingTokens > 0:
+		parts = append(parts, fmt.Sprintf("~%d tokens", m.ThinkingTokens))
 	}
 	if m.ToolCalls > 0 {
 		parts = append(parts, fmt.Sprintf("%d tool calls", m.ToolCalls))

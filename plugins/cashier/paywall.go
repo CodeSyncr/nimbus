@@ -11,10 +11,19 @@ import (
 
 // Entitlement grants a subject (usually a user id) access to a plan until
 // ExpiresAt. A zero ExpiresAt means it never expires.
+//
+// Plan is the entitlement id being granted; the fields below carry the
+// RevenueCat-style context around it. Stores that predate them may persist
+// only the core triple — the lifecycle degrades gracefully.
 type Entitlement struct {
 	Subject   string
-	Plan      string
+	Plan      string // entitlement id
 	ExpiresAt time.Time
+
+	ProductID  string // the product whose purchase granted this ("" for promos)
+	PeriodType string // trial|intro|normal|promotional|grace
+	Source     string // purchase|promotional
+	WillRenew  bool   // false once cancelled/paused (access persists to expiry)
 }
 
 // EntitlementStore persists entitlements. Implement it to back the paywall with
@@ -46,7 +55,10 @@ func (p *Paywall) Store() EntitlementStore { return p.store }
 
 // Grant gives subject access to plan until expires (zero time = forever).
 func (p *Paywall) Grant(subject, plan string, expires time.Time) error {
-	return p.store.Grant(Entitlement{Subject: subject, Plan: plan, ExpiresAt: expires})
+	return p.store.Grant(Entitlement{
+		Subject: subject, Plan: plan, ExpiresAt: expires,
+		Source: SourcePurchase, PeriodType: PeriodNormal, WillRenew: true,
+	})
 }
 
 // Revoke removes a subject's access to a plan.

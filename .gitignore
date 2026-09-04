@@ -42,6 +42,9 @@ graphify-out/
 # ── Generated Hive client (produced per-app by gen:client) ─
 .nimbus-client/
 
+# Per-checkout AI settings; the committed layer is .nimbus/settings.json
+.nimbus/settings.local.json
+
 # ── Editor / IDE ───────────────────────────────────────────
 .idea/
 *.swp

@@ -25,12 +25,26 @@ Use this skill when:
 - [Routing & Controllers](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/routing_controllers.md): Route groups, params, resources, controllers.
 - [Validation](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/validation.md): Chainable rules and Form Requests.
 - [Views & Templates](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/views_templates.md): `.nimbus` engine, layouts, and components.
-- [CLI](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/cli.md): Scaffolding and generator commands.
+- [CLI](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/cli.md): Complete reference — every command, argument, alias, flag, and generated path.
+- [Application Lifecycle & Service Providers](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/service_providers.md): Boot phases, provider/plugin capability interfaces, hooks, app modes, boot-time env switches.
+- [HTTP Context](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/http_context.md): Every `*http.Context` method — input, binding, uploads, cookies, responses, streaming, SSE.
+- [Middleware](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/middleware.md): Built-in middleware, named middleware from plugins, writing your own.
+- [Errors & Exception Handling](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/errors.md): `AppError`, `HTTPError`, content negotiation, dev error page, reporters.
+- [Events](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/events.md): Dispatcher API and every framework lifecycle event constant.
+- [Service Container & DI](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/container_di.md): Bind, Singleton, Instance, auto-wiring, test doubles.
+- [Sessions](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/session.md): Session API, flash data, and the memory/cookie/Redis/database stores.
+- [Helpers](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/helpers.md): `str`, `collect`, `timex`, and `pipeline` — the full method surface.
 - [Type-Safe Client (Hive)](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/hive.md): End-to-end type safety with client proxies.
 
 
 ### Database & Security
 - [ORM (SQL)](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/orm.md): GORM-based database management.
+- [Lucid](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/lucid.md): The `*lucid.DB` handle — what the GORM alias means in practice.
+- [Migrations, Schema, Seeders & Factories](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/database_migrations.md): Migration shape, the schema builder's full column/modifier/index surface, seeders, factories.
+- [Encryption & Hashing](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/encryption_hashing.md): `hash` for passwords, `encryption` for reversible data, key generation and rotation.
+- [Shield](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/shield.md): Request guarding and the AI content guard.
+- [Health Checks](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/health.md): `app.Health`, custom checks, liveness vs readiness.
+- [Multi-Tenancy](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/multi_tenancy.md): Tenant resolution, isolation strategies, scoped database handles.
 - [NoSQL](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/nosql.md): MongoDB and Redis integration.
 - [Authentication](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/auth.md): Auth guards, tokens, and policies.
 - [CORS & Security](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/cors.md): Middleware for security.
@@ -41,6 +55,16 @@ Use this skill when:
 - [Cache](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/cache.md): Multi-driver caching and locks.
 - [Redis](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/redis.md): Direct Redis client — strings, hashes, lists, sets, pub/sub.
 - [Mail](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/mail.md): Unified mail API.
+- [Logger](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/logger.md): Structured zap logging, channels, per-request loggers, rotation.
+- [Metrics](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/metrics.md): Counters, gauges, histograms, Prometheus exposition, cardinality rules.
+- [Localisation](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/locale.md): Catalogues, `T`/`TCtx`/`TLocale`, per-request locale middleware.
+- [Storage & File Uploads](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/storage_uploads.md): Drivers, `UploadedFile`, validation, signed temporary URLs.
+- [Workflows](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/workflow.md): Durable multi-step orchestration — dependencies, retries, waits, signals.
+- [Feature Flags](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/feature_flags.md): Definition, per-user targeting, variants, route gates.
+- [Presence](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/presence.md): WebSocket channels that track who is in them.
+- [API Resources](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/api_resources.md): Model-to-JSON transformation layer.
+- [OpenAPI](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/openapi.md): Spec generation from the route table, plugin, and what is not inferred.
+- [Edge Functions](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/edge_functions.md): Pre-router interception — geo routing, A/B tests, maintenance, edge caching.
 
 - [Scheduler](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/scheduler.md): Recurring task management.
 - [Notification](file:///Users/yashkumar/Documents/Projects/nimbus/.agents/skills/nimbus_expert/notification.md): Multi-channel notifications.

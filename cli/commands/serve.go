@@ -17,6 +17,7 @@ import (
 
 	"github.com/CodeSyncr/nimbus/cli"
 	"github.com/CodeSyncr/nimbus/cli/ui"
+	"github.com/CodeSyncr/nimbus/internal/startupview"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 )
@@ -45,7 +46,13 @@ func (c *ServeCommand) Run(ctx *cli.Context) error {
 	}
 
 	ensureAirConfig(ctx.AppRoot)
-	printServeBanner(ctx.AppRoot, ctx)
+
+	// Say something immediately. Compiling, building assets and migrating can
+	// run for a long time before the app is ready to report itself, and an
+	// empty terminal for that whole stretch looks like a hang.
+	fmt.Fprint(ctx.Stdout, startupview.RenderLaunch(startupview.Launch{
+		Inertia: isInertiaApp(ctx.AppRoot),
+	}))
 
 	// Use Air for hot reload
 	airCmd := exec.Command("go", "run", "github.com/air-verse/air@v1.52.3")
@@ -204,24 +211,6 @@ func patchAirConfig(content, ext string) (string, bool) {
 	return content, content != orig
 }
 
-func printServeBanner(dir string, ctx *cli.Context) {
-	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("39"))
-	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
-	divider := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	label := lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Width(12)
-	value := lipgloss.NewStyle().Foreground(lipgloss.Color("39"))
-
-	fmt.Fprintln(ctx.Stdout)
-	fmt.Fprintf(ctx.Stdout, "  %s %s\n", title.Render("⚡ NIMBUS"), dim.Render("Dev Server"))
-	fmt.Fprintf(ctx.Stdout, "  %s\n", divider.Render("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"))
-	fmt.Fprintf(ctx.Stdout, "  %s%s %s\n", label.Render("Mode"), value.Render("development"), dim.Render("(hot reload)"))
-	fmt.Fprintf(ctx.Stdout, "  %s%s %s\n", label.Render("Watching"), value.Render(".go, .nimbus"), dim.Render("files"))
-	if isInertiaApp(dir) {
-		fmt.Fprintf(ctx.Stdout, "  %s%s %s\n", label.Render("Frontend"), value.Render("inertia/"), dim.Render("(HMR at localhost:5173)"))
-	}
-	fmt.Fprintln(ctx.Stdout)
-}
-
 func isInertiaApp(dir string) bool {
 	pkgPath := filepath.Join(dir, "package.json")
 	inertiaDir := filepath.Join(dir, "inertia")
@@ -295,18 +284,25 @@ func newAirFilter(out io.Writer, u *ui.UI) *airFilter {
 	return f
 }
 
+// maxLogLine bounds one line of app output. A line longer than this is split
+// rather than refused: bufio.Scanner reports ErrTooLong and stops, and a
+// scanner that stops here takes the rest of the session's output with it.
+const maxLogLine = 256 * 1024
+
 func (f *airFilter) readLoop(pr *io.PipeReader) {
-	scanner := bufio.NewScanner(pr)
-	scanner.Buffer(make([]byte, 64*1024), 64*1024)
-	for scanner.Scan() {
-		line := scanner.Text()
+	reader := bufio.NewReaderSize(pr, 64*1024)
+	for {
+		line, err := readLine(reader, maxLogLine)
+		if line == "" && err != nil {
+			return
+		}
 		if f.drop.MatchString(line) {
 			continue
 		}
 		trimmed := strings.TrimSpace(line)
 
 		// App emits this marker when it's ready to serve.
-		if strings.HasPrefix(trimmed, "__NIMBUS_READY__") {
+		if startupview.IsMarker(trimmed) {
 			f.stopSpinner()
 			f.showReady(trimmed)
 			atomic.StoreInt32(&f.state, 3)
@@ -340,6 +336,35 @@ func (f *airFilter) readLoop(pr *io.PipeReader) {
 				f.stopSpinner()
 			}
 			fmt.Fprintln(f.out, line)
+		}
+
+		if err != nil {
+			return
+		}
+	}
+}
+
+// readLine reads one line, giving back at most max bytes of it.
+//
+// An over-long line is truncated and its remainder discarded, so a single
+// enormous log entry costs that one line rather than every line after it.
+// The returned error is only reported once the line in hand has been handled.
+func readLine(r *bufio.Reader, max int) (string, error) {
+	var sb strings.Builder
+	for {
+		chunk, isPrefix, err := r.ReadLine()
+		if sb.Len() < max {
+			room := max - sb.Len()
+			if len(chunk) > room {
+				chunk = chunk[:room]
+			}
+			sb.Write(chunk)
+		}
+		if err != nil {
+			return sb.String(), err
+		}
+		if !isPrefix {
+			return sb.String(), nil
 		}
 	}
 }
@@ -385,29 +410,16 @@ func (f *airFilter) stopSpinner() {
 }
 
 func (f *airFilter) showReady(marker string) {
-	parts := strings.Split(marker, "|")
-	scheme, port, name, env, plugins := "http", "3000", "nimbus", "development", "0"
-	if len(parts) >= 6 {
-		scheme = parts[1]
-		port = parts[2]
-		name = parts[3]
-		env = parts[4]
-		plugins = parts[5]
+	// The app hands over its whole boot report; the CLI owns the terminal, so
+	// it draws the same view a direct `go run .` would have drawn itself.
+	info, ok := startupview.ParseMarker(marker)
+	if !ok {
+		// Better a raw line than nothing: the app said it was ready, and
+		// swallowing the message leaves the terminal looking hung.
+		fmt.Fprintln(f.out, marker)
+		return
 	}
-	url := fmt.Sprintf("%s://localhost:%s", scheme, port)
-
-	green := lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
-	bold := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15"))
-	cyan := lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Bold(true)
-	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
-	label := lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Width(10)
-
-	fmt.Fprintln(f.out)
-	fmt.Fprintf(f.out, "  %s  %s\n", green.Render("✓"), bold.Render(name+" is ready"))
-	fmt.Fprintln(f.out)
-	fmt.Fprintf(f.out, "  %s  %s%s\n", green.Render("➜"), label.Render("Local:"), cyan.Render(url))
-	fmt.Fprintf(f.out, "     %s%s %s %s\n", label.Render("Env:"), dim.Render(env), dim.Render("·"), dim.Render(plugins+" plugin(s)"))
-	fmt.Fprintln(f.out)
+	fmt.Fprint(f.out, startupview.Render(info))
 }
 
 func (f *airFilter) Write(p []byte) (int, error) {

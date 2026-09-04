@@ -12,7 +12,9 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 // ToolDefinition describes a tool schema exposed to the AI agent.
@@ -27,19 +29,79 @@ type ToolExecutor struct {
 	AppRoot string
 	// CommandTimeout bounds a single bash invocation.
 	CommandTimeout time.Duration
+
+	// ApproveCommand is consulted before running a command the policy flags
+	// as consequential (see command_policy.go). Returning false refuses the
+	// command; the model reads the refusal and can choose another route.
+	//
+	// Nil means no one can be asked: interactive callers must set it, and
+	// headless callers set AutoApprove instead. Leaving both unset fails
+	// closed, so a non-interactive run cannot silently `sudo` its way out of
+	// a problem.
+	ApproveCommand func(cmd, reason string) bool
+
+	// AutoApprove runs flagged commands without asking (nimbus ai --yes).
+	AutoApprove bool
+
+	// MaxCommandOutput caps the bytes of a command's output handed back to
+	// the model. Zero means the built-in cap, so a ToolExecutor built without
+	// settings is still bounded.
+	MaxCommandOutput int
+
+	// mode selects how much is decided without asking. See permission.go.
+	mode PermissionMode
+
+	// mu guards taint and reads. Read-only tools in one model turn run
+	// concurrently (see Agent.runToolCalls), and both of these are written
+	// from the tool path — the read cache on every delivered file, the taint
+	// on every result scanned for injected instructions.
+	mu sync.Mutex
+	// taint records untrusted content that tried to instruct the agent.
+	taint *taint
+
+	// reads remembers files already delivered in this conversation, so the
+	// same file is not sent again unchanged. See ReadFile.
+	reads map[string]readRecord
+
+	// GenerateImage draws an image through Nimbus Cloud. The CLI holds no
+	// provider keys, so this is injected by the command that owns the cloud
+	// client. Nil means the tool is not offered to the model at all, rather
+	// than offered and failing when called.
+	GenerateImage func(ctx context.Context, prompt, size, model string) ([]byte, string, error)
 }
+
+// readRecord is what was known about a file the last time it was read.
+type readRecord struct {
+	size       int64
+	modTime    time.Time
+	lines      int
+	suppressed int
+}
+
+// maxReadSuppressions is how many times a repeat read is answered with a
+// reminder before the content is sent again. A model that keeps asking has
+// usually lost the earlier result — through history trimming, say — and
+// refusing forever would strand it.
+const maxReadSuppressions = 2
 
 // Limits applied to tool output so a single result cannot blow the context.
 const (
-	maxReadLines       = 1500
-	maxReadBytes       = 160 * 1024
-	maxGrepMatches     = 100
-	maxGrepLineChars   = 300
-	maxGrepFileBytes   = 2 * 1024 * 1024
-	maxFindResults     = 200
-	maxListEntries     = 300
-	maxCommandOutput   = 16 * 1024
-	defaultCmdTimeout  = 120 * time.Second
+	maxReadLines = 1500
+	// maxReadBytes caps one read. At roughly four characters per token this is
+	// ~10k tokens: enough for any file worth reading whole, and small enough
+	// that a handful of reads cannot fill a 128k window on its own. It was
+	// 160KB, which made three reads sufficient to exhaust the context.
+	maxReadBytes      = 40 * 1024
+	maxGrepMatches    = 100
+	maxGrepLineChars  = 300
+	maxGrepFileBytes  = 2 * 1024 * 1024
+	maxFindResults    = 200
+	maxListEntries    = 300
+	maxCommandOutput  = 16 * 1024
+	defaultCmdTimeout = 120 * time.Second
+	// commandWaitDelay bounds how long Wait lingers on output pipes that a
+	// surviving child still holds open.
+	commandWaitDelay   = 3 * time.Second
 	skippedDirsPattern = ".git|node_modules|vendor|storage|.nimbus|tmp|dist|.next|__pycache__"
 )
 
@@ -61,8 +123,30 @@ func NewToolExecutor(appRoot string) *ToolExecutor {
 }
 
 // GetToolDefinitions returns the canonical tool schemas for the AI agent.
+// imageToolDefinition describes generate_image. It is only advertised when a
+// generator is wired up.
+func (t *ToolExecutor) imageToolDefinition() []ToolDefinition {
+	if t.GenerateImage == nil {
+		return nil
+	}
+	return []ToolDefinition{{
+		Name:        "generate_image",
+		Description: "Generate an image with AI and save it into the project. Use it for real artwork the page needs — a hero illustration, an og:image, an avatar, a texture — instead of leaving a placeholder or linking a stock photo. Give a detailed prompt describing subject, style, composition and palette. The file is written at the given path and the path is what you reference from HTML or CSS.",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"prompt": map[string]any{"type": "string", "description": "Detailed description of the image to draw."},
+				"path":   map[string]any{"type": "string", "description": "Where to write it, relative to the project root, e.g. public/images/hero.png"},
+				"size":   map[string]any{"type": "string", "description": "Optional pixel size or aspect ratio, e.g. 1024x1024 or 16:9."},
+			},
+			"required": []string{"prompt", "path"},
+		},
+	}}
+}
+
 func (t *ToolExecutor) GetToolDefinitions() []ToolDefinition {
-	return append(t.ReadOnlyToolDefinitions(), t.writeToolDefinitions()...)
+	tools := append(t.ReadOnlyToolDefinitions(), t.writeToolDefinitions()...)
+	return append(tools, t.imageToolDefinition()...)
 }
 
 // ReadOnlyToolDefinitions returns the tools that inspect the workspace
@@ -117,6 +201,18 @@ func (t *ToolExecutor) ReadOnlyToolDefinitions() []ToolDefinition {
 					"include": map[string]any{"type": "string", "description": "Optional file-name glob filter such as '*.go' or '*.html'."},
 				},
 				"required": []string{"pattern"},
+			},
+		},
+		{
+			Name:        "fetch_url",
+			Description: "Fetch a web page or file over http(s) and read it. Use it when the user gives a link, to look at a reference site before designing something like it, to read documentation or an API reference, or to check a page your own server is serving. format \"text\" (default) returns the readable text; format \"html\" returns the raw markup, which is what you want when studying how a page is built.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"url":    map[string]any{"type": "string", "description": "The URL to fetch."},
+					"format": map[string]any{"type": "string", "description": "\"text\" for readable content (default), \"html\" for raw markup."},
+				},
+				"required": []string{"url"},
 			},
 		},
 		{
@@ -199,7 +295,27 @@ func (t *ToolExecutor) writeToolDefinitions() []ToolDefinition {
 }
 
 // ExecuteTool runs the requested tool and returns output string and optional diff string.
+// SetPermissionMode selects how much runs without asking.
+func (t *ToolExecutor) SetPermissionMode(mode PermissionMode) { t.mode = mode }
+
+// PermissionMode reports the active mode, defaulting to auto.
+func (t *ToolExecutor) PermissionMode() PermissionMode {
+	if t.mode == "" {
+		return PermissionAuto
+	}
+	return t.mode
+}
+
 func (t *ToolExecutor) ExecuteTool(ctx context.Context, name string, args map[string]any) (output string, diff string, err error) {
+	// Every call is assessed before it runs: what it does, and whether it
+	// follows content that tried to instruct the agent. See permission.go.
+	// The bash family is assessed in runCommand instead, which also covers
+	// direct callers; checking here as well would prompt twice.
+	if !isBashTool(name) {
+		if err := t.Authorize(name, args); err != nil {
+			return "", "", err
+		}
+	}
 	switch name {
 	case "read_file", "read":
 		path, _ := args["path"].(string)
@@ -264,6 +380,23 @@ func (t *ToolExecutor) ExecuteTool(ctx context.Context, name string, args map[st
 		out, diff, err := t.DeleteFile(path)
 		return out, diff, err
 
+	case "fetch_url", "fetch", "web_fetch", "browse":
+		url := strArg(args, "url")
+		out, err := t.FetchURL(ctx, url, strArg(args, "format"))
+		if err == nil {
+			// A fetched page is the least trustworthy thing the agent reads.
+			t.noteUntrustedContent(url, out)
+		}
+		return out, "", err
+
+	case "generate_image", "create_image", "image":
+		out, err := t.CreateImage(ctx,
+			strArg(args, "prompt"),
+			strArg(args, "path"),
+			strArg(args, "size"),
+		)
+		return out, "", err
+
 	case "bash", "run_command", "command", "shell":
 		cmdStr, _ := args["command"].(string)
 		out, err := t.Bash(ctx, cmdStr)
@@ -272,6 +405,12 @@ func (t *ToolExecutor) ExecuteTool(ctx context.Context, name string, args map[st
 	default:
 		return "", "", fmt.Errorf("unknown tool: %s", name)
 	}
+}
+
+// strArg reads a string argument, tolerating a missing key.
+func strArg(args map[string]any, key string) string {
+	v, _ := args[key].(string)
+	return strings.TrimSpace(v)
 }
 
 func intArg(args map[string]any, key string) int {
@@ -288,6 +427,60 @@ func intArg(args map[string]any, key string) int {
 		return n
 	}
 	return 0
+}
+
+// repeatReadNotice reports whether this file has already been delivered
+// unchanged, and returns the reminder to send instead of the content.
+func (t *ToolExecutor) repeatReadNotice(relPath string) (string, bool) {
+	full, err := t.resolvePath(relPath)
+	if err != nil {
+		return "", false
+	}
+	info, err := os.Stat(full)
+	if err != nil || info.IsDir() {
+		return "", false
+	}
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	rec, seen := t.reads[full]
+	if !seen || rec.size != info.Size() || !rec.modTime.Equal(info.ModTime()) {
+		return "", false
+	}
+	if rec.suppressed >= maxReadSuppressions {
+		// It keeps asking; give it the file rather than leaving it stuck.
+		delete(t.reads, full)
+		return "", false
+	}
+
+	rec.suppressed++
+	t.reads[full] = rec
+	return fmt.Sprintf(
+		"%s is unchanged since you read it earlier in this conversation (%d lines). Its contents are already above — use them instead of reading it again.",
+		t.relPath(full), rec.lines), true
+}
+
+// rememberRead records a delivered file so an identical read can be answered
+// with a reminder.
+func (t *ToolExecutor) rememberRead(fullPath string, lines int) {
+	info, err := os.Stat(fullPath)
+	if err != nil {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.reads == nil {
+		t.reads = map[string]readRecord{}
+	}
+	t.reads[fullPath] = readRecord{size: info.Size(), modTime: info.ModTime(), lines: lines}
+}
+
+// forgetRead drops a file from the read cache after it changes on disk.
+func (t *ToolExecutor) forgetRead(fullPath string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	delete(t.reads, fullPath)
 }
 
 // resolvePath ensures path stays strictly inside AppRoot.
@@ -321,7 +514,16 @@ func (t *ToolExecutor) relPath(full string) string {
 }
 
 // ReadFile reads a whole file (subject to size limits).
+//
+// A file that has already been read in this conversation, and has not changed
+// since, comes back as a one-line reminder instead of its full contents. An
+// agent investigating a codebase re-reads the same files often — the earlier
+// output is still in the conversation, and sending it again wastes the context
+// it would need to finish the work.
 func (t *ToolExecutor) ReadFile(relPath string) (string, error) {
+	if notice, ok := t.repeatReadNotice(relPath); ok {
+		return notice, nil
+	}
 	return t.ReadFileRange(relPath, 0, 0)
 }
 
@@ -349,6 +551,10 @@ func (t *ToolExecutor) ReadFileRange(relPath string, startLine, endLine int) (st
 	lines := strings.Split(string(data), "\n")
 	total := len(lines)
 
+	if startLine <= 0 && endLine <= 0 {
+		t.rememberRead(fullPath, total)
+	}
+
 	if startLine > 0 || endLine > 0 {
 		if startLine <= 0 {
 			startLine = 1
@@ -362,26 +568,59 @@ func (t *ToolExecutor) ReadFileRange(relPath string, startLine, endLine int) (st
 		if endLine < startLine {
 			return "", fmt.Errorf("end_line must be >= start_line")
 		}
-		if endLine-startLine+1 > maxReadLines {
-			endLine = startLine + maxReadLines - 1
+		// A range is capped by bytes as well as lines: 1500 lines of minified
+		// JavaScript is not a bounded read.
+		shown := clampLines(lines[startLine-1:endLine], maxReadLines, maxReadBytes)
+		last := startLine + len(shown) - 1
+		note := ""
+		if last < endLine {
+			note = fmt.Sprintf(", truncated at line %d — request the next range to continue", last)
 		}
-		chunk := strings.Join(lines[startLine-1:endLine], "\n")
-		return fmt.Sprintf("File: %s (%d lines total, showing %d-%d)\n\n%s", relPath, total, startLine, endLine, chunk), nil
+		return fmt.Sprintf("File: %s (%d lines total, showing %d-%d%s)\n\n%s",
+			relPath, total, startLine, last, note, strings.Join(shown, "\n")), nil
 	}
 
 	if total > maxReadLines || len(data) > maxReadBytes {
-		shown := lines
-		if len(shown) > maxReadLines {
-			shown = shown[:maxReadLines]
-		}
-		chunk := strings.Join(shown, "\n")
-		if len(chunk) > maxReadBytes {
-			chunk = chunk[:maxReadBytes]
-		}
+		shown := clampLines(lines, maxReadLines, maxReadBytes)
 		return fmt.Sprintf("File: %s (%d lines total, TRUNCATED — showing lines 1-%d; use start_line/end_line to read more)\n\n%s",
-			relPath, total, len(shown), chunk), nil
+			relPath, total, len(shown), strings.Join(shown, "\n")), nil
 	}
 	return fmt.Sprintf("File: %s (%d lines)\n\n%s", relPath, total, string(data)), nil
+}
+
+// clampLines returns the leading lines that fit within both caps.
+//
+// Cutting on a line boundary rather than at a byte offset matters: a half line
+// reads as real content, and nothing in the result tells the model that what
+// it was handed is the first two thirds of a statement. The reported line
+// count is then the number actually returned, so "showing lines 1-N" stays
+// true after the byte cap bites — it previously reported the count from before
+// the byte truncation.
+func clampLines(lines []string, maxLines, maxBytes int) []string {
+	if len(lines) > maxLines {
+		lines = lines[:maxLines]
+	}
+	size := 0
+	for i, l := range lines {
+		size += len(l) + 1 // the newline that rejoins them
+		if size <= maxBytes {
+			continue
+		}
+		if i > 0 {
+			return lines[:i]
+		}
+		// A single line over the cap (minified source, an embedded blob) still
+		// has to yield something; cut it on a rune boundary.
+		cut := maxBytes
+		if cut > len(l) {
+			cut = len(l)
+		}
+		for cut > 0 && cut < len(l) && !utf8.RuneStart(l[cut]) {
+			cut--
+		}
+		return []string{l[:cut]}
+	}
+	return lines
 }
 
 func isBinary(data []byte) bool {
@@ -657,6 +896,10 @@ func (t *ToolExecutor) GrepFiltered(pattern, relPath, include string) (string, e
 }
 
 func (t *ToolExecutor) WriteFile(relPath, newContent string) (string, string, error) {
+	// The file is about to change, so anything remembered about it is stale.
+	if full, err := t.resolvePath(relPath); err == nil {
+		t.forgetRead(full)
+	}
 	fullPath, err := t.resolvePath(relPath)
 	if err != nil {
 		return "", "", err
@@ -692,6 +935,10 @@ func (t *ToolExecutor) EditFile(relPath, target, replacement string) (string, st
 // EditFileAll replaces the target substring; with replaceAll every
 // occurrence is replaced, otherwise the target must be unique.
 func (t *ToolExecutor) EditFileAll(relPath, target, replacement string, replaceAll bool) (string, string, error) {
+	// The file is about to change, so anything remembered about it is stale.
+	if full, err := t.resolvePath(relPath); err == nil {
+		t.forgetRead(full)
+	}
 	fullPath, err := t.resolvePath(relPath)
 	if err != nil {
 		return "", "", err
@@ -747,6 +994,10 @@ func (t *ToolExecutor) EditFileAll(relPath, target, replacement string, replaceA
 }
 
 func (t *ToolExecutor) DeleteFile(relPath string) (string, string, error) {
+	// The file is about to change, so anything remembered about it is stale.
+	if full, err := t.resolvePath(relPath); err == nil {
+		t.forgetRead(full)
+	}
 	fullPath, err := t.resolvePath(relPath)
 	if err != nil {
 		return "", "", err
@@ -762,6 +1013,62 @@ func (t *ToolExecutor) DeleteFile(relPath string) (string, string, error) {
 		return "", "", fmt.Errorf("remove error: %w", err)
 	}
 	return fmt.Sprintf("Deleted %s", relPath), diff, nil
+}
+
+// CreateImage draws an image through Nimbus Cloud and writes it into the
+// workspace, returning a one-line report for the model.
+//
+// The path goes through the same resolution as any write, so a generated image
+// cannot land outside the project.
+func (t *ToolExecutor) CreateImage(ctx context.Context, prompt, relPath, size string) (string, error) {
+	if t.GenerateImage == nil {
+		return "", errors.New("image generation is not available in this session")
+	}
+	prompt = strings.TrimSpace(prompt)
+	if prompt == "" {
+		return "", errors.New("prompt is required")
+	}
+	if strings.TrimSpace(relPath) == "" {
+		return "", errors.New("path is required: say where the image should be written")
+	}
+
+	fullPath, err := t.resolvePath(relPath)
+	if err != nil {
+		return "", err
+	}
+
+	data, model, err := t.GenerateImage(ctx, prompt, size, "")
+	if err != nil {
+		return "", err
+	}
+	if len(data) == 0 {
+		return "", errors.New("the image provider returned no data")
+	}
+
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(fullPath, data, 0o644); err != nil {
+		return "", err
+	}
+
+	report := fmt.Sprintf("Wrote %s (%s", t.relPath(fullPath), humanSize(len(data)))
+	if model != "" {
+		report += ", " + model
+	}
+	return report + "). Reference it by that path.", nil
+}
+
+// humanSize renders a byte count for a tool result line.
+func humanSize(n int) string {
+	switch {
+	case n >= 1<<20:
+		return fmt.Sprintf("%.1f MB", float64(n)/float64(1<<20))
+	case n >= 1<<10:
+		return fmt.Sprintf("%.0f KB", float64(n)/float64(1<<10))
+	default:
+		return fmt.Sprintf("%d B", n)
+	}
 }
 
 // Bash runs a shell command and returns its combined output. A failing
@@ -787,17 +1094,21 @@ func (t *ToolExecutor) runCommand(ctx context.Context, commandStr string) (strin
 		return "", false, errors.New("empty command")
 	}
 
-	// Security Sandbox: Disallow dangerous network/exfiltration or system wipe commands
-	lower := strings.ToLower(commandStr)
-	blockedTokens := []string{
-		"curl ", "wget ", "nc ", "netcat ", "ssh ", "scp ", "telnet ",
-		"rm -rf /", "rm -rf /*", "mkfs", "dd if=", ":(){ :|:& };:",
-		"format c:", "remove-item -recurse -force c:\\", "rd /s /q c:\\",
+	// Assessed here rather than in ExecuteTool, so a direct Bash call from
+	// anywhere in the CLI gets the same treatment. ExecuteTool skips the bash
+	// family for exactly this reason — checking twice would prompt twice.
+	if err := t.Authorize("bash", map[string]any{"command": commandStr}); err != nil {
+		return "", false, err
 	}
-	for _, tok := range blockedTokens {
-		if strings.Contains(lower, tok) {
-			return "", false, fmt.Errorf("security violation: command contains blocked token '%s'", strings.TrimSpace(tok))
-		}
+
+	// A command that backgrounds work cannot report anything useful: the shell
+	// returns immediately, the child keeps running unsupervised, and the agent
+	// has no way to see its output or stop it. Say so instead of stalling for
+	// the full timeout and leaving a stray process behind.
+	if isBackgrounded(commandStr) {
+		return "", false, errors.New(
+			"this command backgrounds a process with '&', which the agent cannot supervise. " +
+				"Run something that exits (start it, check it, stop it), or ask the user to run the server themselves")
 	}
 
 	timeout := t.CommandTimeout
@@ -813,8 +1124,22 @@ func (t *ToolExecutor) runCommand(ctx context.Context, commandStr string) (strin
 	cmd.Stdout = &outBuf
 	cmd.Stderr = &outBuf
 
+	// Stdout is a buffer, so Go pipes the output and Wait blocks until every
+	// writer closes that pipe. A command that leaves a child running —
+	// "node server.js &", "npm run dev &" — hands the pipe to a process that
+	// never exits, and Wait hangs long past the timeout while the orphan keeps
+	// running. Two guards:
+	//
+	//   Cancel      kills the whole process group when the deadline passes,
+	//               so children die with the shell rather than being orphaned;
+	//   WaitDelay   bounds how long Wait will wait for the pipes afterwards,
+	//               so the tool always returns.
+	isolateProcessGroup(cmd)
+	cmd.Cancel = func() error { return killProcessGroup(cmd) }
+	cmd.WaitDelay = commandWaitDelay
+
 	err := cmd.Run()
-	output := truncateOutput(outBuf.String(), maxCommandOutput)
+	output := truncateOutput(outBuf.String(), t.commandOutputCap())
 	if cmdCtx.Err() == context.DeadlineExceeded {
 		return fmt.Sprintf("Command timed out after %s:\n%s", timeout, output), false, nil
 	}
@@ -840,6 +1165,26 @@ func shellCommand(ctx context.Context, commandStr string) *exec.Cmd {
 	return exec.CommandContext(ctx, "sh", "-c", commandStr)
 }
 
+// isBackgrounded reports whether the command detaches work with a trailing "&".
+// A "&&" is a conjunction, not backgrounding, so it does not count.
+func isBackgrounded(command string) bool {
+	trimmed := strings.TrimSpace(command)
+	for _, segment := range strings.Split(trimmed, "\n") {
+		segment = strings.TrimSpace(segment)
+		if segment == "" {
+			continue
+		}
+		if strings.HasSuffix(segment, "&") && !strings.HasSuffix(segment, "&&") {
+			return true
+		}
+		// "node server.js & sleep 1" backgrounds mid-line.
+		if i := strings.Index(segment, "& "); i > 0 && !strings.Contains(segment[i-1:i+2], "&&") {
+			return true
+		}
+	}
+	return false
+}
+
 // truncateOutput keeps the head and tail of long output so both the start
 // of a failure and its final error lines survive.
 func truncateOutput(s string, max int) string {
@@ -849,6 +1194,14 @@ func truncateOutput(s string, max int) string {
 	head := max / 4
 	tail := max - head
 	return s[:head] + fmt.Sprintf("\n... [%d bytes truncated] ...\n", len(s)-max) + s[len(s)-tail:]
+}
+
+// commandOutputCap is the configured cap, or the built-in one.
+func (t *ToolExecutor) commandOutputCap() int {
+	if t.MaxCommandOutput > 0 {
+		return t.MaxCommandOutput
+	}
+	return maxCommandOutput
 }
 
 // GenerateUnifiedDiff builds a simple unified line diff.
