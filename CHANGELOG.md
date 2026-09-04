@@ -6,6 +6,18 @@ This project follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-09-04
+
+### Added
+- **Cashier Subscriptions & In-App Purchases (`plugins/cashier`):**
+  - Full subscription lifecycle support across Stripe (`gateways/stripe_subscriptions`) and Razorpay (`gateways/razorpay_subscriptions`).
+  - In-App Purchase (IAP) validation engine for Apple App Store and Google Play (`plugins/cashier/iap`).
+  - Customer info management, catalog management, product entitlements, refund handling, and Cloud Meter integration.
+- **Captcha Plugin (`plugins/captcha`):**
+  - Modular Captcha plugin with client verification, background solver server, and Turnstile/reCAPTCHA solver integration.
+- **Gemini Image Generation (`plugins/ai`):**
+  - First-class Gemini Image Generation provider integration (`gemini_image.go`).
+
 ### Changed
 - **`nimbus ai` now investigates before it acts.** Every request runs an explore → plan → execute → verify loop instead of generating files blind:
   - *Explore:* the agent reads the codebase with read-only tools (`find_files`, `grep`, `read_file` with line ranges, `list_dir` with depth) and writes a findings report before any plan is made.
