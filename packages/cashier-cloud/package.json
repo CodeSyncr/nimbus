@@ -19,14 +19,14 @@
     "dev": "tsup src/index.ts --format esm,cjs --dts --watch"
   },
   "author": "CodeSyncr",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "engines": {
     "node": ">=18"
   },
   "devDependencies": {
-    "@types/node": "^20.11.0",
+    "@types/node": "^26.5.0",
     "tsup": "^8.0.0",
-    "typescript": "^5.9.0"
+    "typescript": "^7.0.2"
   },
   "module": "./dist/index.js",
   "keywords": [
