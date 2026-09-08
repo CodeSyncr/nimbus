@@ -6,6 +6,47 @@ This project follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [1.6.1] - 2026-09-08
+
+### Breaking
+
+- **`plugins/cashier`: the Cashier Cloud key gate is gone, and three exported
+  identifiers went with it.** The subscription and in-app-purchase suite is
+  now always available, so nothing has to be unlocked before it works. If you
+  reference any of the following, your build will fail on upgrade:
+  - `cashier.ErrCloudRequired` — removed. Nothing returns it any more.
+  - `(*Cashier).CloudEnabled()` — removed. The suite is always enabled; delete
+    the check.
+  - `Config.CloudKey` and the `CASHIER_CLOUD_KEY` environment variable —
+    removed. Drop them from your config and environment; they are ignored.
+  - The plugin's info output no longer carries `cloud_enabled`.
+
+  This is a behaviour change in a patch release because it only ever *adds*
+  capability: code that previously hit `ErrCloudRequired` now works. The
+  removals above are the whole of the breakage.
+
+### Fixed
+
+- **`plugins/telescope`: streaming responses were buffered until the handler
+  returned.** The request watcher wraps the response writer to record status
+  and body, but its recorder did not implement `http.Flusher` — so it hid the
+  underlying writer's, and any Server-Sent Events or chunked response behind
+  the watcher was withheld until the request finished. Long-running streams
+  appeared to hang and then arrive all at once. The recorder now forwards
+  `Flush`, with a compile-time assertion so it cannot regress.
+- **`plugins/ai`: long generations were cut off after 60 seconds.** The
+  client timeout covers reading the entire response body, so a long streamed
+  answer or a multi-step tool run was killed mid-flight rather than merely
+  being slow to start. The default is now 600s.
+- **`plugins/ai`: the Gemini provider ignored the configured timeout**, using
+  a fixed 120s client regardless of `Config.Timeout`. It now honours the
+  configuration like every other provider.
+
+### Added
+
+- **`AI_TIMEOUT`** (seconds) overrides the AI client timeout, for deployments
+  whose model or agent runs need more or less headroom than the default.
+
 ## [1.6.0] - 2026-09-04
 
 ### Added

@@ -108,7 +108,7 @@ Add a file in `gateways/` implementing `contracts.PaymentGateway` (`Name`, `Crea
 
 ## RevenueCat-Style Subscriptions (Catalog, Lifecycle, CustomerInfo)
 
-**Product split:** the self-hosted plugin is free payments-only — gateways, charges, webhooks, refunds, basic paywall. The subscription suite below (catalog/entitlements, offerings, lifecycle, CustomerInfo) and Apple/Google IAP verification are **Cashier Cloud** features, activated by `Config.CloudKey` (or `CASHIER_CLOUD_KEY`) — the `cshr_live_…` key from the Cashier console. Without a key, `NewPlugin` ignores the subscription config fields, `Cashier.CloudEnabled()` is false, `CustomerInfo` returns empty, and features return `cashier.ErrCloudRequired` where applicable.
+**Product split:** everything in `plugins/cashier` is free and unmetered — gateways, charges, webhooks, refunds, the paywall, and the whole subscription suite below (catalog/entitlements, offerings, lifecycle, CustomerInfo). `Config.Catalog` and `Config.Lifecycle` are always built; there is no key to set. The paid product is **Cashier Cloud** — Apple/Google in-app purchases and Stripe for web, where Cloud holds the store credentials and is the source of truth for entitlements across platforms. It ships as its own iOS, Android and Web SDKs rather than as part of this plugin.
 
 Cashier replicates RevenueCat's core model: **products** (what a customer buys) unlock named **entitlements** (what they can access), the **lifecycle** turns payment facts into entitlement changes and canonical subscriber events, and **CustomerInfo** is the one aggregate answering "what does this subscriber have?".
 

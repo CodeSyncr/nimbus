@@ -42,6 +42,20 @@ func (r *responseRecorder) Write(b []byte) (int, error) {
 	return n, err
 }
 
+// Flush forwards to the underlying writer so streaming responses (SSE,
+// chunked) are not buffered for the lifetime of the request. Without this
+// the recorder hides the http.Flusher of the writer it wraps, and an SSE
+// endpoint behind the watcher goes silent until the handler returns.
+func (r *responseRecorder) Flush() {
+	if f, ok := r.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// The recorder must stay a Flusher: without it, streaming endpoints behind
+// the request watcher buffer until completion.
+var _ http.Flusher = (*responseRecorder)(nil)
+
 // RequestWatcher returns middleware that records HTTP requests.
 func (p *Plugin) RequestWatcher() router.Middleware {
 	return func(next router.HandlerFunc) router.HandlerFunc {

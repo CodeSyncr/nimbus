@@ -17,6 +17,16 @@ import (
 
 var geminiHTTPClient = &http.Client{Timeout: 120 * time.Second}
 
+// geminiClientFor returns a client honouring the configured timeout. A
+// fixed 120s ceiling silently truncated long streamed answers regardless
+// of AI_TIMEOUT.
+func geminiClientFor(cfg *Config) *http.Client {
+	if cfg != nil && cfg.Timeout > 0 {
+		return &http.Client{Timeout: time.Duration(cfg.Timeout) * time.Second}
+	}
+	return geminiHTTPClient
+}
+
 func newGeminiProvider(cfg *Config) (Provider, error) {
 	if cfg.GeminiKey == "" {
 		return nil, fmt.Errorf("ai: GEMINI_API_KEY is required for Gemini provider")
@@ -29,18 +39,30 @@ func newGeminiProvider(cfg *Config) (Provider, error) {
 		apiKey:     cfg.GeminiKey,
 		model:      model,
 		imageModel: cfg.ImageModel,
+		http:       geminiClientFor(cfg),
 	}, nil
 }
 
 type geminiProvider struct {
 	apiKey string
 	model  string
+	// http carries the configured timeout; nil falls back to the package client.
+	http *http.Client
 	// imageModel is the default for image generation, independent of the text
 	// model: pictures come from a different endpoint and usually a different
 	// model. See gemini_image.go.
 	imageModel string
 	// baseURL overrides the API root (tests point it at a local server).
 	baseURL string
+}
+
+// client returns the provider's HTTP client, falling back to the package
+// default for providers built before the timeout was configurable.
+func (p *geminiProvider) client() *http.Client {
+	if p.http != nil {
+		return p.http
+	}
+	return geminiHTTPClient
 }
 
 func (p *geminiProvider) Name() string { return "gemini" }
@@ -103,7 +125,7 @@ func (p *geminiProvider) Generate(ctx context.Context, req *GenerateRequest) (*G
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("x-goog-api-key", p.apiKey)
 
-	resp, err := geminiHTTPClient.Do(httpReq)
+	resp, err := p.client().Do(httpReq)
 	if err != nil {
 		return nil, err
 	}
@@ -154,7 +176,7 @@ func (p *geminiProvider) Stream(ctx context.Context, req *GenerateRequest) (*Str
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("x-goog-api-key", p.apiKey)
 
-	resp, err := geminiHTTPClient.Do(httpReq)
+	resp, err := p.client().Do(httpReq)
 	if err != nil {
 		return nil, err
 	}

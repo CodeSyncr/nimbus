@@ -50,19 +50,13 @@ func (ci CustomerInfo) HasEntitlement(id string) bool {
 }
 
 // CustomerInfo builds the aggregate for a subject from the paywall store and
-// the subscription mirror. Customer management is part of the Cashier Cloud
-// suite: on a payments-only facade (no cloud key, so no lifecycle) the
-// aggregate comes back empty.
+// the subscription mirror.
 func (c *Cashier) CustomerInfo(subject string) CustomerInfo {
 	info := CustomerInfo{
 		Subject:      subject,
 		RequestedAt:  time.Now(),
 		Entitlements: map[string]EntitlementInfo{},
 	}
-	if !c.CloudEnabled() {
-		return info
-	}
-
 	if c.Paywall != nil && c.Paywall.Store() != nil {
 		list, err := c.Paywall.Store().List(subject)
 		if err == nil {

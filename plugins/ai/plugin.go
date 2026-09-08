@@ -39,6 +39,7 @@ package ai
 import (
 	"fmt"
 	"os"
+	"strconv"
 
 	"github.com/CodeSyncr/nimbus"
 )
@@ -99,7 +100,11 @@ func (p *Plugin) loadConfig(app *nimbus.App) *Config {
 	cfg := &Config{
 		Provider: "openai",
 		Model:    "gpt-4o",
-		Timeout:  60,
+		// 60s was too low for agentic and streaming work: an http.Client
+		// timeout covers the whole response body, so a long streamed answer
+		// or a multi-step tool run was killed mid-flight. Override with
+		// AI_TIMEOUT (seconds).
+		Timeout: 600,
 		// 1024 was far too small for agent work: a single file write or a
 		// plan runs past it, and the response comes back cut mid-sentence
 		// with nothing to say it was truncated. Override with AI_MAX_TOKENS.
@@ -149,6 +154,11 @@ func (p *Plugin) loadConfig(app *nimbus.App) *Config {
 	}
 	if provider := os.Getenv("AI_PROVIDER"); provider != "" {
 		cfg.Provider = provider
+	}
+	if v := os.Getenv("AI_TIMEOUT"); v != "" {
+		if secs, err := strconv.Atoi(v); err == nil && secs > 0 {
+			cfg.Timeout = secs
+		}
 	}
 	if model := os.Getenv("AI_MODEL"); model != "" {
 		cfg.Model = model

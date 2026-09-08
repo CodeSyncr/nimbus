@@ -1,0 +1,50 @@
+{
+  "name": "@codesyncr/cashier-cloud",
+  "version": "0.1.0",
+  "description": "Cashier Cloud web SDK \u2014 subscriptions and entitlements across Apple, Google and Stripe, from the browser.",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm,cjs --dts --clean",
+    "type-check": "tsc --noEmit",
+    "test": "node --test test/*.test.mjs",
+    "dev": "tsup src/index.ts --format esm,cjs --dts --watch"
+  },
+  "author": "CodeSyncr",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.9.0"
+  },
+  "module": "./dist/index.js",
+  "keywords": [
+    "cashier",
+    "cashier-cloud",
+    "subscriptions",
+    "entitlements",
+    "paywall",
+    "in-app-purchase",
+    "storekit",
+    "play-billing",
+    "stripe"
+  ],
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}

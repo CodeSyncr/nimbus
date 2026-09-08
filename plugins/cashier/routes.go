@@ -17,13 +17,11 @@ func (p *Plugin) RegisterRoutes(r *router.Router) {
 	}
 
 	// The current offering — what a paywall should present right now — with
-	// each package's product resolved. Only mounted when the Cashier Cloud
-	// suite is active and offerings exist: a catalogue is public pricing,
-	// but an app that has none should not expose an empty endpoint.
-	if p.Cashier.Catalog != nil {
-		if _, ok := p.Cashier.Catalog.CurrentOffering(); ok {
-			r.Get(p.cfg.WebhookPrefix+"/offerings", p.offeringsHandler())
-		}
+	// each package's product resolved. Mounted only when offerings exist: a
+	// catalogue is public pricing, but an app that has none should not
+	// expose an empty endpoint.
+	if _, ok := p.Cashier.Catalog.CurrentOffering(); ok {
+		r.Get(p.cfg.WebhookPrefix+"/offerings", p.offeringsHandler())
 	}
 }
 

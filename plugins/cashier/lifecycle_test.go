@@ -277,36 +277,24 @@ func TestOfferingsCatalog(t *testing.T) {
 	}
 }
 
-func TestPluginWithoutCloudKeyIsPaymentsOnly(t *testing.T) {
-	t.Setenv("CASHIER_CLOUD_KEY", "")
+func TestSubscriptionSuiteIsAlwaysAvailable(t *testing.T) {
 	p := NewPlugin(Config{
-		Products:  []Product{{ID: "pro", Entitlements: []string{"premium"}}},
-		Offerings: []Offering{{ID: "default", Packages: []Package{{ID: "m", ProductID: "pro"}}}},
+		Products: []Product{{ID: "pro", Amount: 100, Entitlements: []string{"premium"}}},
 	})
-	if p.Cashier.CloudEnabled() {
-		t.Fatal("no cloud key must leave the subscription suite disabled")
+	if p.Cashier.Catalog == nil || p.Cashier.Lifecycle == nil {
+		t.Fatal("the catalogue and lifecycle must be built without any key")
 	}
-	if p.Cashier.Catalog != nil || p.Cashier.Lifecycle != nil {
-		t.Fatal("catalogue and lifecycle are Cashier Cloud features")
+	if _, ok := p.Cashier.Catalog.Product("pro"); !ok {
+		t.Fatal("configured products must be registered")
 	}
-	if info := p.Cashier.CustomerInfo("u1"); len(info.Entitlements) != 0 {
-		t.Fatal("customer management is a Cashier Cloud feature")
+	if _, err := p.Cashier.Lifecycle.RecordPurchase("u1", "pro", time.Now().Add(time.Hour), PeriodNormal); err != nil {
+		t.Fatalf("lifecycle must work unconditionally: %v", err)
 	}
-}
-
-func TestCloudKeyActivatesSubscriptionSuite(t *testing.T) {
-	p := NewPlugin(Config{
-		CloudKey:  "cshr_live_test",
-		Products:  []Product{{ID: "pro", Entitlements: []string{"premium"}}},
-		Offerings: []Offering{{ID: "default", Packages: []Package{{ID: "m", ProductID: "pro"}}}},
-	})
-	if !p.Cashier.CloudEnabled() {
-		t.Fatal("a cloud key must activate the subscription suite")
+	if !p.Cashier.HasAccess("u1", "premium") {
+		t.Fatal("a recorded purchase must grant its entitlement")
 	}
-	if got := p.Cashier.Catalog.EntitlementsFor("pro"); len(got) != 1 || got[0] != "premium" {
-		t.Fatalf("catalogue not seeded: %v", got)
-	}
-	if _, ok := p.Cashier.Catalog.CurrentOffering(); !ok {
-		t.Fatal("offerings not seeded")
+	info := p.Cashier.CustomerInfo("u1")
+	if !info.HasEntitlement("premium") {
+		t.Fatal("CustomerInfo must report the entitlement, not come back empty")
 	}
 }
