@@ -78,6 +78,11 @@ func (r *Relay) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		r.serveVisitor(w, req, name)
 		return
 	}
+	if strings.HasSuffix(host, "."+r.Domain) {
+		// "a.b.<domain>": under the tunnel suffix but not a tunnel label.
+		http.Error(w, "not a tunnel host", http.StatusNotFound)
+		return
+	}
 	switch req.URL.Path {
 	case ConnectPath:
 		r.connect(w, req)
