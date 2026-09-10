@@ -14,12 +14,27 @@ import (
 	"time"
 )
 
-func testAuthorizer(_ context.Context, token string) (Grant, error) {
+// testAuthorizer stands in for Nimbus Cloud: "pro" may use custom names and
+// owns the reservation "myapp"; "rival" is Pro but owns nothing.
+func testAuthorizer(_ context.Context, token, want string) (Grant, error) {
 	switch token {
 	case "free":
+		if want != "" {
+			return Grant{}, &AuthError{Status: http.StatusForbidden, Message: "custom subdomains need a Pro plan"}
+		}
 		return Grant{UserID: 1, Plan: "free", MaxTunnels: 1, SessionTTLSeconds: 3600}, nil
-	case "pro":
-		return Grant{UserID: 2, Plan: "pro", MaxTunnels: 3, CustomSubdomain: true}, nil
+	case "pro", "rival":
+		g := Grant{UserID: 2, Plan: "pro", MaxTunnels: 3, CustomSubdomain: true}
+		if token == "rival" {
+			g.UserID = 3
+		}
+		if want != "" {
+			if want == "myapp" && token != "pro" {
+				return Grant{}, &AuthError{Status: http.StatusConflict, Message: "myapp is reserved by another account"}
+			}
+			g.Subdomain = want
+		}
+		return g, nil
 	}
 	return Grant{}, ErrUnauthorized
 }
@@ -132,6 +147,26 @@ func TestTunnelProxiesRequests(t *testing.T) {
 	}
 }
 
+// A reserved name is published verbatim, every session.
+func TestReservedSubdomainIsStable(t *testing.T) {
+	_, relaySrv := startRelay(t)
+	backend := startBackend(t)
+	for i := 0; i < 2; i++ {
+		sess, _ := connect(t, relaySrv, backend, "pro", "myapp", false)
+		if sess.URL != "https://myapp.tunnel.test" {
+			t.Fatalf("run %d: got %q", i, sess.URL)
+		}
+		if err := sess.Close(); err != nil {
+			t.Fatal(err)
+		}
+		// Wait for the relay to free the name before reconnecting.
+		deadline := time.Now().Add(3 * time.Second)
+		for relayActive(relaySrv) != 0 && time.Now().Before(deadline) {
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+}
+
 func TestParentDomainCookiesStripped(t *testing.T) {
 	_, relaySrv := startRelay(t)
 	backend := startBackend(t)
@@ -195,6 +230,10 @@ func TestRejections(t *testing.T) {
 	if ce := try("pro", "Bad_Name!"); ce.Status != http.StatusBadRequest {
 		t.Fatalf("invalid name: %+v", ce)
 	}
+	// A reservation belongs to one account, whether or not it is connected.
+	if ce := try("rival", "myapp"); ce.Status != http.StatusConflict {
+		t.Fatalf("another account's reservation: %+v", ce)
+	}
 
 	// Name clash and per-account limit.
 	first, _ := connect(t, relaySrv, backend, "pro", "taken", false)
@@ -250,6 +289,18 @@ func TestRelayRootAndHealth(t *testing.T) {
 			t.Fatalf("%s: status %d, health checks need 200", path, resp.StatusCode)
 		}
 	}
+}
+
+// relayActive reads the relay's health line ("ok <n>").
+func relayActive(srv *httptest.Server) int {
+	resp, err := http.Get(srv.URL + "/healthz")
+	if err != nil {
+		return -1
+	}
+	defer resp.Body.Close()
+	var n int
+	_, _ = fmt.Fscanf(resp.Body, "ok %d", &n)
+	return n
 }
 
 func TestNormalizeRelayURL(t *testing.T) {

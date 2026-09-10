@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"regexp"
 	"time"
 
@@ -40,6 +41,11 @@ const (
 type Grant struct {
 	UserID uint   `json:"user_id"`
 	Plan   string `json:"plan"`
+	// Subdomain, when set, is the name the relay MUST publish under: the
+	// authorizer resolved the agent's request against its own records (a
+	// reservation the account owns). It is authoritative — the relay does
+	// not second-guess it — and empty when no name was requested.
+	Subdomain string `json:"subdomain"`
 	// MaxTunnels caps concurrent tunnels for the account (0 = one).
 	MaxTunnels int `json:"max_tunnels"`
 	// SessionTTLSeconds closes the tunnel after this long (0 = unlimited).
@@ -50,6 +56,24 @@ type Grant struct {
 
 // ErrUnauthorized is returned by an Authorizer for an unknown token.
 var ErrUnauthorized = errors.New("invalid or expired token")
+
+// AuthError is a rejection from an Authorizer that carries the HTTP status
+// the relay should report, so the CLI can tell "your token expired" from
+// "that name belongs to another account" and stop retrying either way.
+type AuthError struct {
+	Status  int
+	Message string
+}
+
+func (e *AuthError) Error() string { return e.Message }
+
+// Unwrap lets errors.Is(err, ErrUnauthorized) keep working for 401s.
+func (e *AuthError) Unwrap() error {
+	if e.Status == http.StatusUnauthorized {
+		return ErrUnauthorized
+	}
+	return nil
+}
 
 var subdomainRe = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])?$`)
 

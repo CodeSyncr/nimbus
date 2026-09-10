@@ -16,9 +16,14 @@ import (
 	"github.com/hashicorp/yamux"
 )
 
-// Authorizer resolves a CLI token to a Grant. Return ErrUnauthorized (or an
-// error wrapping it) for a bad token; any other error is a relay-side fault.
-type Authorizer func(ctx context.Context, token string) (Grant, error)
+// Authorizer resolves a CLI token, plus the subdomain the agent asked for
+// ("" for none), to a Grant. Return an *AuthError to reject the agent with a
+// specific status; ErrUnauthorized is treated as 401. Any other error is a
+// relay-side fault and answered with 502.
+//
+// An authorizer that keeps reservations answers a name request by setting
+// Grant.Subdomain, which the relay then publishes verbatim.
+type Authorizer func(ctx context.Context, token, subdomain string) (Grant, error)
 
 // Relay is the public side of a tunnel. It serves two kinds of traffic on
 // one listener: agent connections on ConnectPath (any host that is not a
@@ -143,17 +148,26 @@ func (r *Relay) connect(w http.ResponseWriter, req *http.Request) {
 		writeJSONError(w, http.StatusUnauthorized, "missing token: run 'nimbus login'")
 		return
 	}
-	grant, err := r.Authorize(req.Context(), token)
+	want := strings.ToLower(strings.TrimSpace(req.Header.Get(HeaderSubdomain)))
+	if want != "" && !ValidSubdomain(want) {
+		writeJSONError(w, http.StatusBadRequest, "subdomain must be 1-40 lowercase letters, digits or hyphens")
+		return
+	}
+	grant, err := r.Authorize(req.Context(), token, want)
 	if err != nil {
-		if errors.Is(err, ErrUnauthorized) {
+		var ae *AuthError
+		switch {
+		case errors.As(err, &ae):
+			writeJSONError(w, ae.Status, ae.Message)
+		case errors.Is(err, ErrUnauthorized):
 			writeJSONError(w, http.StatusUnauthorized, err.Error())
-		} else {
+		default:
 			writeJSONError(w, http.StatusBadGateway, "could not verify the token with Nimbus Cloud: "+err.Error())
 		}
 		return
 	}
 
-	t, status, err := r.reserve(grant, strings.ToLower(strings.TrimSpace(req.Header.Get(HeaderSubdomain))))
+	t, status, err := r.reserve(grant, want)
 	if err != nil {
 		writeJSONError(w, status, err.Error())
 		return
@@ -209,13 +223,12 @@ func (r *Relay) connect(w http.ResponseWriter, req *http.Request) {
 // reserve picks (or validates) the label and counts it against the account.
 // The returned session is registered but not ready until connect fills it.
 func (r *Relay) reserve(g Grant, want string) (t *tunnelSession, status int, err error) {
-	if want != "" {
-		if !g.CustomSubdomain {
-			return nil, http.StatusForbidden, errors.New("custom subdomains need a Pro plan; drop --subdomain for a random one")
-		}
-		if !ValidSubdomain(want) {
-			return nil, http.StatusBadRequest, errors.New("subdomain must be 1-40 lowercase letters, digits or hyphens")
-		}
+	// A name the authorizer resolved wins: it owns the namespace across
+	// sessions, where this relay only knows what is connected right now.
+	if g.Subdomain != "" {
+		want = g.Subdomain
+	} else if want != "" && !g.CustomSubdomain {
+		return nil, http.StatusForbidden, errors.New("custom subdomains need a Pro plan; drop --subdomain for a random one")
 	}
 	maxTunnels := g.MaxTunnels
 	if maxTunnels <= 0 {

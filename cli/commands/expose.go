@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -31,6 +32,7 @@ func init() {
 // Nimbus tunnel relay: `nimbus expose [port]`.
 type ExposeCommand struct {
 	subdomain string
+	random    bool
 	keepHost  bool
 	relay     string
 	host      string
@@ -43,7 +45,8 @@ func (c *ExposeCommand) Description() string {
 func (c *ExposeCommand) Args() int { return -1 }
 
 func (c *ExposeCommand) Flags(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&c.subdomain, "subdomain", "", "Reserve a fixed name, e.g. --subdomain myapp (Pro)")
+	cmd.Flags().StringVar(&c.subdomain, "subdomain", "", "Reserve a fixed name, e.g. --subdomain myapp (Pro). Remembered per project afterwards")
+	cmd.Flags().BoolVar(&c.random, "random", false, "Ignore this project's remembered name and take a random one")
 	cmd.Flags().BoolVar(&c.keepHost, "keep-host", false, "Forward the public Host header instead of the local address")
 	cmd.Flags().StringVar(&c.relay, "relay", "", "Relay to connect through (default $NIMBUS_TUNNEL_URL or "+DefaultRelayURL+")")
 	cmd.Flags().StringVar(&c.host, "host", "127.0.0.1", "Local host the app listens on")
@@ -72,12 +75,27 @@ func (c *ExposeCommand) Run(ctx *cli.Context) error {
 		return err
 	}
 
+	// A reservation is the point of --subdomain: reuse it automatically so
+	// the URL a webhook or an OAuth callback points at survives restarts.
+	want := strings.ToLower(strings.TrimSpace(c.subdomain))
+	reused := false
+	switch {
+	case c.random:
+		want = ""
+		forgetSubdomain(ctx.AppRoot)
+	case want == "":
+		if remembered := rememberedSubdomain(ctx.AppRoot); remembered != "" {
+			want = remembered
+			reused = true
+		}
+	}
+
 	local := net.JoinHostPort(c.host, strconv.Itoa(port))
 	agent := &tunnel.Agent{
 		RelayURL:  relayURL,
 		Token:     creds.AccessToken,
 		LocalAddr: local,
-		Subdomain: strings.ToLower(strings.TrimSpace(c.subdomain)),
+		Subdomain: want,
 		KeepHost:  c.keepHost,
 		OnRequest: func(r tunnel.RequestLog) {
 			fmt.Fprintf(ctx.Stdout, "%s  %-7s %s  %s  %s\n",
@@ -103,6 +121,12 @@ func (c *ExposeCommand) Run(ctx *cli.Context) error {
 			var ce *tunnel.ConnectError
 			if errors.As(err, &ce) && ce.Permanent() {
 				ctx.UI.Errorf("Relay refused the tunnel: %s", ce.Message)
+				if reused && ce.Status == http.StatusConflict {
+					// The remembered name is no longer usable by this
+					// account; do not keep failing on it every run.
+					forgetSubdomain(ctx.AppRoot)
+					ctx.UI.Infof("Forgot the remembered name for this project. Run 'nimbus expose' again for a fresh URL.")
+				}
 				return err
 			}
 			ctx.UI.Warnf("Could not reach the relay (%v); retrying in %s", err, backoff)
@@ -116,7 +140,11 @@ func (c *ExposeCommand) Run(ctx *cli.Context) error {
 		}
 		backoff = 2 * time.Second
 		if first {
-			c.banner(ctx, sess, local, creds)
+			if name := subdomainOfURL(sess.URL); name != "" && want != "" {
+				// Only a name the account actually holds is worth keeping.
+				rememberSubdomain(ctx.AppRoot, name)
+			}
+			c.banner(ctx, sess, local, creds, reused)
 			first = false
 		} else {
 			ctx.UI.Successf("Reconnected: %s", sess.URL)
@@ -143,8 +171,11 @@ func (c *ExposeCommand) Run(ctx *cli.Context) error {
 	}
 }
 
-func (c *ExposeCommand) banner(ctx *cli.Context, sess *tunnel.Session, local string, creds *auth.Credentials) {
+func (c *ExposeCommand) banner(ctx *cli.Context, sess *tunnel.Session, local string, creds *auth.Credentials, reused bool) {
 	body := fmt.Sprintf("Public URL   %s\nForwarding   → http://%s\nAccount      %s (%s)", sess.URL, local, creds.Email, planName(creds))
+	if reused {
+		body += "\n             reserved for this project (--random for a one-off URL)"
+	}
 	if !sess.Expires.IsZero() {
 		body += fmt.Sprintf("\nSession ends %s", sess.Expires.Local().Format("15:04"))
 	}
