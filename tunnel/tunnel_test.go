@@ -238,6 +238,20 @@ func TestOfflineAndUnknownHosts(t *testing.T) {
 	}
 }
 
+func TestRelayRootAndHealth(t *testing.T) {
+	_, relaySrv := startRelay(t)
+	for _, path := range []string{"/", "/healthz"} {
+		resp, err := http.Get(relaySrv.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("%s: status %d, health checks need 200", path, resp.StatusCode)
+		}
+	}
+}
+
 func TestNormalizeRelayURL(t *testing.T) {
 	cases := map[string]string{
 		"tunnel.nimbusgo.space":         "wss://tunnel.nimbusgo.space/connect",

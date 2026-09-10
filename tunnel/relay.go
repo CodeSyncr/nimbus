@@ -83,6 +83,11 @@ func (r *Relay) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		r.connect(w, req)
 	case "/healthz":
 		fmt.Fprintf(w, "ok %d\n", r.Active())
+	case "/":
+		// 200 on the root so default container health checks (which probe
+		// "/") pass; otherwise the edge proxy drops the relay as unhealthy.
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		fmt.Fprintf(w, "nimbus tunnel relay: run `nimbus expose` to publish a local port on *.%s\n", r.Domain)
 	default:
 		http.Error(w, "nimbus tunnel relay", http.StatusNotFound)
 	}
