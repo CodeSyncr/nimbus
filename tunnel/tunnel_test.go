@@ -303,6 +303,19 @@ func relayActive(srv *httptest.Server) int {
 	return n
 }
 
+func TestValidSubdomain(t *testing.T) {
+	for _, ok := range []string{"a", "ab", "a1", "myapp", "my-app-2", "brisk-otter-3f9a", strings.Repeat("a", 40)} {
+		if !ValidSubdomain(ok) {
+			t.Errorf("ValidSubdomain(%q) = false, want true", ok)
+		}
+	}
+	for _, bad := range []string{"", "-lead", "trail-", "UPPER", "has space", "under_score", "dot.ted", strings.Repeat("a", 41)} {
+		if ValidSubdomain(bad) {
+			t.Errorf("ValidSubdomain(%q) = true, want false", bad)
+		}
+	}
+}
+
 func TestNormalizeRelayURL(t *testing.T) {
 	cases := map[string]string{
 		"tunnel.nimbusgo.space":         "wss://tunnel.nimbusgo.space/connect",

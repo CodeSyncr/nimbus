@@ -75,7 +75,8 @@ func (e *AuthError) Unwrap() error {
 	return nil
 }
 
-var subdomainRe = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])?$`)
+// 1-40 characters: a letter or digit at each end, hyphens allowed inside.
+var subdomainRe = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$`)
 
 // ValidSubdomain reports whether name is usable as a tunnel label.
 func ValidSubdomain(name string) bool { return subdomainRe.MatchString(name) }
