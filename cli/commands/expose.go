@@ -21,7 +21,7 @@ import (
 )
 
 // DefaultRelayURL is the hosted relay; NIMBUS_TUNNEL_URL or --relay override it.
-const DefaultRelayURL = "wss://tunnel.nimbusgo.live/connect"
+const DefaultRelayURL = "wss://tunnel.nimbusgo.space/connect"
 
 func init() {
 	cli.RegisterCommand(&ExposeCommand{})

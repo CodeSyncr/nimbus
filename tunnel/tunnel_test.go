@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -34,6 +35,11 @@ func startRelay(t *testing.T) (*Relay, *httptest.Server) {
 func startBackend(t *testing.T) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/cookies" {
+			w.Header().Add("Set-Cookie", "own=1; Path=/")
+			w.Header().Add("Set-Cookie", "scoped=1; Path=/; Domain="+r.Header.Get("X-Forwarded-Host"))
+			w.Header().Add("Set-Cookie", "parent=1; Path=/; Domain=.tunnel.test")
+		}
 		if r.URL.Path == "/fail" {
 			w.WriteHeader(http.StatusTeapot)
 		}
@@ -79,9 +85,16 @@ func visit(t *testing.T, relay *httptest.Server, publicURL, path string) (*http.
 func TestTunnelProxiesRequests(t *testing.T) {
 	_, relaySrv := startRelay(t)
 	backend := startBackend(t)
-	var logged []RequestLog
+	var (
+		mu     sync.Mutex
+		logged []RequestLog
+	)
 	sess, agent := connect(t, relaySrv, backend, "free", "", false)
-	agent.OnRequest = func(r RequestLog) { logged = append(logged, r) }
+	agent.OnRequest = func(r RequestLog) {
+		mu.Lock()
+		defer mu.Unlock()
+		logged = append(logged, r)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go func() { _ = sess.Serve(ctx) }()
@@ -112,8 +125,28 @@ func TestTunnelProxiesRequests(t *testing.T) {
 	if resp.StatusCode != http.StatusTeapot {
 		t.Fatalf("status passthrough: got %d", resp.StatusCode)
 	}
+	mu.Lock()
+	defer mu.Unlock()
 	if len(logged) != 2 || logged[1].Status != http.StatusTeapot || logged[1].Path != "/fail" {
 		t.Fatalf("request log: %+v", logged)
+	}
+}
+
+func TestParentDomainCookiesStripped(t *testing.T) {
+	_, relaySrv := startRelay(t)
+	backend := startBackend(t)
+	sess, _ := connect(t, relaySrv, backend, "free", "", false)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = sess.Serve(ctx) }()
+
+	resp, _ := visit(t, relaySrv, sess.URL, "/cookies")
+	var names []string
+	for _, c := range resp.Cookies() {
+		names = append(names, c.Name)
+	}
+	if strings.Join(names, ",") != "own,scoped" {
+		t.Fatalf("cookies passed through: %v (parent-domain cookie must be dropped)", names)
 	}
 }
 
@@ -207,10 +240,10 @@ func TestOfflineAndUnknownHosts(t *testing.T) {
 
 func TestNormalizeRelayURL(t *testing.T) {
 	cases := map[string]string{
-		"tunnel.nimbusgo.live":         "wss://tunnel.nimbusgo.live/connect",
-		"https://tunnel.nimbusgo.live": "wss://tunnel.nimbusgo.live/connect",
-		"http://localhost:8090/":       "ws://localhost:8090/connect",
-		"wss://relay.example/custom":   "wss://relay.example/custom",
+		"tunnel.nimbusgo.space":         "wss://tunnel.nimbusgo.space/connect",
+		"https://tunnel.nimbusgo.space": "wss://tunnel.nimbusgo.space/connect",
+		"http://localhost:8090/":        "ws://localhost:8090/connect",
+		"wss://relay.example/custom":    "wss://relay.example/custom",
 	}
 	for in, want := range cases {
 		got, err := NormalizeRelayURL(in)

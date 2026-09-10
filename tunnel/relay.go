@@ -25,7 +25,7 @@ type Authorizer func(ctx context.Context, token string) (Grant, error)
 // tunnel subdomain) and visitor requests on "<name>.<Domain>".
 type Relay struct {
 	// Domain is the suffix under which tunnels are published, e.g.
-	// "nimbusgo.live" publishes "brisk-otter-3f9a.nimbusgo.live".
+	// "tunnel.nimbusgo.space" publishes "brisk-otter-3f9a.tunnel.nimbusgo.space".
 	Domain    string
 	Authorize Authorizer
 	// Logf receives one line per tunnel open/close (nil = silent).
@@ -38,9 +38,12 @@ type Relay struct {
 }
 
 type tunnelSession struct {
-	id      string
-	name    string
-	userID  uint
+	id     string
+	name   string
+	userID uint
+	// ready is closed once sess and proxy are set, or the connect failed
+	// (proxy stays nil). Visitors who arrive in between wait on it.
+	ready   chan struct{}
 	sess    *yamux.Session
 	proxy   *httputil.ReverseProxy
 	expires time.Time
@@ -102,7 +105,17 @@ func (r *Relay) serveVisitor(w http.ResponseWriter, req *http.Request, name stri
 	r.mu.Lock()
 	t := r.tunnels[name]
 	r.mu.Unlock()
-	if t == nil {
+	if t != nil {
+		select {
+		case <-t.ready:
+		case <-time.After(10 * time.Second):
+			http.Error(w, "tunnel is still connecting", http.StatusServiceUnavailable)
+			return
+		case <-req.Context().Done():
+			return
+		}
+	}
+	if t == nil || t.proxy == nil {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusNotFound)
 		fmt.Fprintf(w, offlinePage, name+"."+r.Domain)
@@ -130,11 +143,12 @@ func (r *Relay) connect(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	name, status, err := r.reserve(grant, strings.ToLower(strings.TrimSpace(req.Header.Get(HeaderSubdomain))))
+	t, status, err := r.reserve(grant, strings.ToLower(strings.TrimSpace(req.Header.Get(HeaderSubdomain))))
 	if err != nil {
 		writeJSONError(w, status, err.Error())
 		return
 	}
+	name := t.name
 
 	var expires time.Time
 	if grant.SessionTTLSeconds > 0 {
@@ -147,7 +161,8 @@ func (r *Relay) connect(w http.ResponseWriter, req *http.Request) {
 	}
 	ws, err := r.upgrader.Upgrade(w, req, hdr)
 	if err != nil {
-		r.release(name, grant.UserID)
+		r.release(t)
+		close(t.ready)
 		return // Upgrade already wrote the error
 	}
 
@@ -155,22 +170,17 @@ func (r *Relay) connect(w http.ResponseWriter, req *http.Request) {
 	// yamux client; the agent accepts them as a listener.
 	sess, err := yamux.Client(newWSConn(ws), yamuxConfig())
 	if err != nil {
-		r.release(name, grant.UserID)
+		r.release(t)
+		close(t.ready)
 		_ = ws.Close()
 		return
 	}
 
-	t := &tunnelSession{
-		id:      RandomSubdomain(),
-		name:    name,
-		userID:  grant.UserID,
-		sess:    sess,
-		expires: expires,
-	}
+	t.id = RandomSubdomain()
+	t.sess = sess
+	t.expires = expires
 	t.proxy = r.newProxy(t)
-	r.mu.Lock()
-	r.tunnels[name] = t
-	r.mu.Unlock()
+	close(t.ready)
 	r.logf("tunnel open  %s.%s user=%d plan=%s", name, r.Domain, grant.UserID, grant.Plan)
 
 	var timer *time.Timer
@@ -181,27 +191,20 @@ func (r *Relay) connect(w http.ResponseWriter, req *http.Request) {
 	if timer != nil {
 		timer.Stop()
 	}
-	r.mu.Lock()
-	if r.tunnels[name] == t {
-		delete(r.tunnels, name)
-		r.byUser[t.userID]--
-		if r.byUser[t.userID] <= 0 {
-			delete(r.byUser, t.userID)
-		}
-	}
-	r.mu.Unlock()
+	r.release(t)
 	_ = ws.Close()
 	r.logf("tunnel close %s.%s user=%d", name, r.Domain, grant.UserID)
 }
 
 // reserve picks (or validates) the label and counts it against the account.
-func (r *Relay) reserve(g Grant, want string) (name string, status int, err error) {
+// The returned session is registered but not ready until connect fills it.
+func (r *Relay) reserve(g Grant, want string) (t *tunnelSession, status int, err error) {
 	if want != "" {
 		if !g.CustomSubdomain {
-			return "", http.StatusForbidden, errors.New("custom subdomains need a Pro plan; drop --subdomain for a random one")
+			return nil, http.StatusForbidden, errors.New("custom subdomains need a Pro plan; drop --subdomain for a random one")
 		}
 		if !ValidSubdomain(want) {
-			return "", http.StatusBadRequest, errors.New("subdomain must be 1-40 lowercase letters, digits or hyphens")
+			return nil, http.StatusBadRequest, errors.New("subdomain must be 1-40 lowercase letters, digits or hyphens")
 		}
 	}
 	maxTunnels := g.MaxTunnels
@@ -211,11 +214,12 @@ func (r *Relay) reserve(g Grant, want string) (name string, status int, err erro
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.byUser[g.UserID] >= maxTunnels {
-		return "", http.StatusForbidden, fmt.Errorf("this account already has %d open tunnel(s); close one or upgrade", r.byUser[g.UserID])
+		return nil, http.StatusForbidden, fmt.Errorf("this account already has %d open tunnel(s); close one or upgrade", r.byUser[g.UserID])
 	}
+	var name string
 	if want != "" {
 		if _, taken := r.tunnels[want]; taken {
-			return "", http.StatusConflict, fmt.Errorf("%s.%s is already in use", want, r.Domain)
+			return nil, http.StatusConflict, fmt.Errorf("%s.%s is already in use", want, r.Domain)
 		}
 		name = want
 	} else {
@@ -226,19 +230,23 @@ func (r *Relay) reserve(g Grant, want string) (name string, status int, err erro
 			}
 		}
 	}
-	// Hold the slot with a placeholder until the upgrade completes.
-	r.tunnels[name] = &tunnelSession{name: name, userID: g.UserID, proxy: offlineProxy}
+	t = &tunnelSession{name: name, userID: g.UserID, ready: make(chan struct{})}
+	r.tunnels[name] = t
 	r.byUser[g.UserID]++
-	return name, 0, nil
+	return t, 0, nil
 }
 
-func (r *Relay) release(name string, userID uint) {
+// release frees the label and the account slot held by t.
+func (r *Relay) release(t *tunnelSession) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	delete(r.tunnels, name)
-	r.byUser[userID]--
-	if r.byUser[userID] <= 0 {
-		delete(r.byUser, userID)
+	if r.tunnels[t.name] != t {
+		return
+	}
+	delete(r.tunnels, t.name)
+	r.byUser[t.userID]--
+	if r.byUser[t.userID] <= 0 {
+		delete(r.byUser, t.userID)
 	}
 }
 
@@ -273,6 +281,10 @@ func (r *Relay) newProxy(t *tunnelSession) *httputil.ReverseProxy {
 				pr.Out.Header.Set("X-Forwarded-For", prior+", "+clientIP(pr.In))
 			}
 		},
+		ModifyResponse: func(resp *http.Response) error {
+			stripParentDomainCookies(resp, t.name+"."+r.Domain)
+			return nil
+		},
 		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {
 			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 			w.WriteHeader(http.StatusBadGateway)
@@ -281,20 +293,39 @@ func (r *Relay) newProxy(t *tunnelSession) *httputil.ReverseProxy {
 	}
 }
 
-// offlineProxy answers for a slot that is reserved but not yet connected.
-var offlineProxy = &httputil.ReverseProxy{
-	Rewrite: func(*httputil.ProxyRequest) {},
-	Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
-		return nil, errors.New("tunnel is still connecting")
-	}),
-	ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
-	},
+// stripParentDomainCookies drops Set-Cookie headers that carry a Domain
+// attribute other than the tunnel's own host. Tunnels live under the
+// platform's domain, so an exposed app that sets Domain=.nimbusgo.space
+// (a Nimbus app with APP_COOKIE_DOMAIN in its .env, say) would otherwise
+// plant cookies on the cloud and every satellite app for whoever visits.
+func stripParentDomainCookies(resp *http.Response, host string) {
+	raw := resp.Header.Values("Set-Cookie")
+	if len(raw) == 0 {
+		return
+	}
+	kept := raw[:0:0]
+	for _, line := range raw {
+		if domain, ok := cookieDomain(line); !ok || strings.EqualFold(domain, host) {
+			kept = append(kept, line)
+		}
+	}
+	resp.Header.Del("Set-Cookie")
+	for _, line := range kept {
+		resp.Header.Add("Set-Cookie", line)
+	}
 }
 
-type roundTripFunc func(*http.Request) (*http.Response, error)
-
-func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
+// cookieDomain returns the Domain attribute of a Set-Cookie line, without
+// a leading dot, and whether one was present.
+func cookieDomain(line string) (string, bool) {
+	for _, part := range strings.Split(line, ";")[1:] {
+		k, v, _ := strings.Cut(strings.TrimSpace(part), "=")
+		if strings.EqualFold(k, "domain") {
+			return strings.TrimPrefix(strings.TrimSpace(v), "."), true
+		}
+	}
+	return "", false
+}
 
 func (r *Relay) logf(format string, args ...any) {
 	if r.Logf != nil {

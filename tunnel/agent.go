@@ -20,7 +20,7 @@ import (
 // streams it receives with a reverse proxy to LocalAddr.
 type Agent struct {
 	// RelayURL is the relay's connect endpoint, e.g.
-	// "wss://tunnel.nimbusgo.live/connect".
+	// "wss://tunnel.nimbusgo.space/connect".
 	RelayURL string
 	// Token is the Nimbus Cloud CLI token from `nimbus login`.
 	Token string
