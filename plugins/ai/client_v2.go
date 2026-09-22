@@ -105,6 +105,7 @@ func (c *Client) GenerateRequest(ctx context.Context, req *GenerateRequest) (*Ge
 	if req.MaxTokens <= 0 {
 		req.MaxTokens = c.config.MaxTokens
 	}
+	attachRequestImages(req)
 
 	start := time.Now()
 	resp, err := c.provider.Generate(ctx, req)
@@ -245,4 +246,22 @@ func newClientLegacy(cfg *Config) (*Client, error) {
 		return nil, err
 	}
 	return &Client{provider: provider, config: cfg}, nil
+}
+
+// attachRequestImages moves images given with WithImages onto the last user
+// message, where providers read them, as Agent.Prompt already does. The
+// caller's message slice is copied, not changed.
+func attachRequestImages(req *GenerateRequest) {
+	if len(req.Images) == 0 {
+		return
+	}
+	msgs := append([]Message(nil), req.Messages...)
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role == RoleUser || msgs[i].Role == "" {
+			msgs[i].Images = append(append([]string(nil), msgs[i].Images...), req.Images...)
+			req.Messages = msgs
+			req.Images = nil
+			return
+		}
+	}
 }

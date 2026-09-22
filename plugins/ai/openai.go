@@ -2,10 +2,12 @@ package ai
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -14,9 +16,10 @@ import (
 
 // openAIProvider implements Provider using the OpenAI API.
 type openAIProvider struct {
-	client    *openai.Client
-	model     string
-	maxTokens int
+	client     *openai.Client
+	model      string
+	maxTokens  int
+	imageModel string
 }
 
 func (p *openAIProvider) Name() string { return "openai" }
@@ -45,7 +48,7 @@ func newOpenAIProvider(cfg *Config) (*openAIProvider, error) {
 	if maxTokens <= 0 {
 		maxTokens = 8192
 	}
-	return &openAIProvider{client: client, model: model, maxTokens: maxTokens}, nil
+	return &openAIProvider{client: client, model: model, maxTokens: maxTokens, imageModel: cfg.ImageModel}, nil
 }
 
 func (p *openAIProvider) Generate(ctx context.Context, req *GenerateRequest) (*GenerateResponse, error) {
@@ -230,6 +233,24 @@ func (p *openAIProvider) toOpenAIMessages(req *GenerateRequest) []openai.ChatCom
 			Role:    role,
 			Content: m.Content,
 		}
+		// A user turn with pictures goes as parts: the text, then each
+		// image, which is how vision models on OpenAI-compatible APIs
+		// receive them.
+		if len(m.Images) > 0 && (role == RoleUser || role == openai.ChatMessageRoleUser) {
+			var parts []openai.ChatMessagePart
+			if strings.TrimSpace(m.Content) != "" {
+				parts = append(parts, openai.ChatMessagePart{Type: openai.ChatMessagePartTypeText, Text: m.Content})
+			}
+			for _, ref := range m.Images {
+				if u := openAIImageURL(ref); u != "" {
+					parts = append(parts, openai.ChatMessagePart{Type: openai.ChatMessagePartTypeImageURL, ImageURL: &openai.ChatMessageImageURL{URL: u, Detail: openai.ImageURLDetailAuto}})
+				}
+			}
+			if len(parts) > 0 {
+				msg.Content = ""
+				msg.MultiContent = parts
+			}
+		}
 		switch role {
 		case RoleAssistant:
 			for _, tc := range m.ToolCalls {
@@ -297,4 +318,72 @@ func fromOpenAIToolCalls(calls []openai.ToolCall) []ToolCall {
 		})
 	}
 	return out
+}
+
+// openAIImageURL turns an image reference into what the image_url part
+// takes: data URIs and http(s) URLs pass through, a readable file becomes a
+// data URI. Anything else answers "".
+func openAIImageURL(ref string) string {
+	ref = strings.TrimSpace(ref)
+	if strings.HasPrefix(ref, "data:image/") || strings.HasPrefix(ref, "https://") || strings.HasPrefix(ref, "http://") {
+		return ref
+	}
+	data, err := os.ReadFile(strings.TrimPrefix(ref, "/"))
+	if err != nil {
+		if data, err = os.ReadFile(ref); err != nil {
+			return ""
+		}
+	}
+	mediaType := http.DetectContentType(data)
+	if !strings.HasPrefix(mediaType, "image/") {
+		return ""
+	}
+	return "data:" + mediaType + ";base64," + base64.StdEncoding.EncodeToString(data)
+}
+
+// GenerateImage draws through the OpenAI images endpoint, which
+// OpenAI-compatible gateways (Agnes, OpenRouter-style routers) also serve.
+// The model is the caller's, then AI_IMAGE_MODEL, then dall-e-3. Pictures
+// come back as base64 so nothing depends on a URL that expires.
+func (p *openAIProvider) GenerateImage(ctx context.Context, req *ImageRequest) (*ImageResponse, error) {
+	if req == nil || strings.TrimSpace(req.Prompt) == "" {
+		return nil, fmt.Errorf("ai: image prompt is required")
+	}
+	model := strings.TrimSpace(req.Model)
+	if model == "" {
+		model = strings.TrimSpace(p.imageModel)
+	}
+	if model == "" {
+		model = openai.CreateImageModelDallE3
+	}
+	n := req.N
+	if n <= 0 {
+		n = 1
+	}
+	size := strings.TrimSpace(req.Size)
+	if size == "" {
+		size = openai.CreateImageSize1024x1024
+	}
+	res, err := p.client.CreateImage(ctx, openai.ImageRequest{
+		Prompt:         req.Prompt,
+		Model:          model,
+		N:              n,
+		Size:           size,
+		Style:          req.Style,
+		ResponseFormat: openai.CreateImageResponseFormatB64JSON,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := &ImageResponse{Model: model}
+	for _, d := range res.Data {
+		if d.B64JSON == "" && d.URL == "" {
+			continue
+		}
+		out.Images = append(out.Images, ImageData{URL: d.URL, B64JSON: d.B64JSON})
+	}
+	if len(out.Images) == 0 {
+		return nil, fmt.Errorf("ai: %s returned no image", model)
+	}
+	return out, nil
 }

@@ -57,9 +57,10 @@ func TestImageClientFallsBackToTheTextProvider(t *testing.T) {
 	}
 }
 
-// A provider that cannot draw must say so in a way that points at the fix.
+// A provider that cannot draw (Anthropic has no image endpoint) must say so
+// in a way that points at the fix.
 func TestUnsupportedImageProviderExplainsItself(t *testing.T) {
-	cfg := &Config{Provider: "openai", Model: "gpt-4o", OpenAIKey: "sk-test"}
+	cfg := &Config{Provider: "anthropic", Model: "claude-sonnet-5", AnthropicKey: "sk-test"}
 	client, err := NewClient(cfg)
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
