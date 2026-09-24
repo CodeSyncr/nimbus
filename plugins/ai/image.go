@@ -20,7 +20,6 @@ package ai
 import (
 	"context"
 	"fmt"
-	"strings"
 )
 
 // ---------------------------------------------------------------------------
@@ -78,9 +77,13 @@ func (b *ImageBuilder) WithClient(c *Client) *ImageBuilder {
 
 // Generate produces the image(s).
 func (b *ImageBuilder) Generate(ctx context.Context) (*ImageResponse, error) {
-	client := b.client
-	if client == nil {
-		client = imageClient()
+	base := b.client
+	if base == nil {
+		base = GetClient()
+	}
+	client, err := base.imageFor()
+	if err != nil {
+		return nil, err
 	}
 
 	ip, ok := client.provider.(ImageProvider)
@@ -94,26 +97,15 @@ func (b *ImageBuilder) Generate(ctx context.Context) (*ImageResponse, error) {
 
 // imageClient resolves the client that serves image requests.
 //
-// Images and text are separate choices: AI_IMAGE_PROVIDER may name a different
-// provider from the one answering prompts, so an app can reason with one model
-// and draw with another. Without it, the text provider is used — which works
-// when that provider also generates images.
+// Images and text are separate choices: AI_IMAGE_PROVIDER, AI_IMAGE_API_KEY
+// and AI_IMAGE_BASE_URL may point somewhere other than the provider answering
+// prompts, so an app can reason with one model and draw with another (see
+// media.go). Without them, the text provider is used — which works when that
+// provider also generates images.
 func imageClient() *Client {
 	base := GetClient()
-	want := strings.TrimSpace(base.config.ImageProvider)
-	if want == "" || strings.EqualFold(want, base.config.Provider) {
-		return base
+	if c, err := base.imageFor(); err == nil {
+		return c
 	}
-
-	// Same configuration, different provider: keys are all present on Config.
-	cfg := *base.config
-	cfg.Provider = want
-	imageOnly, err := NewClient(&cfg)
-	if err != nil {
-		// A misconfigured image provider should not take text generation down
-		// with it; fall back and let the caller see the clearer error from the
-		// interface check.
-		return base
-	}
-	return imageOnly
+	return base
 }

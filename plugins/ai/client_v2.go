@@ -26,6 +26,10 @@ type Client struct {
 	provider   Provider
 	config     *Config
 	guardrails *Guardrails
+	// image and video answer generation requests when their settings
+	// differ from the text ones (see media.go).
+	image, video       *Client
+	imageErr, videoErr error
 }
 
 // NewClient creates a new AI client from the given config.
@@ -39,7 +43,9 @@ func NewClient(cfg *Config) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Client{provider: provider, config: cfg}, nil
+	c := &Client{provider: provider, config: cfg}
+	c.configureMedia()
+	return c, nil
 }
 
 // WithGuardrails returns a new client that validates all responses.
@@ -48,6 +54,10 @@ func WithGuardrailsClient(c *Client, g *Guardrails) *Client {
 		provider:   c.provider,
 		config:     c.config,
 		guardrails: g,
+		image:      c.image,
+		video:      c.video,
+		imageErr:   c.imageErr,
+		videoErr:   c.videoErr,
 	}
 }
 
@@ -245,7 +255,9 @@ func newClientLegacy(cfg *Config) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Client{provider: provider, config: cfg}, nil
+	c := &Client{provider: provider, config: cfg}
+	c.configureMedia()
+	return c, nil
 }
 
 // attachRequestImages moves images given with WithImages onto the last user

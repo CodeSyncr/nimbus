@@ -19,7 +19,13 @@ Inspired by Vercel AI SDK and LangChain, it provides unified abstractions for:
 ## Core Components
 
 ### Clients & Providers
-The `ai.Client` handles communication with multiple providers (OpenAI, Anthropic, Gemini, Ollama, etc.) through a unified interface. Providers support custom base URLs (`OPENAI_BASE_URL`, `ANTHROPIC_BASE_URL` / `ANTHROPIC_API_URL`) and automatic exponential backoff retries on transient network and gateway errors (`502`, `503`, `504`, `429`).
+The `ai.Client` handles communication with multiple providers (OpenAI, Anthropic, Gemini, Ollama, etc.) through a unified interface. Providers support custom base URLs (`OPENAI_BASE_URL`, `ANTHROPIC_BASE_URL` / `ANTHROPIC_API_URL`) and automatic exponential backoff retries on transient network/gateway errors (`502`, `503`, `504`, `429`) as well as dropped connections/unexpected EOFs.
+
+### Dedicated Media Routing
+Image and video generation can be routed to separate providers, endpoints, and models via environment variables or `ai.Config`:
+- `AI_IMAGE_PROVIDER`, `AI_IMAGE_MODEL`, `AI_IMAGE_API_KEY`, `AI_IMAGE_BASE_URL`
+- `AI_VIDEO_PROVIDER`, `AI_VIDEO_MODEL`, `AI_VIDEO_API_KEY`, `AI_VIDEO_BASE_URL`
+When unset, media builders fall back seamlessly to the primary text provider.
 
 ### Agents
 Agents combine instructions, tools, and memory to perform complex tasks autonomously.

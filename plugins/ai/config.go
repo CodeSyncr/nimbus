@@ -14,8 +14,22 @@ type Config struct {
 	// the provider's default.
 	ImageProvider string
 	ImageModel    string
-	Timeout       int
-	MaxTokens     int
+	// ImageAPIKey and ImageBaseURL put image generation on its own account
+	// and endpoint; VideoProvider, VideoModel, VideoAPIKey and VideoBaseURL
+	// do the same for video. Unset, each falls back to the text setting
+	// (see media.go).
+	ImageAPIKey   string
+	ImageBaseURL  string
+	VideoProvider string
+	VideoModel    string
+	VideoAPIKey   string
+	VideoBaseURL  string
+
+	// mediaOf marks the config of an image or video client ("image",
+	// "video"), which makes no media clients of its own.
+	mediaOf   string
+	Timeout   int
+	MaxTokens int
 	// Text generation providers
 	OpenAIKey        string
 	OpenAIBaseURL    string

@@ -115,14 +115,20 @@ func (b *VideoBuilder) WithClient(c *Client) *VideoBuilder {
 
 // Generate produces the video.
 func (b *VideoBuilder) Generate(ctx context.Context) (*VideoResponse, error) {
-	client := b.client
-	if client == nil {
-		client = GetClient()
+	base := b.client
+	if base == nil {
+		base = GetClient()
+	}
+	client, err := base.videoFor()
+	if err != nil {
+		return nil, err
 	}
 
 	vp, ok := client.provider.(VideoProvider)
 	if !ok {
-		return nil, fmt.Errorf("ai: provider %q does not support video generation", client.config.Provider)
+		return nil, fmt.Errorf("ai: provider %q does not support video generation. Set AI_VIDEO_PROVIDER to one that does", client.config.Provider)
 	}
-	return vp.GenerateVideo(ctx, &b.req)
+	req := b.req
+	req.Model = firstNonBlank(req.Model, client.config.VideoModel)
+	return vp.GenerateVideo(ctx, &req)
 }

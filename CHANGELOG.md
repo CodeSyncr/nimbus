@@ -6,6 +6,54 @@ This project follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-09-25
+
+### Added
+
+- **`plugins/ai`: Independent Image & Video Provider Configuration.** Image and
+  video generation requests can now be served by separate dedicated providers,
+  keys, and endpoints from the primary text generation model.
+  - New environment variables: `AI_IMAGE_PROVIDER`, `AI_IMAGE_MODEL`,
+    `AI_IMAGE_API_KEY`, `AI_IMAGE_BASE_URL` (or `AI_IMAGE_API_URL`),
+    `AI_VIDEO_PROVIDER`, `AI_VIDEO_MODEL`, `AI_VIDEO_API_KEY`,
+    `AI_VIDEO_BASE_URL` (or `AI_VIDEO_API_URL`).
+  - Added matching fields to `ai.Config`: `ImageAPIKey`, `ImageBaseURL`,
+    `VideoProvider`, `VideoModel`, `VideoAPIKey`, `VideoBaseURL`.
+  - When left unset, image and video generation gracefully fall back to the text
+    provider and model configuration.
+- **`plugins/ai`: Enhanced Tool JSON Schema Reflection.**
+  - Struct fields tagged with `omitempty` in their `json` tag are no longer
+    marked as `required` in the generated JSON Schema for tool calls, allowing
+    models to accurately recognize optional parameters.
+  - Added typed element schema reflection (`itemSchema`) for slices and arrays,
+    enabling models to understand the nested item types of array arguments.
+
+### Fixed
+
+- **`plugins/ai`: Resilient Retry for Dropped Connections.**
+  - Added automatic detection and retry (up to 5 attempts with backoff) for
+    requests where the server or gateway terminates the connection before
+    responding (unexpected EOF, connection resets, broken pipes, idle timeouts,
+    or HTTP/2 GOAWAY frames), which frequently occurs on heavily loaded providers
+    such as DeepSeek.
+  - Clears idle connections from the HTTP transport pool between retry attempts
+    to prevent subsequent attempts from reusing dead sockets.
+
+## [1.7.0] - 2026-09-11
+
+### Added
+
+- **`plugins/ai`: OpenAI Vision Support.** Multi-modal prompt inputs and image
+  attachments are now supported natively by the OpenAI provider.
+- **`nimbus expose` & Nimbus Tunnel Relay (`plugins/tunnel`):**
+  - First-class local tunnel command (`nimbus expose <port>`) connecting local
+    development servers to public tunnel endpoints (`tunnel.nimbusgo.space`).
+  - Support for reserved subdomains that persist across reconnects, two-character
+    subdomains, and secure parent-domain cookie isolation.
+- **Document Plugin (`plugins/docs`):**
+  - Added Document API clients and plugin system for dynamic documentation
+    indexing and programmatic access.
+
 ## [1.6.1] - 2026-09-08
 
 ### Breaking

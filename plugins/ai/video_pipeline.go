@@ -162,8 +162,9 @@ type VideoPipeline struct {
 func NewVideoPipeline() *VideoPipeline {
 	return &VideoPipeline{
 		config: VideoPipelineConfig{
-			ImageModel:      "dall-e-3",
-			VideoModel:      "kling-2.5",
+			// Empty: AI_IMAGE_MODEL / AI_VIDEO_MODEL, then the provider's own.
+			ImageModel:      "",
+			VideoModel:      "",
 			PlannerModel:    "", // uses default
 			ExpanderModel:   "", // uses default
 			MaxScenes:       6,
@@ -498,7 +499,10 @@ func (p *VideoPipeline) renderScenes(ctx context.Context, plan *ScenePlan) ([]Sc
 }
 
 func (p *VideoPipeline) generateKeyframe(ctx context.Context, prompt string) (string, error) {
-	client := p.getClient()
+	client, err := p.getClient().imageFor()
+	if err != nil {
+		return "", err
+	}
 	ip, ok := client.provider.(ImageProvider)
 	if !ok {
 		return "", fmt.Errorf("ai: provider does not support image generation")
@@ -520,7 +524,10 @@ func (p *VideoPipeline) generateKeyframe(ctx context.Context, prompt string) (st
 }
 
 func (p *VideoPipeline) generateSceneVideo(ctx context.Context, scene *Scene) (string, error) {
-	client := p.getClient()
+	client, err := p.getClient().videoFor()
+	if err != nil {
+		return "", err
+	}
 	vp, ok := client.provider.(VideoProvider)
 	if !ok {
 		return "", fmt.Errorf("ai: provider does not support video generation")
@@ -534,7 +541,7 @@ func (p *VideoPipeline) generateSceneVideo(ctx context.Context, scene *Scene) (s
 	videoPrompt := string(scene.Camera)
 	resp, err := vp.GenerateVideo(ctx, &VideoRequest{
 		Prompt:   videoPrompt,
-		Model:    p.config.VideoModel,
+		Model:    firstNonBlank(p.config.VideoModel, client.config.VideoModel),
 		ImageURL: scene.KeyframeURL,
 		Duration: duration,
 		Size:     fmt.Sprintf("%dx%d", p.config.Format.Width, p.config.Format.Height),

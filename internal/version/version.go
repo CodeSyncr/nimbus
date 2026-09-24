@@ -1,5 +1,4 @@
 package version
 
 // Nimbus is the current Nimbus framework version.
-// Updated by `nimbus release`.
-const Nimbus = "v1.6.1"
+const Nimbus = "v1.8.0"

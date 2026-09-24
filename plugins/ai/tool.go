@@ -30,6 +30,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"strings"
 	"sync"
 )
 
@@ -279,6 +280,7 @@ func structToJSONSchema(t reflect.Type) json.RawMessage {
 		}
 
 		name := field.Tag.Get("json")
+		optional := strings.Contains(name, ",omitempty")
 		if name == "" || name == "-" {
 			name = field.Name
 		}
@@ -304,6 +306,10 @@ func structToJSONSchema(t reflect.Type) json.RawMessage {
 			prop["type"] = "boolean"
 		case reflect.Slice:
 			prop["type"] = "array"
+			// Say what goes in the list, or a model has to guess its shape.
+			if items := itemSchema(field.Type.Elem()); items != nil {
+				prop["items"] = items
+			}
 		case reflect.Struct:
 			// Nested struct — recurse.
 			nested := structToJSONSchema(field.Type)
@@ -319,8 +325,10 @@ func structToJSONSchema(t reflect.Type) json.RawMessage {
 		}
 
 		properties[name] = prop
-		// All exported fields are required by default.
-		required = append(required, name)
+		// Exported fields are required unless tagged omitempty.
+		if !optional {
+			required = append(required, name)
+		}
 	}
 
 	schema["properties"] = properties
@@ -330,4 +338,27 @@ func structToJSONSchema(t reflect.Type) json.RawMessage {
 
 	b, _ := json.Marshal(schema)
 	return b
+}
+
+// itemSchema is the schema of one element of a list field.
+func itemSchema(t reflect.Type) map[string]any {
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+	switch t.Kind() {
+	case reflect.String:
+		return map[string]any{"type": "string"}
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64, reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return map[string]any{"type": "integer"}
+	case reflect.Float32, reflect.Float64:
+		return map[string]any{"type": "number"}
+	case reflect.Bool:
+		return map[string]any{"type": "boolean"}
+	case reflect.Struct:
+		var m map[string]any
+		if json.Unmarshal(structToJSONSchema(t), &m) == nil {
+			return m
+		}
+	}
+	return nil
 }

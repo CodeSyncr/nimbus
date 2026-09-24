@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"strings"
+	"syscall"
 	"time"
 
 	openai "github.com/sashabaranov/go-openai"
@@ -17,9 +19,35 @@ import (
 // openAIProvider implements Provider using the OpenAI API.
 type openAIProvider struct {
 	client     *openai.Client
+	httpClient *http.Client
 	model      string
 	maxTokens  int
 	imageModel string
+}
+
+// maxDroppedAttempts is how often a request the server hung up on is sent,
+// in all. Other retryable failures keep three.
+const maxDroppedAttempts = 5
+
+// retryAfterDrop decides whether a failed attempt goes again, and clears
+// the connection pool when the server hung up: the next attempt otherwise
+// reuses the dead connection and fails at once, burning a try.
+func (p *openAIProvider) retryAfterDrop(ctx context.Context, err error, attempt int, transient bool) bool {
+	if ctx.Err() != nil {
+		return false
+	}
+	if droppedConnection(err) && attempt < maxDroppedAttempts {
+		if p.httpClient != nil {
+			p.httpClient.CloseIdleConnections()
+		}
+		time.Sleep(time.Duration(attempt) * 700 * time.Millisecond)
+		return true
+	}
+	if transient && attempt < 3 {
+		time.Sleep(time.Duration(attempt) * 600 * time.Millisecond)
+		return true
+	}
+	return false
 }
 
 func (p *openAIProvider) Name() string { return "openai" }
@@ -36,9 +64,13 @@ func newOpenAIProvider(cfg *Config) (*openAIProvider, error) {
 	if cfg.Timeout > 0 {
 		timeoutSec = cfg.Timeout
 	}
-	openaiConfig.HTTPClient = &http.Client{
-		Timeout: time.Duration(timeoutSec) * time.Second,
+	// Its own pool, so clearing it after a dropped connection touches no
+	// other client in the process.
+	httpClient := &http.Client{
+		Timeout:   time.Duration(timeoutSec) * time.Second,
+		Transport: http.DefaultTransport.(*http.Transport).Clone(),
 	}
+	openaiConfig.HTTPClient = httpClient
 	client := openai.NewClientWithConfig(openaiConfig)
 	model := cfg.Model
 	if model == "" {
@@ -48,7 +80,7 @@ func newOpenAIProvider(cfg *Config) (*openAIProvider, error) {
 	if maxTokens <= 0 {
 		maxTokens = 8192
 	}
-	return &openAIProvider{client: client, model: model, maxTokens: maxTokens, imageModel: cfg.ImageModel}, nil
+	return &openAIProvider{client: client, httpClient: httpClient, model: model, maxTokens: maxTokens, imageModel: cfg.ImageModel}, nil
 }
 
 func (p *openAIProvider) Generate(ctx context.Context, req *GenerateRequest) (*GenerateResponse, error) {
@@ -65,7 +97,7 @@ func (p *openAIProvider) Generate(ctx context.Context, req *GenerateRequest) (*G
 	var resp openai.ChatCompletionResponse
 	var err error
 
-	for attempt := 1; attempt <= 3; attempt++ {
+	for attempt := 1; attempt <= maxDroppedAttempts; attempt++ {
 		resp, err = p.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
 			Model:       model,
 			Messages:    messages,
@@ -79,17 +111,18 @@ func (p *openAIProvider) Generate(ctx context.Context, req *GenerateRequest) (*G
 		}
 		if err != nil {
 			errMsg := strings.ToLower(err.Error())
-			if attempt < 3 && (strings.Contains(errMsg, "502") || strings.Contains(errMsg, "503") || strings.Contains(errMsg, "504") || strings.Contains(errMsg, "429") || strings.Contains(errMsg, "bad gateway") || strings.Contains(errMsg, "timeout") || strings.Contains(errMsg, "deadline")) {
-				time.Sleep(time.Duration(attempt) * 800 * time.Millisecond)
+			transient := strings.Contains(errMsg, "502") || strings.Contains(errMsg, "503") || strings.Contains(errMsg, "504") || strings.Contains(errMsg, "429") || strings.Contains(errMsg, "bad gateway") || strings.Contains(errMsg, "timeout") || strings.Contains(errMsg, "deadline")
+			if p.retryAfterDrop(ctx, err, attempt, transient) {
 				continue
 			}
 			return nil, fmt.Errorf("ai: openai: %w", err)
 		}
-		// If err == nil but no choices, retry
+		// If err == nil but no choices, retry (three tries in all)
 		if attempt < 3 {
 			time.Sleep(time.Duration(attempt) * 800 * time.Millisecond)
 			continue
 		}
+		break
 	}
 
 	if len(resp.Choices) == 0 {
@@ -132,7 +165,7 @@ func (p *openAIProvider) Stream(ctx context.Context, req *GenerateRequest) (*Str
 
 		var stream *openai.ChatCompletionStream
 		var err error
-		for attempt := 1; attempt <= 3; attempt++ {
+		for attempt := 1; attempt <= maxDroppedAttempts; attempt++ {
 			stream, err = p.client.CreateChatCompletionStream(ctx, openai.ChatCompletionRequest{
 				Model:       model,
 				Messages:    messages,
@@ -146,8 +179,8 @@ func (p *openAIProvider) Stream(ctx context.Context, req *GenerateRequest) (*Str
 				break
 			}
 			errMsg := strings.ToLower(err.Error())
-			if attempt < 3 && (strings.Contains(errMsg, "502") || strings.Contains(errMsg, "503") || strings.Contains(errMsg, "504") || strings.Contains(errMsg, "429") || strings.Contains(errMsg, "bad gateway")) {
-				time.Sleep(time.Duration(attempt) * 600 * time.Millisecond)
+			transient := strings.Contains(errMsg, "502") || strings.Contains(errMsg, "503") || strings.Contains(errMsg, "504") || strings.Contains(errMsg, "429") || strings.Contains(errMsg, "bad gateway")
+			if p.retryAfterDrop(ctx, err, attempt, transient) {
 				continue
 			}
 			errCh <- fmt.Errorf("ai: openai stream: %w", err)
@@ -386,4 +419,25 @@ func (p *openAIProvider) GenerateImage(ctx context.Context, req *ImageRequest) (
 		return nil, fmt.Errorf("ai: %s returned no image", model)
 	}
 	return out, nil
+}
+
+// droppedConnection is a request the server hung up on before answering:
+// "unexpected EOF", a reset, a closed idle connection. Nothing came back,
+// so nothing reached the user, and sending the request again is safe.
+// Seen from DeepSeek under load: the connection held for 15-30 seconds,
+// then closed without a response.
+func droppedConnection(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF) || errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.EPIPE) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	for _, s := range []string{"unexpected eof", "connection reset", "broken pipe", "server closed idle connection", "http2: server sent goaway", "timeout awaiting response headers"} {
+		if strings.Contains(msg, s) {
+			return true
+		}
+	}
+	return strings.HasSuffix(msg, ": eof")
 }

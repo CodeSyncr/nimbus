@@ -96,6 +96,16 @@ func (p *Plugin) DefaultConfig() map[string]any {
 	}
 }
 
+// firstEnv is the first of the named variables that is set.
+func firstEnv(names ...string) string {
+	for _, n := range names {
+		if v := os.Getenv(n); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
 func (p *Plugin) loadConfig(app *nimbus.App) *Config {
 	cfg := &Config{
 		Provider: "openai",
@@ -142,6 +152,12 @@ func (p *Plugin) loadConfig(app *nimbus.App) *Config {
 	cfg.GeminiKey = os.Getenv("GEMINI_API_KEY")
 	cfg.ImageProvider = os.Getenv("AI_IMAGE_PROVIDER")
 	cfg.ImageModel = os.Getenv("AI_IMAGE_MODEL")
+	cfg.ImageAPIKey = os.Getenv("AI_IMAGE_API_KEY")
+	cfg.ImageBaseURL = firstEnv("AI_IMAGE_BASE_URL", "AI_IMAGE_API_URL")
+	cfg.VideoProvider = os.Getenv("AI_VIDEO_PROVIDER")
+	cfg.VideoModel = os.Getenv("AI_VIDEO_MODEL")
+	cfg.VideoAPIKey = os.Getenv("AI_VIDEO_API_KEY")
+	cfg.VideoBaseURL = firstEnv("AI_VIDEO_BASE_URL", "AI_VIDEO_API_URL")
 	cfg.MistralKey = os.Getenv("MISTRAL_API_KEY")
 	cfg.XAIKey = os.Getenv("XAI_API_KEY")
 	cfg.JinaKey = os.Getenv("JINA_API_KEY")
