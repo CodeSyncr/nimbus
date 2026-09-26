@@ -40,6 +40,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"sync/atomic"
 
 	"github.com/CodeSyncr/nimbus"
 )
@@ -77,7 +78,38 @@ func (p *Plugin) Register(app *nimbus.App) error {
 	}
 	p.client = client
 	setClient(client)
-	app.Container.Singleton("ai.client", func() *Client { return client })
+	registered.Store(&registration{plugin: p, app: app})
+	// The container hands out the current client, so a Reload reaches
+	// whoever resolves it after the swap.
+	app.Container.Singleton("ai.client", func() *Client { return GetClient() })
+	return nil
+}
+
+type registration struct {
+	plugin *Plugin
+	app    *nimbus.App
+}
+
+var registered atomic.Pointer[registration]
+
+// Reload rebuilds the global client from the current configuration: the
+// plugin config and the AI_* environment, read again. An app that lets an
+// operator change models at runtime sets the environment and calls Reload;
+// requests already in flight finish on the client they started with. On an
+// error the previous client stays in place. Before the plugin is registered
+// it is a no-op, since Register will read the same settings.
+func Reload() error {
+	r := registered.Load()
+	if r == nil {
+		return nil
+	}
+	cfg := r.plugin.loadConfig(r.app)
+	client, err := NewClient(cfg)
+	if err != nil {
+		return err
+	}
+	r.plugin.client = client
+	setClient(client)
 	return nil
 }
 
@@ -158,6 +190,10 @@ func (p *Plugin) loadConfig(app *nimbus.App) *Config {
 	cfg.VideoModel = os.Getenv("AI_VIDEO_MODEL")
 	cfg.VideoAPIKey = os.Getenv("AI_VIDEO_API_KEY")
 	cfg.VideoBaseURL = firstEnv("AI_VIDEO_BASE_URL", "AI_VIDEO_API_URL")
+	cfg.FallbackProvider = os.Getenv("AI_FALLBACK_PROVIDER")
+	cfg.FallbackModel = os.Getenv("AI_FALLBACK_MODEL")
+	cfg.FallbackAPIKey = os.Getenv("AI_FALLBACK_API_KEY")
+	cfg.FallbackBaseURL = firstEnv("AI_FALLBACK_BASE_URL", "AI_FALLBACK_API_URL")
 	cfg.MistralKey = os.Getenv("MISTRAL_API_KEY")
 	cfg.XAIKey = os.Getenv("XAI_API_KEY")
 	cfg.JinaKey = os.Getenv("JINA_API_KEY")

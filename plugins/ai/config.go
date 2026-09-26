@@ -24,6 +24,14 @@ type Config struct {
 	VideoModel    string
 	VideoAPIKey   string
 	VideoBaseURL  string
+	// FallbackModel is the model an app retries on when the main one has
+	// nothing to give (out of credit, overloaded). With FallbackProvider,
+	// FallbackAPIKey or FallbackBaseURL set it lives on its own account:
+	// a request naming FallbackModel is sent there (see media.go).
+	FallbackProvider string
+	FallbackModel    string
+	FallbackAPIKey   string
+	FallbackBaseURL  string
 
 	// mediaOf marks the config of an image or video client ("image",
 	// "video"), which makes no media clients of its own.

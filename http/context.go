@@ -9,6 +9,7 @@ import (
 	"html/template"
 	stdlib "net/http"
 	"strings"
+	"time"
 
 	"github.com/CodeSyncr/nimbus/view"
 )
@@ -256,6 +257,13 @@ func (c *Context) SSEStream(streamHandler func(w *SSEWriter) error) error {
 	c.Response.Header().Set("Cache-Control", "no-cache")
 	c.Response.Header().Set("Connection", "keep-alive")
 	c.Response.Header().Set("X-Accel-Buffering", "no")
+	// A stream is meant to outlive SERVER_WRITE_TIMEOUT: an agent reply
+	// that runs tools for minutes was cut off mid-answer when the server's
+	// deadline hit. Lift the deadlines for this response only; the handler
+	// still ends when its request context does.
+	rc := stdlib.NewResponseController(c.Response)
+	_ = rc.SetWriteDeadline(time.Time{})
+	_ = rc.SetReadDeadline(time.Time{})
 	c.Response.WriteHeader(stdlib.StatusOK)
 
 	flusher, _ := c.Response.(stdlib.Flusher)

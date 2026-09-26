@@ -30,6 +30,10 @@ type Client struct {
 	// differ from the text ones (see media.go).
 	image, video       *Client
 	imageErr, videoErr error
+	// fallback answers requests naming the fallback model when it lives on
+	// another account (see media.go).
+	fallback    *Client
+	fallbackErr error
 }
 
 // NewClient creates a new AI client from the given config.
@@ -51,13 +55,15 @@ func NewClient(cfg *Config) (*Client, error) {
 // WithGuardrails returns a new client that validates all responses.
 func WithGuardrailsClient(c *Client, g *Guardrails) *Client {
 	return &Client{
-		provider:   c.provider,
-		config:     c.config,
-		guardrails: g,
-		image:      c.image,
-		video:      c.video,
-		imageErr:   c.imageErr,
-		videoErr:   c.videoErr,
+		provider:    c.provider,
+		config:      c.config,
+		guardrails:  g,
+		image:       c.image,
+		video:       c.video,
+		imageErr:    c.imageErr,
+		videoErr:    c.videoErr,
+		fallback:    c.fallback,
+		fallbackErr: c.fallbackErr,
 	}
 }
 
@@ -111,6 +117,11 @@ func (c *Client) Generate(ctx context.Context, prompt string, opts ...GenerateOp
 func (c *Client) GenerateRequest(ctx context.Context, req *GenerateRequest) (*GenerateResponse, error) {
 	if req.Model == "" {
 		req.Model = c.config.Model
+	}
+	if fb, err := c.fallbackFor(req.Model); err != nil {
+		return nil, err
+	} else if fb != nil {
+		return fb.GenerateRequest(ctx, req)
 	}
 	if req.MaxTokens <= 0 {
 		req.MaxTokens = c.config.MaxTokens
@@ -205,6 +216,11 @@ func (c *Client) Stream(ctx context.Context, prompt string, opts ...GenerateOpti
 func (c *Client) StreamRequest(ctx context.Context, req *GenerateRequest) (*StreamResponse, error) {
 	if req.Model == "" {
 		req.Model = c.config.Model
+	}
+	if fb, err := c.fallbackFor(req.Model); err != nil {
+		return nil, err
+	} else if fb != nil {
+		return fb.StreamRequest(ctx, req)
 	}
 	if req.MaxTokens <= 0 {
 		req.MaxTokens = c.config.MaxTokens

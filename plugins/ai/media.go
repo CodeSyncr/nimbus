@@ -21,6 +21,10 @@ import (
 |
 | (…_API_URL is accepted for …_BASE_URL.) With none of them set, images and
 | video use the text client, as before.
+|
+| The fallback text model can live apart the same way: AI_FALLBACK_MODEL
+| with AI_FALLBACK_PROVIDER / _API_KEY / _BASE_URL. A request that names
+| the fallback model is then sent to that account.
 */
 
 // mediaConfig derives the config of an image or video client from the
@@ -37,7 +41,10 @@ func mediaConfig(base *Config, what, provider, key, url string) (*Config, error)
 	if c.Provider != base.Provider {
 		c.Model = "" // the text model belongs to the other provider
 	}
-	key, url = strings.TrimSpace(key), strings.TrimSpace(url)
+	key, url = strings.TrimSpace(key), strings.TrimRight(strings.TrimSpace(url), "/")
+	// The clients add /chat/completions themselves; a URL copied from a
+	// gateway's docs often carries it already.
+	url = strings.TrimRight(strings.TrimSuffix(url, "/chat/completions"), "/")
 	upper := strings.ToUpper(what)
 
 	switch c.Provider {
@@ -110,6 +117,27 @@ func (c *Client) configureMedia() {
 	if apart(cfg.VideoProvider, cfg.VideoAPIKey, cfg.VideoBaseURL) {
 		c.video, c.videoErr = build("video", cfg.VideoProvider, cfg.VideoAPIKey, cfg.VideoBaseURL)
 	}
+	if strings.TrimSpace(cfg.FallbackModel) != "" && apart(cfg.FallbackProvider, cfg.FallbackAPIKey, cfg.FallbackBaseURL) {
+		mc, err := mediaConfig(cfg, "fallback", cfg.FallbackProvider, cfg.FallbackAPIKey, cfg.FallbackBaseURL)
+		if err == nil {
+			mc.Model = strings.TrimSpace(cfg.FallbackModel)
+			c.fallback, c.fallbackErr = NewClient(mc)
+		} else {
+			c.fallbackErr = err
+		}
+	}
+}
+
+// fallbackFor is the client a request goes to when it names the fallback
+// model and that model lives on its own account; nil keeps it here.
+func (c *Client) fallbackFor(model string) (*Client, error) {
+	if model == "" || c.config == nil || model != strings.TrimSpace(c.config.FallbackModel) {
+		return nil, nil
+	}
+	if c.fallbackErr != nil {
+		return nil, fmt.Errorf("ai: the fallback model is misconfigured: %w", c.fallbackErr)
+	}
+	return c.fallback, nil
 }
 
 // imageFor is the client image requests go to.
