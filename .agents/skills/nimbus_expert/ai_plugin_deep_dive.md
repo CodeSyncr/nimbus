@@ -27,6 +27,15 @@ Image and video generation can be routed to separate providers, endpoints, and m
 - `AI_VIDEO_PROVIDER`, `AI_VIDEO_MODEL`, `AI_VIDEO_API_KEY`, `AI_VIDEO_BASE_URL`
 When unset, media builders fall back seamlessly to the primary text provider.
 
+### Fallback Model
+`AI_FALLBACK_MODEL` names the model to retry on when the main one fails (out of credit, overloaded). Give it its own account with `AI_FALLBACK_PROVIDER`, `AI_FALLBACK_API_KEY` and `AI_FALLBACK_BASE_URL`: any request whose model is the fallback model (`ai.WithModel(os.Getenv("AI_FALLBACK_MODEL"))`) is then routed there. Base URLs may be given with or without a trailing `/chat/completions`.
+
+### Changing Models at Runtime
+`ai.Reload()` rebuilds the global client from the current environment. To switch models, keys or URLs without a restart, `os.Setenv` the `AI_*` variables and call `ai.Reload()`. On error the previous client is kept.
+
+### Streaming Responses
+`c.SSEStream` lifts the server's read/write deadlines for that response, so long streamed agent replies are not cut off by `SERVER_WRITE_TIMEOUT`.
+
 ### Agents
 Agents combine instructions, tools, and memory to perform complex tasks autonomously.
 ```go

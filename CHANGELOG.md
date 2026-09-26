@@ -6,6 +6,48 @@ This project follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [1.8.1] - 2026-09-26
+
+### Added
+
+- **`plugins/ai`: `ai.Reload()` for runtime model changes.** Rebuilds the
+  global AI client from the plugin config and the current `AI_*` environment,
+  so an app can switch models, providers, keys and base URLs without a
+  restart (for example from an admin settings page that writes the
+  environment and then calls `ai.Reload()`).
+  - Requests already in flight finish on the client they started with; new
+    requests use the new one.
+  - If the new settings cannot build a client, `Reload` returns the error and
+    the previous client stays in place.
+  - Before the plugin is registered it is a no-op.
+  - The container's `"ai.client"` binding now resolves to the current client
+    rather than the one built at boot.
+- **`plugins/ai`: Fallback model on its own account.** `AI_FALLBACK_MODEL` can
+  now live on a different provider, key or gateway from the main model, set
+  with `AI_FALLBACK_PROVIDER`, `AI_FALLBACK_API_KEY` and `AI_FALLBACK_BASE_URL`
+  (or `AI_FALLBACK_API_URL`). A `GenerateRequest` or `StreamRequest` that names
+  the fallback model is routed to that account; every other model stays on the
+  main one. With none of these set, the fallback runs on the main account as
+  before.
+  - Added matching fields to `ai.Config`: `FallbackProvider`, `FallbackModel`,
+    `FallbackAPIKey`, `FallbackBaseURL`.
+  - A misconfigured fallback is reported on fallback requests only; it never
+    takes the main model down.
+
+### Fixed
+
+- **`http`: SSE streams are no longer cut off at `SERVER_WRITE_TIMEOUT`.**
+  `Context.SSEStream` now lifts the server's read and write deadlines for its
+  own response (via `http.ResponseController`), so long agent replies that
+  run tools for minutes finish instead of dropping mid-answer with a
+  connection reset. The stream still ends when the request context does, and
+  other responses keep the server's timeouts.
+- **`plugins/ai`: Base URLs that include `/chat/completions`.** Image, video
+  and fallback base URLs are normalised by dropping a trailing slash and a
+  trailing `/chat/completions`, which the clients append themselves. A URL
+  copied from a gateway's docs no longer produces
+  `…/chat/completions/chat/completions`.
+
 ## [1.8.0] - 2026-09-25
 
 ### Added
