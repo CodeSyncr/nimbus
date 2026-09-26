@@ -6,6 +6,22 @@ This project follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [1.8.2] - 2026-09-26
+
+### Fixed
+
+- **`http`: SSE streams survive proxies that close idle connections.**
+  Cloudflare and most load balancers drop a response after about 100 seconds
+  without a byte, so an agent step that thought for minutes lost its
+  connection and the client saw a network error instead of the answer.
+  `Context.SSEStream` now writes a `: keep-alive` comment every
+  `http.SSEKeepAlive` (15 seconds by default; set it to zero to turn it off).
+  EventSource and other SSE clients ignore comment lines, so nothing changes
+  for the receiving code.
+  - `SSEWriter` is now safe to use from several goroutines at once, since the
+    keep-alive ticker writes alongside the handler.
+  - Nothing is written to the response after the handler returns.
+
 ## [1.8.1] - 2026-09-26
 
 ### Added

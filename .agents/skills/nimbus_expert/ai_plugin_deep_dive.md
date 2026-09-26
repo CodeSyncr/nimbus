@@ -34,7 +34,7 @@ When unset, media builders fall back seamlessly to the primary text provider.
 `ai.Reload()` rebuilds the global client from the current environment. To switch models, keys or URLs without a restart, `os.Setenv` the `AI_*` variables and call `ai.Reload()`. On error the previous client is kept.
 
 ### Streaming Responses
-`c.SSEStream` lifts the server's read/write deadlines for that response, so long streamed agent replies are not cut off by `SERVER_WRITE_TIMEOUT`.
+`c.SSEStream` lifts the server's read/write deadlines for that response, so long streamed agent replies are not cut off by `SERVER_WRITE_TIMEOUT`. While the handler is quiet it sends a `: keep-alive` comment every `http.SSEKeepAlive` (15s) so proxies such as Cloudflare do not drop the idle connection.
 
 ### Agents
 Agents combine instructions, tools, and memory to perform complex tasks autonomously.
