@@ -9,6 +9,7 @@ import (
 	"html/template"
 	stdlib "net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/CodeSyncr/nimbus/view"
@@ -209,10 +210,32 @@ func (c *Context) ValidationErrors(errors any) error {
 
 // ── Server-Sent Events (SSE) ────────────────────────────────────
 
-// SSEWriter handles streaming Server-Sent Events to the client.
+// SSEWriter handles streaming Server-Sent Events to the client. It is safe
+// for concurrent use: the keep-alive and any goroutines of the handler
+// write through the same lock.
 type SSEWriter struct {
+	mu      sync.Mutex
 	w       ResponseWriter
 	flusher stdlib.Flusher
+}
+
+// SSEKeepAlive is how often SSEStream sends a comment line while a stream is
+// open. Proxies drop a response that goes quiet (Cloudflare after 100
+// seconds), so an agent step that thinks for minutes would otherwise lose
+// its connection; clients ignore comment lines. Zero turns it off.
+var SSEKeepAlive = 15 * time.Second
+
+// Comment writes an SSE comment line (": text"), which clients ignore.
+func (s *SSEWriter) Comment(text string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, err := fmt.Fprintf(s.w, ": %s\n\n", strings.ReplaceAll(text, "\n", " ")); err != nil {
+		return err
+	}
+	if s.flusher != nil {
+		s.flusher.Flush()
+	}
+	return nil
 }
 
 // Event writes an SSE message with an optional event name and data payload.
@@ -231,6 +254,8 @@ func (s *SSEWriter) Event(event string, data any) error {
 		payload = b
 	}
 
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if event != "" {
 		if _, err := fmt.Fprintf(s.w, "event: %s\n", event); err != nil {
 			return err
@@ -272,6 +297,28 @@ func (c *Context) SSEStream(streamHandler func(w *SSEWriter) error) error {
 	}
 
 	writer := &SSEWriter{w: c.Response, flusher: flusher}
+	if SSEKeepAlive > 0 {
+		stop, done := make(chan struct{}), make(chan struct{})
+		go func() {
+			defer close(done)
+			t := time.NewTicker(SSEKeepAlive)
+			defer t.Stop()
+			for {
+				select {
+				case <-stop:
+					return
+				case <-c.Request.Context().Done():
+					return
+				case <-t.C:
+					if writer.Comment("keep-alive") != nil {
+						return
+					}
+				}
+			}
+		}()
+		// Nothing may write to the response once the handler has returned.
+		defer func() { close(stop); <-done }()
+	}
 	return streamHandler(writer)
 }
 
