@@ -1,6 +1,6 @@
 {
   "name": "@codesyncr/cashier-cloud",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Cashier Cloud web SDK \u2014 subscriptions and entitlements across Apple, Google and Stripe, from the browser.",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -16,7 +16,8 @@
     "build": "tsup src/index.ts --format esm,cjs --dts --clean",
     "type-check": "tsc --noEmit",
     "test": "node --test test/*.test.mjs",
-    "dev": "tsup src/index.ts --format esm,cjs --dts --watch"
+    "dev": "tsup src/index.ts --format esm,cjs --dts --watch",
+    "sync:console": "npm run build && cp dist/index.js ../../../nimbus-starter/public/js/cashier/cashier-cloud.js"
   },
   "author": "CodeSyncr",
   "license": "MIT",
@@ -25,8 +26,9 @@
   },
   "devDependencies": {
     "@types/node": "^26.5.0",
+    "happy-dom": "^15.11.7",
     "tsup": "^8.0.0",
-    "typescript": "^7.0.2"
+    "typescript": "~5.9.3"
   },
   "module": "./dist/index.js",
   "keywords": [

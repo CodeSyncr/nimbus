@@ -6,6 +6,47 @@ This project follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-09-29
+
+### Added
+
+- **`plugins/cashier`: App Store Server API.** `iap.NewAppleServerAPI` reads a
+  subscription's latest signed transaction and renewal info from Apple with an
+  In-App Purchase key (issuer id, key id, .p8), so a server can ask Apple
+  before expiring a subscription whose notification never arrived. Answers are
+  reduced through the same verifier as notifications.
+  - Apple's root certificates are embedded, and receipt chains are checked for
+    Apple's receipt-signing extensions.
+- **`plugins/cashier`: richer store state on `contracts.IAPEntitlement`.**
+  `RenewalInfo`, `PeriodType` (trial, intro, normal), `PurchasedAt`, `Revoked`,
+  `BillingIssue` with `GraceExpiresAt`, Google's `Token`, `LinkedToken` and
+  `Acknowledged`, and StoreKit 2's `AppAccountToken`.
+- **`plugins/cashier`: canonical store notifications.** `IAPNotification` now
+  carries the store's delivery `ID` (for de-duplication), `Environment`,
+  `Subtype`, Google's `Token`, and the `Entitlement` Apple signs into every
+  notification. `Type` covers purchased, renewed, canceled, uncanceled,
+  expired, refunded, grace_period, billing_issue, product_change, paused,
+  recovered and test.
+- **`plugins/cashier`: Google acknowledgement.** `GoogleVerifier.Acknowledge`
+  and the `contracts.IAPAcknowledger` interface (Google refunds purchases not
+  acknowledged within three days); the metered verifier forwards it.
+- **`plugins/cashier`: lifecycle sync.** `Lifecycle.SyncProduct`,
+  `RevokeProduct` and `Emit` let a host mirror store state it already knows
+  (restores, re-reads of the same purchase) without emitting duplicate events.
+- **`packages/cashier-cloud` 0.2.0 (web SDK):** a native renderer for paywalls
+  designed in the Cashier console (flows of screens, every block type, art,
+  motion), `presentPaywall()` with hosted Stripe checkout, paywall languages
+  (`localizePaywall`), answers from Feedback and Marketing Consent screens,
+  paywall view and close events, experiments on `offerings()`, and webhook
+  signature helpers. New error codes `checkout_not_configured` and
+  `already_subscribed`.
+
+### Changed
+
+- **`plugins/cashier`: Google Play verification** uses the purchase token as
+  the stable identity of a purchase, reads subscriptions v2, and links
+  upgrades, downgrades and resubscribes to the purchase they replace.
+
 ## [1.8.2] - 2026-09-26
 
 ### Fixed
