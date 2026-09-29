@@ -298,3 +298,57 @@ func TestSubscriptionSuiteIsAlwaysAvailable(t *testing.T) {
 		t.Fatal("CustomerInfo must report the entitlement, not come back empty")
 	}
 }
+
+// Expiring one product must not take away an entitlement another product or a
+// promotional grant still provides.
+func TestExpirationSparesEntitlementsHeldElsewhere(t *testing.T) {
+	lc, cash, _ := harness(t)
+	lc.Catalog().RegisterProduct(Product{ID: "lifetime", Amount: 1, Entitlements: []string{"premium"}})
+
+	_, _ = lc.RecordNonRenewingPurchase("u1", "lifetime", time.Time{})
+	_, _ = lc.RecordExpiration("u1", "pro", ReasonUnsubscribe)
+	if !cash.HasAccess("u1", "premium") {
+		t.Fatal("expiring pro revoked premium that the lifetime purchase grants")
+	}
+
+	_, _ = lc.GrantPromotional("u2", "premium", time.Time{})
+	_, _ = lc.RecordExpiration("u2", "pro", ReasonUnsubscribe)
+	if !cash.HasAccess("u2", "premium") {
+		t.Fatal("expiring pro revoked a promotional grant")
+	}
+}
+
+// SyncProduct writes state silently and never shortens a longer grant from
+// another product.
+func TestSyncProductIsSilentAndKeepsLongerGrants(t *testing.T) {
+	lc, cash, events := harness(t)
+	lc.Catalog().RegisterProduct(Product{ID: "lifetime", Amount: 1, Entitlements: []string{"premium"}})
+
+	before := len(*events)
+	if _, err := lc.SyncProduct("u1", "pro", time.Now().Add(time.Hour), PeriodTrial, true); err != nil {
+		t.Fatal(err)
+	}
+	if len(*events) != before {
+		t.Fatal("SyncProduct emitted an event")
+	}
+	if !cash.HasAccess("u1", "premium") {
+		t.Fatal("SyncProduct did not grant")
+	}
+
+	_, _ = lc.SyncProduct("u1", "lifetime", time.Time{}, "", false)
+	_, _ = lc.SyncProduct("u1", "pro", time.Now().Add(time.Hour), "", true)
+	for _, e := range mustList(t, cash, "u1") {
+		if e.Plan == "premium" && e.ProductID != "lifetime" {
+			t.Fatalf("monthly sync overwrote the lifetime grant: %+v", e)
+		}
+	}
+}
+
+func mustList(t *testing.T, c *Cashier, subject string) []Entitlement {
+	t.Helper()
+	list, err := c.Paywall.Store().List(subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return list
+}

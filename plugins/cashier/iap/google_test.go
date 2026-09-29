@@ -74,8 +74,10 @@ func TestGoogle_VerifySubscription(t *testing.T) {
 	if ent.ProductID != "pro.monthly" {
 		t.Errorf("product id = %q", ent.ProductID)
 	}
-	if ent.OriginalTransactionID != "GPA.1" {
-		t.Errorf("order id not carried: %q", ent.OriginalTransactionID)
+	// The purchase token is the stable id (it survives renewals and is what
+	// notifications name); the order id is the latest charge.
+	if ent.OriginalTransactionID != "purchase-token" || ent.TransactionID != "GPA.1" {
+		t.Errorf("ids = %q / %q", ent.OriginalTransactionID, ent.TransactionID)
 	}
 	if ent.ExpiresAt == nil {
 		t.Error("expiry not parsed")
@@ -158,4 +160,105 @@ func (rt redirectTransport) RoundTrip(req *http.Request) (*http.Response, error)
 	newReq, _ := http.NewRequestWithContext(req.Context(), req.Method, target, req.Body)
 	newReq.Header = req.Header
 	return http.DefaultTransport.RoundTrip(newReq)
+}
+
+// googleServer answers the token exchange and one subscription lookup.
+func googleServer(t *testing.T, body string, onAck func(path string)) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/token"):
+			_, _ = w.Write([]byte(`{"access_token":"t","expires_in":3600}`))
+		case strings.HasSuffix(r.URL.Path, ":acknowledge"):
+			if onAck != nil {
+				onAck(r.URL.Path)
+			}
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			_, _ = w.Write([]byte(body))
+		}
+	}))
+}
+
+// A cancelled subscription keeps access until its paid period ends; only the
+// renewal is off. Reading CANCELED as inactive would cut paying users off.
+func TestGoogle_CanceledKeepsAccessUntilExpiry(t *testing.T) {
+	srv := googleServer(t, `{"subscriptionState":"SUBSCRIPTION_STATE_CANCELED","latestOrderId":"GPA.2",
+		"acknowledgementState":"ACKNOWLEDGEMENT_STATE_PENDING","linkedPurchaseToken":"old-token",
+		"lineItems":[{"productId":"pro.monthly","expiryTime":"2099-01-01T00:00:00Z",
+		"autoRenewingPlan":{"autoRenewEnabled":false},"offerPhase":{"freeTrial":{}}}]}`, nil)
+	defer srv.Close()
+	v, _ := NewGoogle(GoogleConfig{PackageName: "com.example.app", ServiceAccountJSON: googleTestSA(t, srv.URL+"/token")})
+	v.http = redirectingClient(srv.URL)
+
+	ent, err := v.VerifyReceipt(context.Background(), contracts.ReceiptParams{Token: "tok", Subscription: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ent.Active || ent.AutoRenewing {
+		t.Errorf("cancelled-but-paid subscription: active=%v renewing=%v", ent.Active, ent.AutoRenewing)
+	}
+	if ent.Acknowledged || ent.LinkedToken != "old-token" || ent.PeriodType != "trial" {
+		t.Errorf("ack/link/period not carried: %+v", ent)
+	}
+}
+
+func TestGoogle_OnHoldIsInactiveBillingIssue(t *testing.T) {
+	srv := googleServer(t, `{"subscriptionState":"SUBSCRIPTION_STATE_ON_HOLD",
+		"lineItems":[{"productId":"pro.monthly","expiryTime":"2000-01-01T00:00:00Z"}]}`, nil)
+	defer srv.Close()
+	v, _ := NewGoogle(GoogleConfig{PackageName: "com.example.app", ServiceAccountJSON: googleTestSA(t, srv.URL+"/token")})
+	v.http = redirectingClient(srv.URL)
+
+	ent, err := v.VerifyReceipt(context.Background(), contracts.ReceiptParams{Token: "tok", Subscription: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ent.Active || !ent.BillingIssue {
+		t.Errorf("account hold: %+v", ent)
+	}
+}
+
+func TestGoogle_Acknowledge(t *testing.T) {
+	var got string
+	srv := googleServer(t, `{}`, func(p string) { got = p })
+	defer srv.Close()
+	v, _ := NewGoogle(GoogleConfig{PackageName: "com.example.app", ServiceAccountJSON: googleTestSA(t, srv.URL+"/token")})
+	v.http = redirectingClient(srv.URL)
+
+	if err := v.Acknowledge(context.Background(), "pro.monthly", "tok", true); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(got, "/purchases/subscriptions/pro.monthly/tokens/tok:acknowledge") {
+		t.Errorf("acknowledged at %q", got)
+	}
+}
+
+func TestGoogle_VoidedAndForeignNotifications(t *testing.T) {
+	v, _ := NewGoogle(GoogleConfig{PackageName: "com.example.app", ServiceAccountJSON: googleTestSA(t, "http://x/token")})
+	wrap := func(inner map[string]any) []byte {
+		b, _ := json.Marshal(inner)
+		out, _ := json.Marshal(map[string]any{"message": map[string]any{
+			"data": base64.StdEncoding.EncodeToString(b), "messageId": "m-1",
+		}})
+		return out
+	}
+
+	n, err := v.ParseNotification(wrap(map[string]any{
+		"packageName":                "com.example.app",
+		"voidedPurchaseNotification": map[string]any{"purchaseToken": "ptok", "orderId": "GPA.9"},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n.Type != "refunded" || n.Token != "ptok" || n.ID != "m-1" {
+		t.Errorf("voided purchase: %+v", n)
+	}
+
+	if _, err := v.ParseNotification(wrap(map[string]any{
+		"packageName":              "com.other.app",
+		"subscriptionNotification": map[string]any{"notificationType": 2, "purchaseToken": "p"},
+	})); err == nil {
+		t.Fatal("a notification for another package was accepted")
+	}
 }

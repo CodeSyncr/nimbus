@@ -47,6 +47,14 @@ export interface ResolvedPackage {
 /** The paywall payload: the current offering with every product resolved. */
 export interface OfferingsResponse {
   currentOffering: string
+  /** The Cashier app's name, for {{app_name}} in paywall text. */
+  appName?: string
+  /** The current offering's published paywall, when it has one. */
+  paywall?: import('./paywall.js').PaywallDoc
+  /** Names the paywall in view/close events and answers. */
+  paywallId?: number
+  /** The experiment this customer is in, when one is running. */
+  experiment?: { id: number; variant: 'a' | 'b' }
   metadata?: Record<string, string>
   packages: ResolvedPackage[]
   /** The one-month package, if the offering has one. */
@@ -175,7 +183,11 @@ export type SubscriberReason =
   | 'customer_support'
   | 'unknown'
 
-/** One canonical moment in a subscriber's life. Also the outbound webhook payload. */
+/**
+ * One canonical moment in a subscriber's life, in the SDK's camelCase shape.
+ * Webhook deliveries are NOT this shape: type those with `CashierWebhook`
+ * and check them with `verifyCashierWebhook`.
+ */
 export interface SubscriberEvent {
   type: SubscriberEventType
   subject: string

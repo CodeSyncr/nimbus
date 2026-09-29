@@ -23,7 +23,7 @@ in-memory storage where `localStorage` is absent).
 ```typescript
 import { CashierCloud } from '@codesyncr/cashier-cloud'
 
-const cashier = new CashierCloud({ apiKey: 'cshr_web_…' })
+const cashier = new CashierCloud({ apiKey: 'cshr_pub_…' })
 
 // 1. What should the paywall present?
 const { packages } = await cashier.offerings()
@@ -48,7 +48,7 @@ Configure once for the page:
 ```typescript
 import { CashierCloud } from '@codesyncr/cashier-cloud'
 
-CashierCloud.configure({ apiKey: 'cshr_web_…', appUserId: user?.id })
+CashierCloud.configure({ apiKey: 'cshr_pub_…', appUserId: user?.id })
 
 // anywhere else
 const cashier = CashierCloud.getSharedInstance()
@@ -66,7 +66,7 @@ the instance — two of them would disagree about who is signed in.
 | `storage` | `Storage` | `localStorage`, else memory |
 
 **Only ever pass the public key.** It is scoped to reading this subscriber and
-starting a checkout. The secret `sk_…` key can grant entitlements and belongs on
+starting a checkout. The secret `cshr_live_…` key can grant entitlements and belongs on
 your own server, never in a page.
 
 **There is no `baseURL`.** The API origin is fixed at `https://nimbusgo.space`,
@@ -202,53 +202,104 @@ from each product's `periodMonths`, so a package called `starter` still resolves
 const { monthly, annual, lifetime } = await cashier.offerings()
 ```
 
-Pass a currency when you already know where the visitor is, rather than quoting
-dollars first and correcting yourself:
-
-```typescript
-await cashier.offerings({ currency: 'EUR' })
-```
+Prices are the ones set on each product in the console, in that product's
+currency.
 
 > **Amounts are in the smallest currency unit** — paise, cents. `149900` is
 > ₹1,499.00. Format with `Intl.NumberFormat`, dividing by 100.
 
-### `purchase(target, options?)`
+### Taking web payments
 
-Starts a web checkout and sends the browser to it. Web purchases settle through
-Stripe.
+Cashier hosts the checkout on **your own Stripe account**. Connect it once in
+the console — your app → **Settings → Web payments · Stripe**: paste a secret key
+(`sk_live_…`, or a restricted `rk_…` key with write access to Checkout Sessions
+and read access to Subscriptions, Invoices and Charges), add the webhook URL shown
+there as an endpoint in Stripe (events `checkout.session.completed`,
+`invoice.paid`, `invoice.payment_failed`, `customer.subscription.updated`,
+`customer.subscription.deleted`, `charge.refunded`), and paste that endpoint's
+signing secret (`whsec_…`).
+
+Then `purchase()` sends the buyer to Stripe Checkout, priced from the Cashier
+product — a subscription with the product's period and free trial, or a
+one-time payment for a lifetime product:
 
 ```typescript
-await cashier.purchase(packages[0], {
-  successUrl: 'https://example.com/welcome',
-  cancelUrl: 'https://example.com/pricing',
+const { annual } = await cashier.offerings()
+
+await cashier.purchase(annual, {               // a package, a product, or a product id
+  successUrl: 'https://example.com/welcome',   // default: the current page
+  cancelUrl: 'https://example.com/pricing',    // default: the current page
 })
+// The browser is now on checkout.stripe.com. purchase() resolves with { url };
+// pass { redirect: false } (or call it outside a browser) to only get the URL.
 ```
 
-`target` may be a package, a product, or a bare product id. `successUrl` and
-`cancelUrl` default to the current page.
-
-| Option | Effect |
-|---|---|
-| `customerEmail` | Pre-fills checkout, skipping the email step |
-| `locale` | BCP-47 tag for checkout's language, e.g. `hi-IN` |
-| `metadata` | Carried through to your webhook on the resulting event |
-| `redirect: false` | Returns the URL instead of navigating to it |
-
-This **navigates away**, so treat the call as the end of the page's life. To
-handle the redirect yourself, pass `redirect: false` and use the returned URL:
-
-```typescript
-const { url } = await cashier.purchase(pkg, { redirect: false })
-```
-
-Nothing is unlocked when the customer returns to your success URL — it is
-unlocked when Stripe tells Cloud the money moved. Always refetch:
+When the buyer pays, Stripe tells Cloud and the entitlement is granted to the
+app user id that started the checkout — renewals, cancellations, failed
+payments and refunds follow the same way, as the same events and revenue as
+App Store and Play purchases. On the success page:
 
 ```typescript
 const info = await cashier.customerInfo({ force: true })
+if (info.entitlements.premium?.active) unlockPro()
 ```
 
----
+The webhook can land a second or two after the redirect; if the entitlement is
+not there yet, poll `customerInfo({ force: true })` briefly.
+
+`presentPaywall()` does all of this by itself: without `onPurchase`, its
+purchase button calls `purchase(pkg)` with the current page as both return
+URLs (override with `successUrl` / `cancelUrl`; failures go to `onError`).
+
+If the app has not connected Stripe, `purchase()` rejects with
+`checkout_not_configured`:
+
+```typescript
+try {
+  await cashier.purchase(pkg)
+} catch (err) {
+  if (err instanceof CashierCloudError && err.code === CashierErrorCode.CheckoutNotConfigured) {
+    // connect Stripe in the Cashier console first
+  }
+}
+```
+
+**Your own checkout instead.** Pass `onPurchase` to `presentPaywall()` and take
+the payment yourself; when your provider confirms the charge, **your server**
+records it with the secret key:
+
+```sh
+curl -X POST https://nimbusgo.space/api/cashier/v1/purchases \
+  -H "Authorization: Bearer $CASHIER_SECRET_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"app_user_id":"user_42","product_id":"pro_monthly"}'
+```
+
+### Languages, answers and experiments
+
+The paywall you design in the console can carry translations, questions and
+an A/B test; `presentPaywall()` handles all three:
+
+```typescript
+await cashier.presentPaywall({
+  locale: 'es-MX',                 // default: navigator.language
+  onAnswer: ({ screen_id, question, answer }) => {
+    if (question === 'Marketing emails' && answer === 'yes') subscribeToNewsletter()
+  },
+})
+```
+
+- **Languages.** The paywall shows the translation that matches `locale`
+  exactly, else one in the same language (`es-MX` → `es`), else the texts as
+  written. `localizePaywall(doc, locale)` does the same for your own renderer.
+- **Answers.** Buttons on Feedback and Marketing Consent screens can carry an
+  answer. A tap calls `onAnswer`, and Cashier records it (Responses in the
+  console, a `paywall_response` webhook event).
+- **Experiments.** `offerings()` sends the app user id, so a customer in a
+  running experiment gets their variant's offering and paywall;
+  `offerings().experiment` says which (`{ id, variant: 'a' | 'b' }`). The
+  paywall reports when it is shown and dismissed, which is what the console
+  compares.
 
 ## Errors
 
@@ -283,7 +334,10 @@ try {
 | `subscriber_not_found` | Never seen this subscriber |
 | `payment_required` | The account is over its plan |
 | `user_cancelled` | The customer walked away from checkout |
-| `checkout_failed` | Checkout could not be started |
+| `checkout_failed` | Checkout could not be started (Stripe refused, bad return URLs) |
+| `checkout_not_configured` | The app has not connected Stripe for web payments |
+| `already_subscribed` | The customer already has an active web subscription; change or cancel it instead |
+| `checkout_unavailable` | Older Cloud servers without hosted checkout (kept for compatibility) |
 | `rate_limited` | Too many requests |
 | `server_error` | Cloud faulted |
 | `unknown` | Anything else |
@@ -329,21 +383,39 @@ Everything is exported: `CustomerInfo`, `EntitlementInfo`, `Product`, `Package`,
 `Offering`, `ResolvedPackage`, `OfferingsResponse`, `Subscription`,
 `SubscriptionStatus`, `PeriodType`, `EntitlementSource`, `Entitlement`.
 
-`SubscriberEvent` is also exported — it is the payload Cloud posts to your
-backend's webhook, so you can type that handler with the same package:
+### Webhooks on your backend
+
+Cashier posts every subscriber event to your webhook URL, signed with your
+app's webhook secret. `verifyCashierWebhook` checks the `Cashier-Signature`
+header over the **raw** body and returns the typed payload (Node 18+, Deno,
+Bun, edge runtimes):
 
 ```typescript
-import type { SubscriberEvent } from '@codesyncr/cashier-cloud'
+import { verifyCashierWebhook } from '@codesyncr/cashier-cloud'
 
-export function handleCashierWebhook(event: SubscriberEvent) {
-  switch (event.type) {
+// Express: app.post('/cashier', express.raw({ type: 'application/json' }), handler)
+export async function handler(req, res) {
+  const hook = await verifyCashierWebhook(
+    process.env.CASHIER_WEBHOOK_SECRET!,
+    req.header('cashier-signature'),
+    req.body,                         // the raw bytes, not parsed JSON
+  )
+  if (!hook) return res.status(400).end()
+
+  const e = hook.event                // snake_case, exactly as sent
+  switch (e.type) {
     case 'initial_purchase':
-    case 'renewal':          return grant(event.subject, event.entitlementIds)
-    case 'billing_issue':    return emailAboutPayment(event.subject)
-    case 'expiration':       return revoke(event.subject, event.entitlementIds)
+    case 'renewal':        await grant(e.app_user_id, e.entitlement_ids); break
+    case 'billing_issue':  await emailAboutPayment(e.app_user_id); break
+    case 'expiration':     await revoke(e.app_user_id, e.entitlement_ids); break
+    case 'paywall_response': await saveAnswer(e.app_user_id, e.question, e.answer); break
   }
+  res.status(200).end()               // anything else is retried: 1m, 5m, 30m, 2h, 6h, 12h
 }
 ```
+
+Type a handler that doesn't verify with `CashierWebhook` / `CashierWebhookEvent`.
+`SubscriberEvent` is the SDK's camelCase shape and is not what webhooks carry.
 
 ---
 

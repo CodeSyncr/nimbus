@@ -4,13 +4,15 @@
  * This is the browser half — the counterpart of the iOS and Android SDKs. It
  * holds a **public** key, so everything it can do is safe to ship in a page:
  * read what the paywall should sell, read what the current subscriber owns,
- * and start a checkout. It cannot grant an entitlement; only Cloud can, and
- * only after a store or Stripe has confirmed the money moved.
+ * show the paywall, and send the buyer to Cashier's hosted checkout. It cannot
+ * grant an entitlement: access follows only once Stripe (or the App Store /
+ * Play) confirms the payment to Cloud.
  *
- *     const cashier = new CashierCloud({ apiKey: 'cshr_web_…' })
+ *     const cashier = new CashierCloud({ apiKey: 'cshr_pub_…' })
  *
  *     const { packages } = await cashier.offerings()
- *     await cashier.purchase(packages[0], { successUrl, cancelUrl })
+ *     await cashier.purchase(packages[0])     // → Stripe Checkout
+ *     await cashier.presentPaywall()           // or let the paywall do it
  *
  *     const info = await cashier.customerInfo()
  *     if (info.entitlements.premium?.active) unlockPro()
@@ -22,6 +24,7 @@
  */
 
 import { asBool, asDate, asNumber, asString, pick } from './decode.js'
+import { formatAmount, paywallSavings, periodWord, renderPaywall, type PaywallAnswer, type PaywallDoc, type PaywallPackageView } from './paywall.js'
 import type {
   CustomerInfo,
   EntitlementInfo,
@@ -55,7 +58,7 @@ const ANON_KEY = 'cashier.anonymousId'
 const API_ORIGIN = 'https://nimbusgo.space'
 
 export interface CashierCloudOptions {
-  /** The public SDK key for this app, e.g. `cshr_web_…`. Safe to ship in a page. */
+  /** The public SDK key for this app, e.g. `cshr_pub_…`. Safe to ship in a page. */
   apiKey: string
   /**
    * Your own user id. Omit it and an anonymous id is generated and persisted,
@@ -95,6 +98,18 @@ export const CashierErrorCode = {
   UserCancelled: 'user_cancelled',
   /** Checkout could not be started. */
   CheckoutFailed: 'checkout_failed',
+  /**
+   * The app has not connected a web payment provider (Stripe) in the Cashier
+   * console, so `purchase()` cannot start a hosted checkout.
+   */
+  CheckoutNotConfigured: 'checkout_not_configured',
+  /** The customer already has an active web subscription; a second checkout would bill them twice. */
+  AlreadySubscribed: 'already_subscribed',
+  /**
+   * Returned by Cloud servers that predate the hosted checkout.
+   * @deprecated Kept for older servers; current ones answer `checkout_not_configured`.
+   */
+  CheckoutUnavailable: 'checkout_unavailable',
   RateLimited: 'rate_limited',
   ServerError: 'server_error',
 } as const
@@ -127,9 +142,13 @@ export class CashierCloudError extends Error {
 
 /** Maps a response onto a stable code, preferring one Cloud sent explicitly. */
 function errorCodeFor(status: number, body: unknown): CashierErrorCode {
-  const explicit = (body as any)?.code
-  if (typeof explicit === 'string' && (Object.values(CashierErrorCode) as string[]).includes(explicit)) {
-    return explicit as CashierErrorCode
+  // Cloud answers {"error": "<code>", "message": "…"}; older shapes used "code".
+  for (const key of ['code', 'error']) {
+    const explicit = (body as any)?.[key]
+    if (typeof explicit !== 'string') continue
+    if ((Object.values(CashierErrorCode) as string[]).includes(explicit)) return explicit as CashierErrorCode
+    const alias = SERVER_CODES[explicit]
+    if (alias) return alias
   }
   switch (status) {
     case 0:
@@ -148,7 +167,30 @@ function errorCodeFor(status: number, body: unknown): CashierErrorCode {
   }
 }
 
+/** Server error codes that map onto a differently named SDK code. */
+const SERVER_CODES: Record<string, CashierErrorCode> = {
+  unknown_product: CashierErrorCode.ProductNotAvailable,
+  invalid_checkout: CashierErrorCode.CheckoutFailed,
+  not_found: CashierErrorCode.SubscriberNotFound,
+  secret_key_required: CashierErrorCode.InvalidApiKey,
+}
+
 export type CustomerInfoListener = (info: CustomerInfo) => void
+
+/** Where hosted checkout returns the buyer. */
+export interface PurchaseOptions {
+  /**
+   * Where Stripe sends the buyer after paying. Defaults to the current page.
+   * https, or http on localhost. Stripe replaces `{CHECKOUT_SESSION_ID}` in it.
+   */
+  successUrl?: string
+  /** Where Stripe sends the buyer if they back out. Defaults to the current page. */
+  cancelUrl?: string
+  /** The offering the package came from, for your analytics (optional). */
+  offeringId?: string
+  /** Navigate to checkout (default true in a browser). False just returns the URL. */
+  redirect?: boolean
+}
 
 export class CashierCloud {
   private readonly opts: CashierCloudOptions
@@ -214,20 +256,17 @@ export class CashierCloud {
   // ── Paywall ─────────────────────────────────────────────────────
 
   /**
-   * The current offering, with each package's product resolved.
-   *
-   * Pass a `currency` to price it in something other than the subscriber's
-   * default — a paywall shown to a visitor whose country you already know
-   * should not quote them dollars first and correct itself later.
+   * The current offering, with each package's product resolved. Prices are
+   * the ones set on each product in the console, in its own currency.
    */
-  async offerings(options: { currency?: string } = {}): Promise<OfferingsResponse> {
-    const query = options.currency ? `?currency=${encodeURIComponent(options.currency)}` : ''
-    return decodeOfferings(await this.request('GET', `/v1/offerings${query}`))
+  async offerings(): Promise<OfferingsResponse> {
+    // The app user id puts this customer in a running experiment, if any.
+    return decodeOfferings(await this.request('GET', `/api/cashier/v1/offerings?app_user_id=${encodeURIComponent(this.appUserId)}`))
   }
 
   /** The current offering's packages, for a paywall that only renders a list. */
-  async packages(options: { currency?: string } = {}): Promise<ResolvedPackage[]> {
-    return (await this.offerings(options)).packages
+  async packages(): Promise<ResolvedPackage[]> {
+    return (await this.offerings()).packages
   }
 
   // ── Subscriber state ────────────────────────────────────────────
@@ -240,7 +279,7 @@ export class CashierCloud {
     if (!options.force && this.cached) return this.cached
     if (!options.force && this.inflight) return this.inflight
 
-    const promise = this.request('GET', `/v1/subscribers/${encodeURIComponent(this.subject)}`)
+    const promise = this.request('GET', `/api/cashier/v1/subscribers/${encodeURIComponent(this.subject)}`)
       .then((body) => {
         const info = decodeCustomerInfo(body)
         this.cached = info
@@ -293,7 +332,7 @@ export class CashierCloud {
     const previous = this.subject
     if (previous === appUserId) return this.customerInfo()
 
-    const body = await this.request('POST', `/v1/subscribers/${encodeURIComponent(previous)}/alias`, {
+    const body = await this.request('POST', `/api/cashier/v1/subscribers/${encodeURIComponent(previous)}/alias`, {
       newAppUserId: appUserId,
     })
     this.subject = appUserId
@@ -321,54 +360,158 @@ export class CashierCloud {
   // ── Purchasing ──────────────────────────────────────────────────
 
   /**
-   * Starts a web checkout for a package and sends the browser to it.
+   * Starts Cashier's hosted web checkout for a package, product or product id
+   * and sends the browser there (`window.location.assign`). Resolves with the
+   * checkout `url`; outside a browser, or with `{ redirect: false }`, it only
+   * returns it.
    *
-   * Web purchases settle through Stripe, so this navigates away and the
-   * promise never resolves — treat the call as the end of the page's life, and
-   * refetch CustomerInfo on the success URL.
+   * The app connects its own Stripe account in the Cashier console (Settings →
+   * Web payments); the price comes from the Cashier product. When the buyer
+   * pays, Stripe tells Cloud and the entitlement is granted to the current app
+   * user id — call `customerInfo({ force: true })` on the success page.
+   *
+   * Rejects with `checkout_not_configured` when the app has no Stripe
+   * connection, `product_not_available` for an unknown product.
    */
-  async purchase(
-    target: ResolvedPackage | Product | string,
-    options: {
-      successUrl?: string
-      cancelUrl?: string
-      /** Set false to receive the URL instead of navigating to it. */
-      redirect?: boolean
-      /** Pre-fills checkout, skipping the email step. */
-      customerEmail?: string
-      /** BCP-47 tag for the checkout's language, e.g. "hi-IN". */
-      locale?: string
-      /** Carried through to your webhook on the resulting subscriber event. */
-      metadata?: Record<string, string>
-    } = {},
-  ): Promise<{ url: string }> {
-    const packageId = typeof target === 'string' ? undefined : 'product' in target ? target.id : undefined
-    const productId = typeof target === 'string' ? target : 'product' in target ? target.product.id : target.id
-
-    const body = await this.request('POST', '/v1/checkout', {
-      packageId,
-      productId,
-      successUrl: options.successUrl ?? currentUrl(),
-      cancelUrl: options.cancelUrl ?? currentUrl(),
-      customerEmail: options.customerEmail,
-      locale: options.locale,
-      metadata: options.metadata,
-    })
-    const url = asString(pick(body, 'url', 'checkout_url'))
-    if (!url) {
-      throw new CashierCloudError(
-        'cashier-cloud: checkout returned no URL',
-        CashierErrorCode.CheckoutFailed,
-        502,
-        body,
-      )
+  async purchase(target: ResolvedPackage | Product | string, options: PurchaseOptions = {}): Promise<{ url: string }> {
+    const { productId, packageId } = purchaseTarget(target)
+    if (!productId) {
+      throw new CashierCloudError('cashier-cloud: purchase needs a package, a product or a product id', CashierErrorCode.ProductNotAvailable, 0)
     }
-
-    if (options.redirect !== false) {
-      const location = (globalThis as any)?.location
-      if (location?.assign) location.assign(url)
+    const loc = (globalThis as any).location as { href?: string; assign?: (url: string) => void } | undefined
+    const here = typeof loc?.href === 'string' ? loc.href : undefined
+    const successUrl = options.successUrl ?? here
+    const cancelUrl = options.cancelUrl ?? here
+    if (!successUrl || !cancelUrl) {
+      throw new CashierCloudError('cashier-cloud: purchase needs successUrl and cancelUrl outside a browser', CashierErrorCode.CheckoutFailed, 0)
     }
+    const body: Record<string, string> = {
+      app_user_id: this.subject,
+      product_id: productId,
+      success_url: successUrl,
+      cancel_url: cancelUrl,
+    }
+    if (packageId) body.package_id = packageId
+    if (options.offeringId) body.offering_id = options.offeringId
+
+    const res = await this.request('POST', '/api/cashier/v1/checkout', body)
+    const url = asString(pick(res, 'url'))
+    if (!url) throw new CashierCloudError('cashier-cloud: Cloud returned no checkout URL', CashierErrorCode.CheckoutFailed, 200, res)
+    // Whatever happens next happens on Stripe; the next read must refetch.
+    this.invalidate()
+    if (options.redirect !== false && typeof loc?.assign === 'function') loc.assign(url)
     return { url }
+  }
+
+  // ── Paywalls ────────────────────────────────────────────────────
+
+  /**
+   * Shows the current offering's paywall — designed in the Cashier console —
+   * as a full-screen overlay, and resolves when it closes.
+   *
+   * Without `onPurchase`, the purchase button starts Cashier's hosted checkout
+   * (`purchase(pkg)`), returning to `successUrl` / `cancelUrl` — the current
+   * page by default. Pass `onPurchase` to take the payment yourself instead:
+   * it receives the chosen package; charge it, record it from your server
+   * with the secret key (POST /api/cashier/v1/purchases), and return. The SDK
+   * then refetches CustomerInfo and closes the paywall if the purchase
+   * granted `entitlement` (when given).
+   */
+  async presentPaywall(options: {
+    onPurchase?: (pkg: ResolvedPackage) => void | Promise<void>
+    /** Hosted checkout return URLs (default: the current page). */
+    successUrl?: string
+    cancelUrl?: string
+    /** Called when the hosted checkout cannot start (default: console.error). */
+    onError?: (error: unknown) => void
+    onRestore?: () => void | Promise<void>
+    /** Close automatically once this entitlement is active. */
+    entitlement?: string
+    /** Mount point (default document.body). */
+    container?: HTMLElement
+    closable?: boolean
+    /** Language for prices and for the paywall's translations (default: the browser's). */
+    locale?: string
+    /** A Feedback or Marketing Consent button was tapped. Cashier records it too. */
+    onAnswer?: (answer: PaywallAnswer) => void
+  } = {}): Promise<{ purchased: boolean; customerInfo: CustomerInfo | null }> {
+    const doc = (globalThis as any).document as Document | undefined
+    if (!doc) throw new Error('cashier-cloud: presentPaywall needs a browser document')
+    const offerings = await this.offerings()
+    if (!offerings.paywall) {
+      throw new CashierCloudError('cashier-cloud: the current offering has no published paywall', CashierErrorCode.OfferingNotFound, 404)
+    }
+    const savings = paywallSavings(offerings.packages.map((p) => ({ id: p.id, amount: p.product.amount ?? 0, months: p.product.periodMonths ?? 0 })))
+    const views = offerings.packages.map((p) => ({ ...packageView(p, options.locale), savings: savings[p.id] }))
+    const byId = new Map(offerings.packages.map((p) => [p.id, p]))
+
+    return new Promise((resolve) => {
+      const overlay = doc.createElement('div')
+      Object.assign(overlay.style, {
+        position: 'fixed', inset: '0', zIndex: '2147483000', background: 'rgba(8,8,12,.55)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', boxSizing: 'border-box',
+      })
+      const frame = doc.createElement('div')
+      Object.assign(frame.style, {
+        width: '100%', maxWidth: '440px', maxHeight: '100%', overflowY: 'auto', borderRadius: '24px',
+        boxShadow: '0 30px 80px -20px rgba(0,0,0,.5)',
+      })
+      overlay.appendChild(frame)
+      let purchased = false
+      const close = () => {
+        overlay.remove()
+        if (!purchased) this.paywallEvent(offerings, 'close')
+        resolve({ purchased, customerInfo: this.current })
+      }
+      const locale = options.locale ?? ((globalThis as any).navigator?.language as string | undefined)
+      frame.appendChild(renderPaywall(offerings.paywall!, {
+        appName: offerings.appName ?? '',
+        packages: views,
+        closable: options.closable,
+        locale,
+        onClose: close,
+        onRestore: options.onRestore,
+        onAnswer: (answer) => {
+          try { options.onAnswer?.(answer) } catch (err) { console.error(err) }
+          if (offerings.paywallId) {
+            this.request('POST', '/api/cashier/v1/paywalls/responses', { app_user_id: this.appUserId, paywall_id: offerings.paywallId, ...answer }).catch(() => {})
+          }
+        },
+        onPurchase: async (view) => {
+          const pkg = byId.get(view.id)
+          if (!pkg) return
+          if (!options.onPurchase) {
+            const href = (globalThis as any).location?.href as string | undefined
+            try {
+              await this.purchase(pkg, {
+                successUrl: options.successUrl ?? href,
+                cancelUrl: options.cancelUrl ?? href,
+                offeringId: offerings.currentOffering || undefined,
+              })
+            } catch (err) {
+              if (options.onError) options.onError(err)
+              else console.error(err)
+            }
+            // The page is on its way to checkout; it comes back to successUrl.
+            return
+          }
+          await options.onPurchase(pkg)
+          purchased = true
+          const info = await this.customerInfo({ force: true })
+          if (!options.entitlement || info.entitlements[options.entitlement]?.active) close()
+        },
+      }))
+      ;(options.container ?? doc.body).appendChild(overlay)
+      this.paywallEvent(offerings, 'view')
+    })
+  }
+
+  /** Reports a paywall view or close; never throws, never waits. */
+  private paywallEvent(offerings: OfferingsResponse, type: 'view' | 'close'): void {
+    if (!offerings.paywallId) return
+    const body: Record<string, unknown> = { app_user_id: this.appUserId, paywall_id: offerings.paywallId, type }
+    if (offerings.experiment) Object.assign(body, { experiment_id: offerings.experiment.id, variant: offerings.experiment.variant })
+    this.request('POST', '/api/cashier/v1/paywalls/events', body).catch(() => {})
   }
 
   // ── Internals ───────────────────────────────────────────────────
@@ -437,17 +580,22 @@ export class CashierCloud {
 
 // ── Helpers ───────────────────────────────────────────────────────
 
+/** What purchase() was asked to buy. */
+function purchaseTarget(target: ResolvedPackage | Product | string): { productId: string; packageId?: string } {
+  if (typeof target === 'string') return { productId: target.trim() }
+  if (target && typeof target === 'object' && 'product' in target && target.product) {
+    return { productId: target.product.id, packageId: target.id || undefined }
+  }
+  return { productId: (target as Product)?.id ?? '' }
+}
+
 function errorMessage(body: unknown): string | undefined {
   if (typeof body === 'string' && body) return body
   if (body && typeof body === 'object') {
-    const err = (body as any).error ?? (body as any).message
+    const err = (body as any).message ?? (body as any).error
     if (typeof err === 'string') return `cashier-cloud: ${err}`
   }
   return undefined
-}
-
-function currentUrl(): string | undefined {
-  return (globalThis as any)?.location?.href
 }
 
 function randomId(): string {
@@ -495,13 +643,36 @@ export function decodeProduct(raw: any): Product {
   }
 }
 
+/** A package priced for the web paywall from the console's product price. */
+function packageView(p: ResolvedPackage, locale?: string): PaywallPackageView {
+  const months = p.product.periodMonths ?? 0
+  const amount = p.product.amount ?? 0
+  const currency = p.product.currency ?? ''
+  return {
+    id: p.id,
+    productName: p.product.name || p.product.id,
+    price: formatAmount(amount, currency, locale),
+    period: periodWord(months),
+    pricePerMonth: months > 1 ? formatAmount(Math.round(amount / months), currency, locale) : '',
+    trial: p.product.trialDays ? `${p.product.trialDays}-day` : '',
+  }
+}
+
 export function decodeOfferings(raw: any): OfferingsResponse {
   const packages = (pick<any[]>(raw, 'packages') ?? []).map((p) => ({
     id: asString(pick(p, 'id')),
     product: decodeProduct(pick(p, 'product') ?? {}),
   }))
+  const paywall = pick<PaywallDoc>(raw, 'paywall')
+  const exp = pick<any>(raw, 'experiment')
+  const paywallId = Number(pick(raw, 'paywall_id')) || undefined
   return {
     currentOffering: asString(pick(raw, 'current_offering', 'id')),
+    appName: asString(pick(raw, 'app_name')) || undefined,
+    // A flow of screens (version 2), or version 1's single list of blocks.
+    paywall: paywall && (Array.isArray(paywall.screens) || Array.isArray(paywall.blocks)) ? paywall : undefined,
+    paywallId: paywall ? paywallId : undefined,
+    experiment: exp && Number(exp.id) > 0 && (exp.variant === 'a' || exp.variant === 'b') ? { id: Number(exp.id), variant: exp.variant } : undefined,
     metadata: pick<Record<string, string>>(raw, 'metadata'),
     packages,
     // Paywall code wants "the monthly one", not packages[0]. Derived from the

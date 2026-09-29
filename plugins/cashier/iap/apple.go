@@ -7,9 +7,11 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"crypto/x509"
+	"encoding/asn1"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/CodeSyncr/nimbus/plugins/cashier/contracts"
@@ -30,6 +32,16 @@ No network call is needed to verify a StoreKit 2 JWS: everything required is in
 the token and the pinned Apple root. That is the whole point of the V2 design.
 */
 
+// Apple marks the certificates it uses for App Store receipts with its own
+// extensions. Apple Root CA - G3 also anchors the developer-relations
+// intermediates that issue ordinary developer certificates, so a chain that
+// merely reaches the root is not enough: without these checks any developer
+// could sign a "transaction" with their own certificate and pass.
+var (
+	oidAppleReceiptSigner = asn1.ObjectIdentifier{1, 2, 840, 113635, 100, 6, 11, 1}
+	oidAppleIntermediate  = asn1.ObjectIdentifier{1, 2, 840, 113635, 100, 6, 2, 1}
+)
+
 // AppleVerifier verifies StoreKit 2 JWS transactions and V2 notifications.
 type AppleVerifier struct {
 	// bundleID is the app the receipts must belong to; a transaction for a
@@ -47,8 +59,8 @@ type AppleConfig struct {
 	BundleID     string
 	AllowSandbox bool
 	// RootCertsPEM is Apple's root certificate(s) in PEM. Required: without a
-	// pinned root there is nothing to anchor the chain to. Apple publishes the
-	// "Apple Root CA - G3" certificate for this.
+	// pinned root there is nothing to anchor the chain to. AppleRootCAG3PEM is
+	// the one Apple uses.
 	RootCertsPEM []byte
 }
 
@@ -80,13 +92,27 @@ type appleTransaction struct {
 	ExpiresDate           int64  `json:"expiresDate"`
 	Environment           string `json:"environment"` // "Production" | "Sandbox"
 	RevocationDate        int64  `json:"revocationDate"`
+	AppAccountToken       string `json:"appAccountToken"`
+	// OfferType: 1 introductory, 2 promotional, 3 offer code, 4 win-back.
+	OfferType int `json:"offerType"`
+	// OfferDiscountType: "FREE_TRIAL" | "PAY_AS_YOU_GO" | "PAY_UP_FRONT".
+	OfferDiscountType string `json:"offerDiscountType"`
 	// Price is in milliunits of Currency in StoreKit 2 (e.g. 4990 = 4.99).
 	Price    int64  `json:"price"`
 	Currency string `json:"currency"`
 }
 
-// VerifyReceipt verifies a StoreKit 2 signed transaction and returns the
-// entitlement it proves.
+// appleRenewalInfo is the JWS payload of a subscription's signed renewal info.
+type appleRenewalInfo struct {
+	OriginalTransactionID  string `json:"originalTransactionId"`
+	AutoRenewProductID     string `json:"autoRenewProductId"`
+	AutoRenewStatus        int    `json:"autoRenewStatus"` // 1 on, 0 off
+	IsInBillingRetryPeriod bool   `json:"isInBillingRetryPeriod"`
+	GracePeriodExpiresDate int64  `json:"gracePeriodExpiresDate"`
+}
+
+// VerifyReceipt verifies a StoreKit 2 signed transaction (and, when the app
+// sends it, the signed renewal info) and returns the entitlement it proves.
 func (a *AppleVerifier) VerifyReceipt(ctx context.Context, p contracts.ReceiptParams) (*contracts.IAPEntitlement, error) {
 	if p.Token == "" {
 		return nil, fmt.Errorf("cashier/iap/apple: the signed transaction (Token) is required")
@@ -105,42 +131,102 @@ func (a *AppleVerifier) VerifyReceipt(ctx context.Context, p contracts.ReceiptPa
 		return nil, fmt.Errorf("cashier/iap/apple: refusing a %s receipt on a production verifier", tx.Environment)
 	}
 
+	var renewal *appleRenewalInfo
+	if p.RenewalInfo != "" {
+		var ri appleRenewalInfo
+		if err := a.verifyJWS(p.RenewalInfo, &ri); err != nil {
+			return nil, err
+		}
+		// Renewal info for a different subscription would let a client pair
+		// one purchase with another's grace period.
+		if ri.OriginalTransactionID != tx.OriginalTransactionID {
+			return nil, fmt.Errorf("cashier/iap/apple: renewal info belongs to another subscription")
+		}
+		renewal = &ri
+	}
+
+	ent := appleEntitlement(tx, renewal)
+	ent.Subject = p.Subject
+	return ent, nil
+}
+
+// appleEntitlement reduces a verified transaction (and renewal info, when
+// known) to the canonical entitlement.
+func appleEntitlement(tx appleTransaction, renewal *appleRenewalInfo) *contracts.IAPEntitlement {
 	ent := &contracts.IAPEntitlement{
 		Platform:              contracts.PlatformApple,
 		ProductID:             tx.ProductID,
-		Subject:               p.Subject,
 		TransactionID:         tx.TransactionID,
 		OriginalTransactionID: tx.OriginalTransactionID,
 		Subscription:          tx.ExpiresDate > 0,
 		Environment:           envLabel(tx.Environment),
 		PriceMicros:           tx.Price * 1000, // milliunits → micros
 		Currency:              tx.Currency,
+		Revoked:               tx.RevocationDate != 0,
+		AppAccountToken:       tx.AppAccountToken,
+		PeriodType:            applePeriodType(tx),
 		Raw:                   map[string]any{"type": tx.Type},
 	}
-	if tx.ExpiresDate > 0 {
-		exp := msToTime(tx.ExpiresDate)
-		ent.ExpiresAt = &exp
-		ent.Active = tx.RevocationDate == 0 && time.Now().Before(exp)
-	} else {
+	if tx.PurchaseDate > 0 {
+		at := msToTime(tx.PurchaseDate)
+		ent.PurchasedAt = &at
+	}
+	if !ent.Subscription {
 		// A non-consumable or consumable purchase is owned once verified,
 		// unless it was revoked (refunded).
-		ent.Active = tx.RevocationDate == 0
+		ent.Active = !ent.Revoked
+		return ent
 	}
-	return ent, nil
+
+	exp := msToTime(tx.ExpiresDate)
+	ent.ExpiresAt = &exp
+	// Without renewal info, assume the subscription renews: that is the store
+	// default, and a cancellation arrives as a notification.
+	ent.AutoRenewing = true
+	accessUntil := exp
+	if renewal != nil {
+		ent.AutoRenewing = renewal.AutoRenewStatus == 1
+		ent.BillingIssue = renewal.IsInBillingRetryPeriod
+		if renewal.GracePeriodExpiresDate > 0 {
+			grace := msToTime(renewal.GracePeriodExpiresDate)
+			ent.GraceExpiresAt = &grace
+			if grace.After(accessUntil) {
+				accessUntil = grace
+			}
+		}
+	}
+	ent.Active = !ent.Revoked && time.Now().Before(accessUntil)
+	return ent
+}
+
+func applePeriodType(tx appleTransaction) string {
+	if tx.ExpiresDate == 0 {
+		return ""
+	}
+	if tx.OfferType != 1 {
+		return "normal"
+	}
+	if tx.OfferDiscountType == "FREE_TRIAL" || (tx.OfferDiscountType == "" && tx.Price == 0) {
+		return "trial"
+	}
+	return "intro"
 }
 
 // appleNotification is the outer V2 notification payload.
 type appleNotification struct {
 	NotificationType string `json:"notificationType"`
 	Subtype          string `json:"subtype"`
+	NotificationUUID string `json:"notificationUUID"`
 	Data             struct {
 		SignedTransactionInfo string `json:"signedTransactionInfo"`
+		SignedRenewalInfo     string `json:"signedRenewalInfo"`
 		BundleID              string `json:"bundleId"`
+		Environment           string `json:"environment"`
 	} `json:"data"`
 }
 
 // ParseNotification verifies an App Store Server Notification V2 and reduces it
-// to the canonical shape.
+// to the canonical shape, including the purchase state it vouches for.
 func (a *AppleVerifier) ParseNotification(payload []byte) (*contracts.StoreNotification, error) {
 	var wrap struct {
 		SignedPayload string `json:"signedPayload"`
@@ -152,24 +238,39 @@ func (a *AppleVerifier) ParseNotification(payload []byte) (*contracts.StoreNotif
 	if err := a.verifyJWS(wrap.SignedPayload, &note); err != nil {
 		return nil, err
 	}
+	if note.Data.BundleID != "" && note.Data.BundleID != a.bundleID {
+		return nil, fmt.Errorf("cashier/iap/apple: notification is for bundle %q, not %q", note.Data.BundleID, a.bundleID)
+	}
 
 	out := &contracts.StoreNotification{
-		Platform: contracts.PlatformApple,
-		Type:     appleNoteType(note.NotificationType, note.Subtype),
-		Raw:      payload,
+		Platform:    contracts.PlatformApple,
+		Type:        appleNoteType(note.NotificationType, note.Subtype),
+		Subtype:     strings.Trim(note.NotificationType+"/"+note.Subtype, "/"),
+		ID:          note.NotificationUUID,
+		Environment: envLabel(note.Data.Environment),
+		Raw:         payload,
 	}
-	// The nested transaction, when present, carries the product and expiry.
-	if note.Data.SignedTransactionInfo != "" {
-		var tx appleTransaction
-		if err := a.verifyJWS(note.Data.SignedTransactionInfo, &tx); err == nil {
-			out.ProductID = tx.ProductID
-			out.OriginalTransactionID = tx.OriginalTransactionID
-			if tx.ExpiresDate > 0 {
-				exp := msToTime(tx.ExpiresDate)
-				out.ExpiresAt = &exp
-			}
+	if note.Data.SignedTransactionInfo == "" {
+		return out, nil // TEST, and summary notifications, carry no transaction
+	}
+	var tx appleTransaction
+	if err := a.verifyJWS(note.Data.SignedTransactionInfo, &tx); err != nil {
+		return nil, err
+	}
+	var renewal *appleRenewalInfo
+	if note.Data.SignedRenewalInfo != "" {
+		var ri appleRenewalInfo
+		if err := a.verifyJWS(note.Data.SignedRenewalInfo, &ri); err != nil {
+			return nil, err
 		}
+		renewal = &ri
 	}
+	ent := appleEntitlement(tx, renewal)
+	out.Entitlement = ent
+	out.ProductID = tx.ProductID
+	out.OriginalTransactionID = tx.OriginalTransactionID
+	out.TransactionID = tx.TransactionID
+	out.ExpiresAt = ent.ExpiresAt
 	return out, nil
 }
 
@@ -177,7 +278,6 @@ func (a *AppleVerifier) ParseNotification(payload []byte) (*contracts.StoreNotif
 // certificate's key, and the leaf's chain up to a pinned Apple root. Only then
 // is the payload decoded into out.
 func (a *AppleVerifier) verifyJWS(token string, out any) error {
-	var leaf *x509.Certificate
 	parsed, err := jwt.Parse(token, func(t *jwt.Token) (any, error) {
 		if t.Method.Alg() != "ES256" {
 			return nil, fmt.Errorf("unexpected signing method %q", t.Method.Alg())
@@ -186,11 +286,10 @@ func (a *AppleVerifier) verifyJWS(token string, out any) error {
 		if err != nil {
 			return nil, err
 		}
-		leaf = chain[0]
 		if err := verifyAppleChain(chain, a.roots); err != nil {
 			return nil, err
 		}
-		pub, ok := leaf.PublicKey.(*ecdsa.PublicKey)
+		pub, ok := chain[0].PublicKey.(*ecdsa.PublicKey)
 		if !ok {
 			return nil, fmt.Errorf("leaf certificate is not ECDSA")
 		}
@@ -236,14 +335,15 @@ func x5cChain(t *jwt.Token) ([]*x509.Certificate, error) {
 	return chain, nil
 }
 
-// verifyAppleChain checks that the leaf chains up to a pinned root through the
-// supplied intermediates.
+// verifyAppleChain checks that the leaf chains up to a pinned root through an
+// Apple receipt intermediate, and that the leaf is a receipt-signing
+// certificate.
 func verifyAppleChain(chain []*x509.Certificate, roots *x509.CertPool) error {
 	inter := x509.NewCertPool()
 	for _, c := range chain[1:] {
 		inter.AddCert(c)
 	}
-	_, err := chain[0].Verify(x509.VerifyOptions{
+	verified, err := chain[0].Verify(x509.VerifyOptions{
 		Roots:         roots,
 		Intermediates: inter,
 		KeyUsages:     []x509.ExtKeyUsage{x509.ExtKeyUsageAny},
@@ -251,7 +351,25 @@ func verifyAppleChain(chain []*x509.Certificate, roots *x509.CertPool) error {
 	if err != nil {
 		return fmt.Errorf("certificate chain does not terminate at a trusted Apple root: %w", err)
 	}
-	return nil
+	if !hasExtension(chain[0], oidAppleReceiptSigner) {
+		return fmt.Errorf("leaf certificate is not an App Store receipt-signing certificate")
+	}
+	for _, path := range verified {
+		// leaf → Apple intermediate → root.
+		if len(path) == 3 && hasExtension(path[1], oidAppleIntermediate) {
+			return nil
+		}
+	}
+	return fmt.Errorf("certificate chain does not pass through an Apple receipt intermediate")
+}
+
+func hasExtension(cert *x509.Certificate, oid asn1.ObjectIdentifier) bool {
+	for _, ext := range cert.Extensions {
+		if ext.Id.Equal(oid) {
+			return true
+		}
+	}
+	return false
 }
 
 func isProd(env string) bool { return env == "" || env == "Production" || env == "PROD" }
@@ -268,22 +386,36 @@ func msToTime(ms int64) time.Time { return time.Unix(0, ms*int64(time.Millisecon
 // appleNoteType maps Apple's V2 notification types onto the canonical set.
 func appleNoteType(t, sub string) string {
 	switch t {
-	case "DID_RENEW", "SUBSCRIBED":
+	case "SUBSCRIBED", "ONE_TIME_CHARGE":
+		return "purchased"
+	case "DID_RENEW":
+		if sub == "BILLING_RECOVERY" {
+			return "recovered"
+		}
 		return "renewed"
 	case "DID_CHANGE_RENEWAL_STATUS":
 		if sub == "AUTO_RENEW_DISABLED" {
 			return "canceled"
 		}
-		return "renewed"
-	case "EXPIRED":
-		return "expired"
-	case "REFUND":
-		return "refunded"
-	case "GRACE_PERIOD_EXPIRED":
-		return "expired"
+		return "uncanceled"
+	case "DID_CHANGE_RENEWAL_PREF":
+		return "product_change"
 	case "DID_FAIL_TO_RENEW":
-		return "grace_period"
+		if sub == "GRACE_PERIOD" {
+			return "grace_period"
+		}
+		return "billing_issue"
+	case "EXPIRED", "GRACE_PERIOD_EXPIRED":
+		return "expired"
+	case "REFUND", "REVOKE":
+		return "refunded"
+	case "REFUND_REVERSED":
+		return "refund_reversed"
+	case "RENEWAL_EXTENDED":
+		return "extended"
+	case "TEST":
+		return "test"
 	default:
-		return t
+		return strings.ToLower(t)
 	}
 }

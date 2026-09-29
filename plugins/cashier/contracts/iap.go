@@ -45,6 +45,11 @@ type ReceiptParams struct {
 
 	// Google needs the product kind to pick the right API; Apple does not.
 	Subscription bool
+
+	// RenewalInfo is Apple's optional signed renewal info JWS (StoreKit 2's
+	// Product.SubscriptionInfo.RenewalInfo). With it the verifier knows
+	// whether the subscription will renew and whether it is in grace.
+	RenewalInfo string
 }
 
 // Entitlement is the verified result of a receipt check: what the store
@@ -76,6 +81,35 @@ type IAPEntitlement struct {
 	// production server is the classic test-purchase-as-real bug.
 	Environment string
 
+	// PeriodType is "trial", "intro" or "normal" where the store says which
+	// kind of period this transaction pays for ("" when it does not say).
+	PeriodType string
+	// PurchasedAt is when this transaction (this renewal) was bought.
+	PurchasedAt *time.Time
+	// Revoked is set when the store took the purchase back (a refund, a
+	// family-sharing removal). A revoked purchase never grants access.
+	Revoked bool
+	// BillingIssue is set while the store is retrying a failed renewal. With
+	// GraceExpiresAt in the future the user keeps access through the store's
+	// own grace period; without it, access has already lapsed (billing retry
+	// or Google's account hold).
+	BillingIssue   bool
+	GraceExpiresAt *time.Time
+
+	// Token is Google's purchase token: the handle every later API call and
+	// notification uses. LinkedToken is the token this purchase replaced
+	// (an upgrade, a downgrade, a resubscribe), so the replaced row can be
+	// retired instead of expiring as if the user had left. Apple leaves both
+	// empty.
+	Token       string
+	LinkedToken string
+	// Acknowledged is Google's acknowledgement state. Google refunds any
+	// purchase that is not acknowledged within three days.
+	Acknowledged bool
+	// AppAccountToken is the UUID an iOS app attached to the purchase
+	// (StoreKit 2's appAccountToken); it names the buyer's account.
+	AppAccountToken string
+
 	Raw map[string]any
 }
 
@@ -83,12 +117,31 @@ type IAPEntitlement struct {
 // (Apple App Store Server Notifications V2, Google Real-time Developer
 // Notifications), reduced to a canonical shape.
 type StoreNotification struct {
-	Platform              IAPPlatform
-	Type                  string // canonical: "renewed" | "canceled" | "expired" | "refunded" | "grace_period" | provider-specific
+	Platform IAPPlatform
+	// Type is canonical: "purchased" | "renewed" | "canceled" | "uncanceled" |
+	// "expired" | "refunded" | "grace_period" | "billing_issue" |
+	// "product_change" | "paused" | "recovered" | "test", or provider-specific.
+	Type string
+	// Subtype is the store's own type and subtype, for logs
+	// ("DID_CHANGE_RENEWAL_STATUS/AUTO_RENEW_DISABLED", "google_3").
+	Subtype               string
 	ProductID             string
 	OriginalTransactionID string
+	TransactionID         string
 	ExpiresAt             *time.Time
-	Raw                   []byte
+	// ID is the store's delivery id (Apple's notificationUUID, Pub/Sub's
+	// messageId); a store retries deliveries, so handlers dedupe on it.
+	ID string
+	// Environment is "production" or "sandbox".
+	Environment string
+	// Token is Google's purchase token (empty for Apple).
+	Token string
+	// Entitlement is the purchase state the notification itself vouches for.
+	// Apple signs the latest transaction and renewal info into every
+	// notification, so it is set there; Google's notifications carry only a
+	// token, so it is nil and the handler re-verifies against the API.
+	Entitlement *IAPEntitlement
+	Raw         []byte
 }
 
 // IAPVerifier verifies purchases and store notifications for one platform.
@@ -99,4 +152,11 @@ type IAPVerifier interface {
 	VerifyReceipt(ctx context.Context, p ReceiptParams) (*IAPEntitlement, error)
 	// ParseNotification verifies and decodes a server-to-server notification.
 	ParseNotification(payload []byte) (*StoreNotification, error)
+}
+
+// IAPAcknowledger is implemented by verifiers whose store needs the server to
+// confirm a purchase (Google refunds unacknowledged purchases after three
+// days).
+type IAPAcknowledger interface {
+	Acknowledge(ctx context.Context, productID, token string, subscription bool) error
 }

@@ -12,7 +12,7 @@
  */
 
 export { CashierCloud, CashierCloudError, CashierErrorCode } from './client.js'
-export type { CashierCloudOptions, CustomerInfoListener, FetchLike, Storage } from './client.js'
+export type { CashierCloudOptions, CustomerInfoListener, FetchLike, PurchaseOptions, Storage } from './client.js'
 export {
   decodeCustomerInfo,
   decodeEntitlementInfo,
@@ -38,3 +38,8 @@ export type {
   Subscription,
   SubscriptionStatus,
 } from './types.js'
+export { renderPaywall, resolvePaywallText, formatAmount, periodWord, paywallScreens, flattenBlocks, countdownRemaining, switchPackage, paywallVariant, paywallSavings, artColor, localizePaywall, matchPaywallLocale, PAYWALL_SCHEMA_VERSION, PAYWALL_CONTAINERS, PAYWALL_VARIANTS } from './paywall.js'
+export type { PaywallDoc, PaywallScreen, PaywallBlock, PaywallBlockType, PaywallLook, PaywallTheme, PaywallItem, PaywallContext, PaywallPackageView, PaywallAnswer } from './paywall.js'
+export { PAYWALL_ART } from './art.js'
+export { verifyCashierWebhook } from './webhook.js'
+export type { CashierWebhook, CashierWebhookEvent, CashierWebhookType } from './webhook.js'

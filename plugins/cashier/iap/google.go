@@ -89,30 +89,49 @@ func (g *GoogleVerifier) Platform() contracts.IAPPlatform { return contracts.Pla
 // googleSubPurchase is the subscriptionsv2 purchase resource, trimmed to what
 // the entitlement needs.
 type googleSubPurchase struct {
-	SubscriptionState string `json:"subscriptionState"`
-	LineItems         []struct {
+	SubscriptionState    string `json:"subscriptionState"`
+	LatestOrderID        string `json:"latestOrderId"`
+	LinkedPurchaseToken  string `json:"linkedPurchaseToken"`
+	AcknowledgementState string `json:"acknowledgementState"`
+	StartTime            string `json:"startTime"`
+	LineItems            []struct {
 		ProductID        string `json:"productId"`
 		ExpiryTime       string `json:"expiryTime"`
 		AutoRenewingPlan *struct {
-			RecurringPrice *struct {
+			AutoRenewEnabled bool `json:"autoRenewEnabled"`
+			RecurringPrice   *struct {
 				CurrencyCode string `json:"currencyCode"`
 				Units        string `json:"units"`
 				Nanos        int64  `json:"nanos"`
 			} `json:"recurringPrice"`
 		} `json:"autoRenewingPlan"`
+		// OfferPhase names the phase the current period is in; exactly one
+		// of its members is set.
+		OfferPhase *struct {
+			FreeTrial         *struct{} `json:"freeTrial"`
+			IntroductoryPrice *struct{} `json:"introductoryPrice"`
+		} `json:"offerPhase"`
 	} `json:"lineItems"`
-	LatestOrderID string    `json:"latestOrderId"`
-	TestPurchase  *struct{} `json:"testPurchase"`
+	TestPurchase *struct{} `json:"testPurchase"`
 }
 
 // googleProductPurchase is the one-time products resource.
 type googleProductPurchase struct {
-	PurchaseState int    `json:"purchaseState"` // 0 = purchased, 1 = canceled, 2 = pending
-	OrderID       string `json:"orderId"`
-	ProductID     string `json:"productId"`
+	PurchaseState        int    `json:"purchaseState"` // 0 = purchased, 1 = canceled, 2 = pending
+	OrderID              string `json:"orderId"`
+	ProductID            string `json:"productId"`
+	AcknowledgementState int    `json:"acknowledgementState"` // 0 = pending, 1 = acknowledged
+	PurchaseTimeMillis   string `json:"purchaseTimeMillis"`
+	// PurchaseType is absent for a real purchase; 0 is a license-tester
+	// (test) purchase, 1 promo, 2 rewarded.
+	PurchaseType *int `json:"purchaseType"`
 }
 
 // VerifyReceipt looks a purchase up against the Android Publisher API.
+//
+// The purchase token is the stable identity of a Google purchase — every
+// renewal keeps it, and every notification names it — so it is returned as
+// OriginalTransactionID; the order id of the latest charge is TransactionID.
 func (g *GoogleVerifier) VerifyReceipt(ctx context.Context, p contracts.ReceiptParams) (*contracts.IAPEntitlement, error) {
 	if p.Token == "" {
 		return nil, fmt.Errorf("cashier/iap/google: the purchase token (Token) is required")
@@ -134,11 +153,18 @@ func (g *GoogleVerifier) verifySubscription(ctx context.Context, p contracts.Rec
 	ent := &contracts.IAPEntitlement{
 		Platform:              contracts.PlatformGoogle,
 		Subject:               p.Subject,
-		OriginalTransactionID: out.LatestOrderID,
+		OriginalTransactionID: p.Token,
 		TransactionID:         out.LatestOrderID,
+		Token:                 p.Token,
+		LinkedToken:           out.LinkedPurchaseToken,
 		Subscription:          true,
 		Environment:           googleEnv(out.TestPurchase != nil),
+		Acknowledged:          out.AcknowledgementState == "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED",
+		PeriodType:            "normal",
 		Raw:                   map[string]any{"subscriptionState": out.SubscriptionState},
+	}
+	if t, err := time.Parse(time.RFC3339, out.StartTime); err == nil {
+		ent.PurchasedAt = &t
 	}
 	if len(out.LineItems) > 0 {
 		li := out.LineItems[0]
@@ -146,18 +172,44 @@ func (g *GoogleVerifier) verifySubscription(ctx context.Context, p contracts.Rec
 		if exp, err := time.Parse(time.RFC3339, li.ExpiryTime); err == nil {
 			ent.ExpiresAt = &exp
 		}
-		if li.AutoRenewingPlan != nil && li.AutoRenewingPlan.RecurringPrice != nil {
-			rp := li.AutoRenewingPlan.RecurringPrice
-			// Google prices are units + nanos of the currency; micros is
-			// units*1e6 + nanos/1000.
-			units, _ := strconv.ParseInt(rp.Units, 10, 64)
-			ent.PriceMicros = units*1_000_000 + rp.Nanos/1000
-			ent.Currency = rp.CurrencyCode
+		if li.AutoRenewingPlan != nil {
+			ent.AutoRenewing = li.AutoRenewingPlan.AutoRenewEnabled
+			if rp := li.AutoRenewingPlan.RecurringPrice; rp != nil {
+				// Google prices are units + nanos of the currency; micros is
+				// units*1e6 + nanos/1000.
+				units, _ := strconv.ParseInt(rp.Units, 10, 64)
+				ent.PriceMicros = units*1_000_000 + rp.Nanos/1000
+				ent.Currency = rp.CurrencyCode
+			}
+		}
+		if ph := li.OfferPhase; ph != nil {
+			switch {
+			case ph.FreeTrial != nil:
+				ent.PeriodType = "trial"
+				ent.PriceMicros = 0
+			case ph.IntroductoryPrice != nil:
+				ent.PeriodType = "intro"
+			}
 		}
 	}
-	ent.Active = out.SubscriptionState == "SUBSCRIPTION_STATE_ACTIVE" ||
-		out.SubscriptionState == "SUBSCRIPTION_STATE_IN_GRACE_PERIOD"
-	ent.AutoRenewing = ent.Active
+
+	stillPaid := ent.ExpiresAt == nil || time.Now().Before(*ent.ExpiresAt)
+	switch out.SubscriptionState {
+	case "SUBSCRIPTION_STATE_ACTIVE":
+		ent.Active = true
+	case "SUBSCRIPTION_STATE_IN_GRACE_PERIOD":
+		// Google keeps access through its grace period while it retries.
+		ent.Active = true
+		ent.BillingIssue = true
+		ent.GraceExpiresAt = ent.ExpiresAt
+	case "SUBSCRIPTION_STATE_CANCELED":
+		// Cancelled is renewal off, not access off: the paid period stands.
+		ent.Active = stillPaid
+		ent.AutoRenewing = false
+	case "SUBSCRIPTION_STATE_ON_HOLD":
+		// Account hold: the retry window after grace, with access suspended.
+		ent.BillingIssue = true
+	}
 	if p.ProductID != "" && ent.ProductID != "" && ent.ProductID != p.ProductID {
 		return nil, fmt.Errorf("cashier/iap/google: purchase is for product %q, not the claimed %q", ent.ProductID, p.ProductID)
 	}
@@ -174,24 +226,46 @@ func (g *GoogleVerifier) verifyProduct(ctx context.Context, p contracts.ReceiptP
 	if err := g.get(ctx, path, &out); err != nil {
 		return nil, err
 	}
-	return &contracts.IAPEntitlement{
+	ent := &contracts.IAPEntitlement{
 		Platform:              contracts.PlatformGoogle,
 		Subject:               p.Subject,
 		ProductID:             p.ProductID,
 		TransactionID:         out.OrderID,
-		OriginalTransactionID: out.OrderID,
+		OriginalTransactionID: p.Token,
+		Token:                 p.Token,
 		Subscription:          false,
 		Active:                out.PurchaseState == 0,
-		Environment:           "production",
+		Revoked:               out.PurchaseState == 1,
+		Acknowledged:          out.AcknowledgementState == 1,
+		Environment:           googleEnv(out.PurchaseType != nil && *out.PurchaseType == 0),
 		Raw:                   map[string]any{"purchaseState": out.PurchaseState},
-	}, nil
+	}
+	if ms, err := strconv.ParseInt(out.PurchaseTimeMillis, 10, 64); err == nil && ms > 0 {
+		at := msToTime(ms)
+		ent.PurchasedAt = &at
+	}
+	return ent, nil
+}
+
+// Acknowledge confirms a purchase to Google. Google refunds and revokes any
+// purchase left unacknowledged for three days, so a server that grants access
+// must acknowledge it. Acknowledging an acknowledged purchase is harmless.
+func (g *GoogleVerifier) Acknowledge(ctx context.Context, productID, token string, subscription bool) error {
+	kind := "products"
+	if subscription {
+		kind = "subscriptions"
+	}
+	path := fmt.Sprintf("/androidpublisher/v3/applications/%s/purchases/%s/%s/tokens/%s:acknowledge",
+		url.PathEscape(g.packageName), kind, url.PathEscape(productID), url.PathEscape(token))
+	return g.do(ctx, http.MethodPost, path, nil)
 }
 
 // googleRTDN is a Real-time Developer Notification, delivered base64-wrapped in
 // a Pub/Sub push message.
 type googleRTDN struct {
 	Message struct {
-		Data string `json:"data"`
+		Data      string `json:"data"`
+		MessageID string `json:"messageId"`
 	} `json:"message"`
 }
 
@@ -202,6 +276,16 @@ type googleDeveloperNotification struct {
 		PurchaseToken    string `json:"purchaseToken"`
 		SubscriptionID   string `json:"subscriptionId"`
 	} `json:"subscriptionNotification"`
+	OneTimeProductNotification *struct {
+		NotificationType int    `json:"notificationType"` // 1 purchased, 2 canceled
+		PurchaseToken    string `json:"purchaseToken"`
+		SKU              string `json:"sku"`
+	} `json:"oneTimeProductNotification"`
+	VoidedPurchaseNotification *struct {
+		PurchaseToken string `json:"purchaseToken"`
+		OrderID       string `json:"orderId"`
+	} `json:"voidedPurchaseNotification"`
+	TestNotification *struct{} `json:"testNotification"`
 }
 
 // ParseNotification decodes a Real-time Developer Notification.
@@ -210,7 +294,8 @@ type googleDeveloperNotification struct {
 // the Pub/Sub push being authenticated at the transport, not from a signature
 // in the body — so this decodes and canonicalises rather than verifying a
 // signature. The entitlement itself must still be confirmed by calling
-// VerifyReceipt with the token inside.
+// VerifyReceipt with the token inside, which is why a forged notification can
+// at worst make the server re-read the truth from Google.
 func (g *GoogleVerifier) ParseNotification(payload []byte) (*contracts.StoreNotification, error) {
 	var env googleRTDN
 	if err := json.Unmarshal(payload, &env); err != nil || env.Message.Data == "" {
@@ -224,22 +309,52 @@ func (g *GoogleVerifier) ParseNotification(payload []byte) (*contracts.StoreNoti
 	if err := json.Unmarshal(decoded, &note); err != nil {
 		return nil, fmt.Errorf("cashier/iap/google: notification body is not valid: %w", err)
 	}
-	out := &contracts.StoreNotification{Platform: contracts.PlatformGoogle, Raw: payload}
-	if note.SubscriptionNotification != nil {
-		out.Type = googleNoteType(note.SubscriptionNotification.NotificationType)
-		out.ProductID = note.SubscriptionNotification.SubscriptionID
-		out.OriginalTransactionID = note.SubscriptionNotification.PurchaseToken
+	if note.PackageName != "" && note.PackageName != g.packageName {
+		return nil, fmt.Errorf("cashier/iap/google: notification is for package %q, not %q", note.PackageName, g.packageName)
 	}
+	out := &contracts.StoreNotification{Platform: contracts.PlatformGoogle, ID: env.Message.MessageID, Raw: payload}
+	switch {
+	case note.SubscriptionNotification != nil:
+		n := note.SubscriptionNotification
+		out.Type = googleNoteType(n.NotificationType)
+		out.Subtype = fmt.Sprintf("subscription_%d", n.NotificationType)
+		out.ProductID = n.SubscriptionID
+		out.Token = n.PurchaseToken
+	case note.OneTimeProductNotification != nil:
+		n := note.OneTimeProductNotification
+		out.Type = "purchased"
+		if n.NotificationType == 2 {
+			out.Type = "canceled"
+		}
+		out.Subtype = fmt.Sprintf("one_time_%d", n.NotificationType)
+		out.ProductID = n.SKU
+		out.Token = n.PurchaseToken
+	case note.VoidedPurchaseNotification != nil:
+		out.Type = "refunded"
+		out.Subtype = "voided"
+		out.Token = note.VoidedPurchaseNotification.PurchaseToken
+		out.TransactionID = note.VoidedPurchaseNotification.OrderID
+	case note.TestNotification != nil:
+		out.Type = "test"
+		out.Subtype = "test"
+	}
+	out.OriginalTransactionID = out.Token
 	return out, nil
 }
 
 // get performs an authenticated GET against the Android Publisher API.
 func (g *GoogleVerifier) get(ctx context.Context, path string, out any) error {
+	return g.do(ctx, http.MethodGet, path, out)
+}
+
+// do performs an authenticated call against the Android Publisher API,
+// decoding the response into out when it is non-nil.
+func (g *GoogleVerifier) do(ctx context.Context, method, path string, out any) error {
 	token, err := g.accessToken(ctx)
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://androidpublisher.googleapis.com"+path, nil)
+	req, err := http.NewRequestWithContext(ctx, method, "https://androidpublisher.googleapis.com"+path, nil)
 	if err != nil {
 		return err
 	}
@@ -252,6 +367,9 @@ func (g *GoogleVerifier) get(ctx context.Context, path string, out any) error {
 	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("cashier/iap/google: API error %d: %s", resp.StatusCode, string(raw))
+	}
+	if out == nil || len(raw) == 0 {
+		return nil
 	}
 	return json.Unmarshal(raw, out)
 }
@@ -344,19 +462,34 @@ func googleEnv(test bool) string {
 	return "production"
 }
 
-// googleNoteType maps Google's numeric notification types onto the canonical set.
+// googleNoteType maps Google's numeric subscription notification types onto
+// the canonical set.
 func googleNoteType(t int) string {
 	switch t {
+	case 1: // RECOVERED
+		return "recovered"
 	case 2: // RENEWED
 		return "renewed"
 	case 3: // CANCELED
 		return "canceled"
-	case 13: // EXPIRED
-		return "expired"
-	case 12: // REVOKED
-		return "refunded"
+	case 4: // PURCHASED
+		return "purchased"
+	case 5: // ON_HOLD
+		return "billing_issue"
 	case 6: // IN_GRACE_PERIOD
 		return "grace_period"
+	case 7: // RESTARTED
+		return "uncanceled"
+	case 9: // DEFERRED
+		return "extended"
+	case 10: // PAUSED
+		return "paused"
+	case 12: // REVOKED
+		return "refunded"
+	case 13: // EXPIRED
+		return "expired"
+	case 17: // ITEMS_CHANGED
+		return "product_change"
 	default:
 		return fmt.Sprintf("google_type_%d", t)
 	}

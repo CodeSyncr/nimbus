@@ -178,6 +178,14 @@ func (v meteredVerifier) ParseNotification(payload []byte) (*contracts.StoreNoti
 	return v.inner.ParseNotification(payload)
 }
 
+// Acknowledge forwards to the wrapped verifier when its store needs it.
+func (v meteredVerifier) Acknowledge(ctx context.Context, productID, token string, subscription bool) error {
+	if a, ok := v.inner.(contracts.IAPAcknowledger); ok {
+		return a.Acknowledge(ctx, productID, token, subscription)
+	}
+	return nil
+}
+
 // Metered wraps a verifier so its entitlements are gated by a meter. Registering
 // the result with IAPManager is what turns a raw verifier into the paid feature.
 func Metered(v contracts.IAPVerifier, m Meter) contracts.IAPVerifier {

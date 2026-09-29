@@ -59,6 +59,8 @@ const (
 	ReasonDeveloperInitiated = "developer_initiated"
 	ReasonPriceIncrease      = "price_increase"
 	ReasonCustomerSupport    = "customer_support"
+	ReasonRefunded           = "refunded"
+	ReasonTransferred        = "transferred"
 	ReasonUnknown            = "unknown"
 )
 
@@ -87,6 +89,16 @@ type SubscriberEvent struct {
 	Reason         string     `json:"reason,omitempty"`
 	ExpiresAt      *time.Time `json:"expires_at,omitempty"`
 	At             time.Time  `json:"at"`
+
+	// Store context, set when the event came from an app store purchase:
+	// "app_store" | "play_store" | "" (a gateway or the app itself).
+	Store         string `json:"store,omitempty"`
+	Environment   string `json:"environment,omitempty"` // production|sandbox
+	TransactionID string `json:"transaction_id,omitempty"`
+	// OriginalTransactionID is the stable id of the store purchase.
+	OriginalTransactionID string `json:"original_transaction_id,omitempty"`
+	PriceMicros           int64  `json:"price_micros,omitempty"`
+	Currency              string `json:"currency,omitempty"`
 }
 
 // Lifecycle applies subscriber events to entitlements and emits them.
@@ -363,16 +375,105 @@ func (l *Lifecycle) RecordExpiration(subject, productID, reason string) (Subscri
 	if reason == "" {
 		reason = ReasonUnknown
 	}
-	ents := l.catalog.EntitlementsFor(productID)
-	for _, ent := range ents {
-		if err := store.Revoke(subject, ent); err != nil {
-			return SubscriberEvent{}, err
-		}
+	ents, err := l.revokeProduct(store, subject, productID)
+	if err != nil {
+		return SubscriberEvent{}, err
 	}
 	return l.emit(SubscriberEvent{
 		Type: EventExpiration, Subject: subject, ProductID: productID,
 		EntitlementIDs: ents, Reason: reason,
 	}), nil
+}
+
+// revokeProduct revokes the product's entitlements that this product is what
+// grants. An entitlement currently held through another product (a lifetime
+// unlock, a purchase on the other store) or a promotional grant is left alone:
+// one product lapsing must not take away access something else still pays for.
+func (l *Lifecycle) revokeProduct(store EntitlementStore, subject, productID string) ([]string, error) {
+	held := map[string]Entitlement{}
+	if list, err := store.List(subject); err == nil {
+		for _, e := range list {
+			held[e.Plan] = e
+		}
+	}
+	ents := l.catalog.EntitlementsFor(productID)
+	for _, ent := range ents {
+		if h, ok := held[ent]; ok && (h.Source == SourcePromotional || (h.ProductID != "" && h.ProductID != productID)) {
+			continue
+		}
+		if err := store.Revoke(subject, ent); err != nil {
+			return nil, err
+		}
+	}
+	return ents, nil
+}
+
+// SyncProduct writes a product's entitlements to match state already known
+// from a store, without emitting an event. A host that mirrors App Store or
+// Play state re-reads the same purchase on every restore, app launch and
+// notification; only the host can tell whether that read was a renewal, a
+// cancellation or nothing new, so it syncs silently here and emits what the
+// change was with Emit.
+//
+// A zero expiresAt never lapses. An entitlement currently held through a
+// different product that outlives this one (or a promotional grant) is kept
+// rather than shortened.
+func (l *Lifecycle) SyncProduct(subject, productID string, expiresAt time.Time, periodType string, willRenew bool) ([]string, error) {
+	store, err := l.store()
+	if err != nil {
+		return nil, err
+	}
+	if periodType == "" {
+		periodType = PeriodNormal
+	}
+	held := map[string]Entitlement{}
+	if list, err := store.List(subject); err == nil {
+		for _, e := range list {
+			held[e.Plan] = e
+		}
+	}
+	ents := l.catalog.EntitlementsFor(productID)
+	for _, ent := range ents {
+		if h, ok := held[ent]; ok && h.ProductID != productID && outlives(h, expiresAt) {
+			continue
+		}
+		if err := store.Grant(Entitlement{
+			Subject: subject, Plan: ent, ExpiresAt: expiresAt,
+			ProductID: productID, PeriodType: periodType, Source: SourcePurchase, WillRenew: willRenew,
+		}); err != nil {
+			return nil, err
+		}
+	}
+	return ents, nil
+}
+
+// RevokeProduct removes a product's entitlements (as RecordExpiration does)
+// without emitting an event, for a host that emits its own.
+func (l *Lifecycle) RevokeProduct(subject, productID string) ([]string, error) {
+	store, err := l.store()
+	if err != nil {
+		return nil, err
+	}
+	return l.revokeProduct(store, subject, productID)
+}
+
+// Emit stamps and delivers an event the host composed itself (see
+// SyncProduct).
+func (l *Lifecycle) Emit(e SubscriberEvent) SubscriberEvent { return l.emit(e) }
+
+// outlives reports whether a held, still-active entitlement lasts at least as
+// long as a grant expiring at exp (zero = never).
+func outlives(h Entitlement, exp time.Time) bool {
+	if !h.ExpiresAt.IsZero() && !h.ExpiresAt.After(time.Now()) {
+		return false // already lapsed
+	}
+	if h.Source == SourcePromotional {
+		return h.ExpiresAt.IsZero() || (!exp.IsZero() && !h.ExpiresAt.Before(exp))
+	}
+	if h.ExpiresAt.IsZero() {
+		return true
+	}
+	return !exp.IsZero() && h.ExpiresAt.After(exp)
 }
 
 // GrantPromotional gives an entitlement without a purchase (a comp, a beta
