@@ -6,6 +6,8 @@ This project follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [1.9.1] - 2026-10-02
+
 ### Fixed
 
 - **`queue`: the Redis driver delivered delayed and retried jobs many times
