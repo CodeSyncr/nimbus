@@ -231,11 +231,13 @@ import (
 
 func RegisterMiddleware(app *nimbus.App) {
 	// RequestID (outermost) tags every request/response with X-Request-Id so
-	// logs correlate. Logger → errors.Handler → Recover: panics become
+	// logs correlate. Tracing continues W3C traceparent traces and exports
+	// spans when OTEL_EXPORTER_OTLP_ENDPOINT is set. Logger → errors.Handler → Recover: panics become
 	// AppError inside Recover and are rendered by Handler (HTML/JSON).
 	// BodyLimit caps request bodies (default 10 MiB) to prevent memory abuse.
 	app.Router.Use(
 		middleware.RequestID(),
+		middleware.Tracing(),
 		middleware.Logger(),
 		errors.Handler(),
 		middleware.Recover(),
@@ -1478,6 +1480,7 @@ func RegisterMiddleware(app *nimbus.App) {
 
 	app.Router.Use(
 		middleware.RequestID(),
+		middleware.Tracing(),
 		middleware.Logger(),
 		errors.Handler(),
 		middleware.Recover(),
@@ -1530,6 +1533,7 @@ func RegisterMiddleware(app *nimbus.App) {
 
 	app.Router.Use(
 		middleware.RequestID(),
+		middleware.Tracing(),
 		middleware.Logger(),
 		errors.Handler(),
 		middleware.Recover(),

@@ -30,6 +30,9 @@ func (l Labels) key() string {
 	return strings.Join(pairs, ",")
 }
 
+// labelEscaper escapes label values per the Prometheus text format.
+var labelEscaper = strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`)
+
 // promLabels formats labels for Prometheus text exposition.
 func (l Labels) promLabels() string {
 	if len(l) == 0 {
@@ -37,7 +40,7 @@ func (l Labels) promLabels() string {
 	}
 	pairs := make([]string, 0, len(l))
 	for k, v := range l {
-		pairs = append(pairs, fmt.Sprintf(`%s="%s"`, k, v))
+		pairs = append(pairs, fmt.Sprintf(`%s="%s"`, k, labelEscaper.Replace(v)))
 	}
 	sort.Strings(pairs)
 	return "{" + strings.Join(pairs, ",") + "}"
@@ -181,7 +184,7 @@ type Histogram struct {
 }
 
 type histSeries struct {
-	counts []uint64 // one per bucket
+	counts []uint64 // observations falling in each bucket (not cumulative)
 	count  uint64
 	sum    uint64 // float64 bits via math.Float64bits
 }
@@ -229,13 +232,19 @@ func (h *Histogram) getSeries(l Labels) *histSeries {
 // Observe records a new value in the histogram.
 func (h *Histogram) Observe(val float64, l Labels) {
 	s := h.getSeries(l)
-	bits := math.Float64bits(val)
 	atomic.AddUint64(&s.count, 1)
-	atomic.AddUint64(&s.sum, bits) // approximate; good enough for exposition
-	for i, bound := range h.buckets {
-		if val <= bound {
-			atomic.AddUint64(&s.counts[i], 1)
+	// The sum is a float64 stored as bits; add with a CAS loop (adding the
+	// bit patterns as integers would not add the values).
+	for {
+		old := atomic.LoadUint64(&s.sum)
+		next := math.Float64bits(math.Float64frombits(old) + val)
+		if atomic.CompareAndSwapUint64(&s.sum, old, next) {
+			break
 		}
+	}
+	// counts are per bucket (not cumulative); render accumulates them.
+	if i := sort.SearchFloat64s(h.buckets, val); i < len(h.buckets) {
+		atomic.AddUint64(&s.counts[i], 1)
 	}
 }
 
@@ -256,8 +265,6 @@ func (h *Histogram) render(b *strings.Builder) {
 		fmt.Fprintf(b, "%s_bucket%s %d\n", h.name, infLabels.promLabels(), atomic.LoadUint64(&s.count))
 		// sum is stored as float64 bits; decode for exposition
 		sumBits := atomic.LoadUint64(&s.sum)
-		// NOTE: atomic addition of float64 bits is an approximation for
-		// lock-free performance. For precise sums, use a mutex-based approach.
 		fmt.Fprintf(b, "%s_sum%s %g\n", h.name, lbl.promLabels(), math.Float64frombits(sumBits))
 		fmt.Fprintf(b, "%s_count%s %d\n", h.name, lbl.promLabels(), atomic.LoadUint64(&s.count))
 	}

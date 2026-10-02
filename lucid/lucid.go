@@ -26,6 +26,10 @@ type Statement = gorm.Statement
 // ErrRecordNotFound is returned when no row matches a query.
 var ErrRecordNotFound = gorm.ErrRecordNotFound
 
+// ErrDuplicatedKey is returned for unique constraint violations when the
+// dialector translates errors (Config.TranslateError).
+var ErrDuplicatedKey = gorm.ErrDuplicatedKey
+
 // ErrInvalidData can be returned from hooks to roll back a transaction.
 var ErrInvalidData = gorm.ErrInvalidData
 

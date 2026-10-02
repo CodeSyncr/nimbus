@@ -11,8 +11,10 @@
 package workflow
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"github.com/CodeSyncr/nimbus"
 	nhttp "github.com/CodeSyncr/nimbus/http"
@@ -20,15 +22,20 @@ import (
 )
 
 var (
-	_ nimbus.Plugin    = (*WorkflowPlugin)(nil)
-	_ nimbus.HasRoutes = (*WorkflowPlugin)(nil)
-	_ nimbus.HasConfig = (*WorkflowPlugin)(nil)
+	_ nimbus.Plugin      = (*WorkflowPlugin)(nil)
+	_ nimbus.HasRoutes   = (*WorkflowPlugin)(nil)
+	_ nimbus.HasConfig   = (*WorkflowPlugin)(nil)
+	_ nimbus.HasShutdown = (*WorkflowPlugin)(nil)
 )
 
 // WorkflowPlugin integrates the workflow engine with Nimbus.
 type WorkflowPlugin struct {
 	nimbus.BasePlugin
 	Engine *Engine
+	// RecoveryInterval is how often a durable store is checked for runs
+	// left behind by a restart or a crashed instance (default 30s).
+	RecoveryInterval time.Duration
+	stopRecovery     context.CancelFunc
 }
 
 // NewPlugin creates a new workflow plugin.
@@ -47,7 +54,26 @@ func (p *WorkflowPlugin) Register(app *nimbus.App) error {
 	return nil
 }
 
+// Boot starts run recovery when the store is shared and durable, so runs
+// interrupted by a restart or a crashed instance are continued.
 func (p *WorkflowPlugin) Boot(app *nimbus.App) error {
+	if _, mem := p.Engine.store.(*MemoryStore); mem {
+		return nil
+	}
+	if _, ok := p.Engine.store.(Leaser); !ok {
+		return nil
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	p.stopRecovery = cancel
+	go p.Engine.StartRecovery(ctx, p.RecoveryInterval)
+	return nil
+}
+
+// Shutdown stops run recovery.
+func (p *WorkflowPlugin) Shutdown() error {
+	if p.stopRecovery != nil {
+		p.stopRecovery()
+	}
 	return nil
 }
 

@@ -3,12 +3,14 @@ package storage
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 )
@@ -111,16 +113,29 @@ func (d *S3Driver) PutWithOptions(path string, src io.Reader, contentType string
 
 // Get downloads the object at path and returns a ReadCloser.
 func (d *S3Driver) Get(path string) (io.ReadCloser, error) {
+	// The body streams under ctx, so the timeout is only cancelled when the
+	// caller closes it; cancelling on return would cut off unread bytes.
 	ctx, cancel := d.sdkContext()
-	defer cancel()
 	out, err := d.client.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(d.bucket),
 		Key:    aws.String(path),
 	})
 	if err != nil {
+		cancel()
 		return nil, fmt.Errorf("s3: get %q: %w", path, err)
 	}
-	return out.Body, nil
+	return &cancelOnClose{ReadCloser: out.Body, cancel: cancel}, nil
+}
+
+type cancelOnClose struct {
+	io.ReadCloser
+	cancel context.CancelFunc
+}
+
+func (c *cancelOnClose) Close() error {
+	err := c.ReadCloser.Close()
+	c.cancel()
+	return err
 }
 
 // Delete removes the object at path.
@@ -164,10 +179,22 @@ func (d *S3Driver) Exists(path string) (bool, error) {
 		Key:    aws.String(path),
 	})
 	if err != nil {
-		// Check if it's a NotFound-style error
-		return false, nil
+		if isS3NotFound(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("s3: exists %q: %w", path, err)
 	}
 	return true, nil
+}
+
+func isS3NotFound(err error) bool {
+	var nf *types.NotFound
+	var nsk *types.NoSuchKey
+	if errors.As(err, &nf) || errors.As(err, &nsk) {
+		return true
+	}
+	var re *awshttp.ResponseError
+	return errors.As(err, &re) && re.HTTPStatusCode() == http.StatusNotFound
 }
 
 // Size returns the size in bytes of the object.

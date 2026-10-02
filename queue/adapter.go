@@ -12,6 +12,7 @@ package queue
 
 import (
 	"context"
+	"errors"
 	"time"
 )
 
@@ -31,6 +32,20 @@ type Adapter interface {
 type CompletableAdapter interface {
 	Adapter
 	Complete(ctx context.Context, payload *JobPayload) error
+}
+
+// ErrLeaseLost is returned by LeaseExtender.ExtendLease when the job's lease
+// already expired and the job may have been handed to another worker.
+var ErrLeaseLost = errors.New("queue: job lease lost")
+
+// LeaseExtender is implemented by adapters whose deliveries are leased for a
+// limited time (Redis visibility timeout, database lease). While a job runs,
+// the Manager calls ExtendLease every LeaseDuration()/3 so long jobs are not
+// handed to a second worker, while a crashed worker's jobs still come back
+// after one lease period.
+type LeaseExtender interface {
+	LeaseDuration() time.Duration
+	ExtendLease(ctx context.Context, payload *JobPayload) error
 }
 
 // JobPayload is the serialized form of a job for storage.

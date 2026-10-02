@@ -1,5 +1,5 @@
 # Nimbus
-https://agentrouter.org/register?aff=iHLj
+
 **Laravel-inspired web framework for Go.** Convention over configuration, clear structure, and a pleasant DX.
 
 **Repository:** [github.com/CodeSyncr/nimbus](https://github.com/CodeSyncr/nimbus)
@@ -20,9 +20,10 @@ These packages are intended as stable building blocks for applications:
 - **Integration-style plugins** (`plugins/ai`, Scout, Socialite, etc.) — Pin versions in production; follow release notes for breaking changes until each plugin is explicitly marked stable.
 - **`studio`** — Optional tooling; not part of the core stability promise.
 
-### Not in v1
+### Auth & API tokens
 
-- **OAuth / first-party API tokens** (Laravel Sanctum/Passport-class) — Not shipped in v1; plan your own bearer tokens or wait for a future release (see `CHANGELOG.md`).
+- **Personal access tokens with abilities** (Sanctum-style) ship in `auth`: `HasAnyAbility` / `HasAllAbilities` on `PersonalAccessToken`, and `RequireAnyAbility` / `RequireAllAbilities` middleware.
+- **OAuth2 authorization server** (Passport-style) ships as **`plugins/passport`**: authorization code with PKCE, client credentials, refresh-token rotation, introspection and revocation. Like the other integration plugins it is **preview**: pin versions and read release notes.
 
 ### Requirements
 
@@ -39,6 +40,7 @@ Release checklist: **[V1_RELEASE.md](./V1_RELEASE.md)** · History: **[CHANGELOG
 - **Error pages** – Built-in, content-negotiated 404/500 pages: a styled HTML page for browsers and structured JSON for API clients (based on the `Accept` header), with a tracking `error_id`. Override via `router.Fallback` and custom handlers.
 - **Validation** – Struct validation with [go-playground/validator](https://github.com/go-playground/validator)
 - **Database** – GORM-based models with `database.Model` (ID, timestamps), migrations support
+- **Tracing** – W3C `traceparent` propagation across HTTP, outbound calls and the queue, exported over OTLP to any OpenTelemetry backend (`tracing`, `middleware.Tracing()`)
 - **CLI** – `nimbus new`, `make:model`, `make:migration` (Ace-style)
 
 ## Project structure (Laravel-inspired)
@@ -287,6 +289,9 @@ Views are loaded from the `views/` directory by default. Change with `view.SetRo
 | Package | Description | Docs |
 |---------|-------------|------|
 | [Queue](queue/README.md) | Background jobs (sync, Redis, database, SQS, Kafka) | [README](queue/README.md) |
+| Tracing | Distributed tracing: W3C Trace Context + OTLP/HTTP exporter, no OpenTelemetry SDK needed | `tracing` |
+| Workflow | Multi-step workflows with retries, waits and resumable runs (memory, Redis or database store) | `workflow` |
+| Presence | Presence channels over WebSockets; shares members across instances with Redis | `presence` |
 
 ### Additional plugins (`nimbus plugin install <name>`)
 
@@ -304,6 +309,21 @@ Views are loaded from the `views/` directory by default. Change with `view.SetRo
 ### Redis
 
 Redis is used by **Queue** (`QUEUE_DRIVER=redis`), **Transmit** (`TRANSMIT_TRANSPORT=redis`), **Horizon** (failed jobs + live queue depths), and **Reverb** (multi-instance WebSocket fan-out). Set `REDIS_URL=redis://localhost:6379` in `.env` when using these features.
+
+### Running more than one instance
+
+What each piece needs so that several app instances or workers behave like one:
+
+| Feature | Shared across instances when… |
+|---------|-------------------------------|
+| Queue jobs | `QUEUE_DRIVER=redis` or `database`. Each job is delivered to one worker; running jobs heartbeat their lease (`QUEUE_REDIS_VISIBILITY_TIMEOUT_SECONDS` / `QUEUE_DB_LEASE_SECONDS` only bound how long a crashed worker's job waits). |
+| Unique jobs, `WithoutOverlapping`, batches, queue rate limits | Same as above: `queue.Boot` keeps locks, batch progress and rate limits in Redis or the database. Batch callbacks are looked up by name, so register them in workers with `queue.RegisterBatch`. |
+| Scheduled tasks | Automatic with the redis/database queue driver or `REDIS_URL`; each task runs once per tick. `SCHEDULE_LOCK=off` opts out. |
+| Presence | `presence.Config{Redis: client}`. |
+| `websocket.Hub` broadcasts | `hub.UseRedis(client, "")`. Reverb does this from `REDIS_URL`. |
+| Workflow runs | `workflow.NewRedisStore` or `NewDatabaseStore`; interrupted runs are resumed by another instance, and `Signal` / `Cancel` work from any instance. |
+| Rate limiting middleware | `middleware.RateLimitRedis` (the in-memory `RateLimit` counts per process). |
+| Cache | Any driver except `memory`. |
 
 ## Commands
 

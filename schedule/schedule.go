@@ -17,8 +17,12 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/CodeSyncr/nimbus/redis"
 )
 
 var (
@@ -63,6 +67,9 @@ type Scheduler struct {
 	cancel  context.CancelFunc
 	running bool
 	locker  Locker
+	// lockerChosen is set once WithLocker or Start decided on a locker
+	// (possibly none), so Start does not override an explicit choice.
+	lockerChosen bool
 }
 
 // Locker coordinates schedule execution across multiple app instances.
@@ -72,7 +79,56 @@ type Locker interface {
 	TryLock(ctx context.Context, key string, ttl time.Duration) (unlock func(), acquired bool, err error)
 }
 
-// New creates a new Scheduler.
+var (
+	defaultLockerMu sync.RWMutex
+	defaultLocker   Locker
+)
+
+// SetDefaultLocker sets the Locker used by schedulers that have none of
+// their own. queue.Boot sets it for the redis and database drivers.
+func SetDefaultLocker(l Locker) {
+	defaultLockerMu.Lock()
+	defaultLocker = l
+	defaultLockerMu.Unlock()
+}
+
+// DefaultLocker returns the Locker set with SetDefaultLocker, if any.
+func DefaultLocker() Locker {
+	defaultLockerMu.RLock()
+	defer defaultLockerMu.RUnlock()
+	return defaultLocker
+}
+
+// envLocker picks a Locker from the environment:
+//
+//	SCHEDULE_LOCK=off             run every task on every instance
+//	SCHEDULE_REDIS_URL / REDIS_URL lock through that Redis
+func envLocker() (Locker, string) {
+	switch strings.ToLower(os.Getenv("SCHEDULE_LOCK")) {
+	case "off", "none", "false", "0":
+		return nil, "disabled by SCHEDULE_LOCK"
+	}
+	if l := DefaultLocker(); l != nil {
+		return l, "queue driver"
+	}
+	url := os.Getenv("SCHEDULE_REDIS_URL")
+	if url == "" {
+		url = os.Getenv("REDIS_URL")
+	}
+	if url == "" {
+		return nil, ""
+	}
+	opt, err := redis.ParseURL(url)
+	if err != nil {
+		log.Printf("[schedule] invalid redis url for task locking: %v", err)
+		return nil, ""
+	}
+	return NewRedisLocker(redis.NewClient(opt)), "redis"
+}
+
+// New creates a new Scheduler. Unless WithLocker is called, Start picks a
+// distributed lock on its own (see envLocker), so a multi-instance deploy
+// runs each task once per tick rather than once per instance.
 func New() *Scheduler {
 	return &Scheduler{}
 }
@@ -83,6 +139,7 @@ func (s *Scheduler) WithLocker(locker Locker) *Scheduler {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.locker = locker
+	s.lockerChosen = true
 	return s
 }
 
@@ -130,6 +187,17 @@ func (s *Scheduler) Start(ctx context.Context) {
 		return
 	}
 	s.running = true
+	if s.locker == nil && !s.lockerChosen {
+		s.lockerChosen = true
+		var via string
+		s.locker, via = envLocker()
+		switch {
+		case s.locker != nil:
+			log.Printf("[schedule] tasks are locked across instances (%s)", via)
+		case via == "" && strings.EqualFold(os.Getenv("APP_ENV"), "production"):
+			log.Printf("[schedule] no distributed lock: every instance runs every task. Set REDIS_URL, use the redis/database queue driver, or call WithLocker")
+		}
+	}
 	childCtx, cancel := context.WithCancel(ctx)
 	s.cancel = cancel
 	entries := make([]entry, len(s.entries))
@@ -196,11 +264,11 @@ func (s *Scheduler) execute(ctx context.Context, e entry) {
 		}
 		// Use a time bucket in the lock key so only one instance can execute
 		// this task for the current interval window.
-		bucketSize := int64(e.interval.Seconds())
+		bucketSize := e.interval.Milliseconds()
 		if bucketSize <= 0 {
-			bucketSize = 60
+			bucketSize = 60_000
 		}
-		bucket := time.Now().Unix() / bucketSize
+		bucket := time.Now().UnixMilli() / bucketSize
 		lockKey := fmt.Sprintf("nimbus:schedule:%s:%d", e.name, bucket)
 		_, acquired, err := s.locker.TryLock(ctx, lockKey, lockTTL)
 		if err != nil {

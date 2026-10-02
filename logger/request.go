@@ -10,7 +10,8 @@ import (
 const contextKey = "_nimbus_logger"
 
 // ForRequest returns a *zap.SugaredLogger scoped to the current HTTP request.
-// It carries the request_id (set by the RequestID middleware) and any other
+// It carries the request_id (set by the RequestID middleware), the trace_id
+// (set by the Tracing middleware) and any other
 // fields previously attached via WithContext.
 //
 // If no scoped logger exists yet, one is created from the global logger with
@@ -27,10 +28,14 @@ func ForRequest(c *http.Context) *zap.SugaredLogger {
 		}
 	}
 
-	// Build a scoped logger with request_id.
+	// Build a scoped logger with request_id (and trace_id when the Tracing
+	// middleware is on, so logs link to traces).
 	l := Log
 	if rid, ok := c.Get("request_id"); ok {
 		l = l.With("request_id", rid)
+	}
+	if tid, ok := c.Get("trace_id"); ok {
+		l = l.With("trace_id", tid)
 	}
 
 	c.Set(contextKey, l)

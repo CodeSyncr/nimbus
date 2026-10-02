@@ -24,35 +24,55 @@ func NewLocalDriver(root string) *LocalDriver {
 	return &LocalDriver{Root: root}
 }
 
-// Put writes the reader to root/path, creating parent dirs.
+// resolve maps a storage path to a file under Root. Cleaning it as an
+// absolute path first drops any leading "..", so paths built from user
+// input ("../../etc/passwd") cannot reach outside Root.
+func (d *LocalDriver) resolve(path string) string {
+	return filepath.Join(d.Root, filepath.Clean(string(filepath.Separator)+path))
+}
+
+// Put writes the reader to root/path, creating parent dirs. The file is
+// written to a temporary name and renamed, so readers never see a partial
+// file and a failed copy leaves the previous version in place.
 func (d *LocalDriver) Put(path string, src io.Reader) error {
-	full := filepath.Join(d.Root, path)
+	full := d.resolve(path)
 	if err := os.MkdirAll(filepath.Dir(full), 0755); err != nil {
 		return err
 	}
-	f, err := os.Create(full)
+	f, err := os.CreateTemp(filepath.Dir(full), ".tmp-"+filepath.Base(full)+"-*")
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	tmp := f.Name()
 	_, err = io.Copy(f, src)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Chmod(tmp, 0644)
+	}
+	if err == nil {
+		err = os.Rename(tmp, full)
+	}
+	if err != nil {
+		_ = os.Remove(tmp)
+	}
 	return err
 }
 
 // Get opens the file at root/path for reading.
 func (d *LocalDriver) Get(path string) (io.ReadCloser, error) {
-	full := filepath.Join(d.Root, path)
-	return os.Open(full)
+	return os.Open(d.resolve(path))
 }
 
 // Delete removes the file at root/path.
 func (d *LocalDriver) Delete(path string) error {
-	return os.Remove(filepath.Join(d.Root, path))
+	return os.Remove(d.resolve(path))
 }
 
 // Exists returns whether the file exists.
 func (d *LocalDriver) Exists(path string) (bool, error) {
-	_, err := os.Stat(filepath.Join(d.Root, path))
+	_, err := os.Stat(d.resolve(path))
 	if os.IsNotExist(err) {
 		return false, nil
 	}

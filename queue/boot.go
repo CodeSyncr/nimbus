@@ -20,24 +20,25 @@ import (
 	"time"
 
 	"github.com/CodeSyncr/nimbus/database"
+	"github.com/CodeSyncr/nimbus/schedule"
 )
 
 // BootConfig configures queue boot. Pass nil for env-based config.
 type BootConfig struct {
-	Driver          string // sync, redis, database, sqs, kafka
-	RedisURL        string
+	Driver   string // sync, redis, database, sqs, kafka
+	RedisURL string
 	// RedisVisibilityTimeout controls Redis in-flight lease timeout.
 	RedisVisibilityTimeout time.Duration
 	// DatabaseLeaseDuration controls how long processing DB jobs are leased before reclaim.
 	DatabaseLeaseDuration time.Duration
-	SQSQueueURL     string
-	KafkaBrokers    string
-	KafkaTopic      string
-	KafkaGroupID    string
-	RateLimitPerSec float64
-	RateLimitBurst  int
-	Strict          bool
-	RegisterJobs    func()
+	SQSQueueURL           string
+	KafkaBrokers          string
+	KafkaTopic            string
+	KafkaGroupID          string
+	RateLimitPerSec       float64
+	RateLimitBurst        int
+	Strict                bool
+	RegisterJobs          func()
 }
 
 // Boot initializes the queue manager from config/env and sets it globally.
@@ -77,7 +78,12 @@ func BootWithError(cfg *BootConfig) (*Manager, error) {
 		}
 	}
 
-	var adapter Adapter
+	var (
+		adapter     Adapter
+		locker      Locker     = NewMemoryLocker()
+		batches     BatchStore = NewMemoryBatchStore()
+		limiterFrom func(perSec float64, burst int) JobLimiter
+	)
 	switch config.Driver {
 	case "redis":
 		if config.RedisURL == "" {
@@ -91,6 +97,13 @@ func BootWithError(cfg *BootConfig) (*Manager, error) {
 			a.SetVisibilityTimeout(config.RedisVisibilityTimeout)
 		}
 		adapter = a
+		// Locks, batch progress and rate limits must be shared by every
+		// worker and web instance, so keep them in the same Redis.
+		locker = NewRedisLocker(a.Client())
+		batches = NewRedisBatchStore(a.Client())
+		limiterFrom = func(perSec float64, burst int) JobLimiter {
+			return NewRedisJobLimiter(a.Client(), perSec, burst)
+		}
 	case "database":
 		db := database.Get()
 		if db == nil {
@@ -103,7 +116,15 @@ func BootWithError(cfg *BootConfig) (*Manager, error) {
 		if err := da.EnsureTable(context.Background()); err != nil {
 			return nil, fmt.Errorf("queue: ensure table: %w", err)
 		}
-		adapter = da
+		dl := NewDatabaseLocker(db)
+		if err := dl.EnsureTable(context.Background()); err != nil {
+			return nil, fmt.Errorf("queue: ensure locks table: %w", err)
+		}
+		bs := NewDatabaseBatchStore(db)
+		if err := bs.EnsureTable(context.Background()); err != nil {
+			return nil, fmt.Errorf("queue: ensure batches table: %w", err)
+		}
+		adapter, locker, batches = da, dl, bs
 	case "sqs":
 		if config.SQSQueueURL == "" {
 			config.SQSQueueURL = os.Getenv("SQS_QUEUE_URL")
@@ -153,7 +174,20 @@ func BootWithError(cfg *BootConfig) (*Manager, error) {
 		if burst <= 0 {
 			burst = 10
 		}
-		adapter = NewRateLimitAdapter(adapter, config.RateLimitPerSec, burst)
+		if limiterFrom != nil {
+			adapter = NewRateLimitAdapterWith(adapter, limiterFrom(config.RateLimitPerSec, burst), config.RateLimitPerSec)
+		} else {
+			adapter = NewRateLimitAdapter(adapter, config.RateLimitPerSec, burst)
+		}
+	}
+	SetLocker(locker)
+	SetBatchStore(batches)
+	if _, local := locker.(*MemoryLocker); !local {
+		// Scheduled tasks lock through the same backend unless the app
+		// configured its own.
+		if schedule.DefaultLocker() == nil {
+			schedule.SetDefaultLocker(ScheduleLocker{Locker: locker})
+		}
 	}
 	m := NewManager(adapter)
 	SetGlobal(m)

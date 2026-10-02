@@ -9,14 +9,38 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-// Client represents a single websocket connection.
+// Client represents a single websocket connection. A user may have several
+// (one per tab or device).
 type Client struct {
+	id      string
 	user    *User
 	conn    *websocket.Conn
 	channel string
 	send    chan []byte
+	done    chan struct{}
 	hub     *Hub
 	mu      sync.Mutex
+}
+
+func newClient(h *Hub, user *User, conn *websocket.Conn, channel string) *Client {
+	return &Client{
+		id:      randomID(),
+		user:    user,
+		conn:    conn,
+		channel: channel,
+		send:    make(chan []byte, 256),
+		done:    make(chan struct{}),
+		hub:     h,
+	}
+}
+
+// trySend queues a message without blocking; a client whose buffer is full
+// misses it.
+func (c *Client) trySend(data []byte) {
+	select {
+	case c.send <- data:
+	default:
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -25,6 +49,7 @@ type Client struct {
 
 func (c *Client) readPump(ch *Channel) {
 	defer func() {
+		close(c.done)
 		ch.Leave(c)
 		c.conn.Close()
 	}()
@@ -77,23 +102,16 @@ func (c *Client) readPump(ch *Channel) {
 
 		case "whisper":
 			// Private message to specific user
+			// Private message to every connection of one user, on any instance.
 			if dataMap, ok := incoming.Data.(map[string]any); ok {
 				targetID, _ := dataMap["to"].(string)
-				ch.mu.RLock()
-				target, exists := ch.clients[targetID]
-				ch.mu.RUnlock()
-				if exists {
-					event := Event{
+				if targetID != "" {
+					c.hub.SendTo(ch.name, Event{
 						Type:    "whisper",
 						Channel: ch.name,
 						User:    c.user,
 						Data:    dataMap["message"],
-					}
-					data, _ := json.Marshal(event)
-					select {
-					case target.send <- data:
-					default:
-					}
+					}, targetID)
 				}
 			}
 
@@ -129,13 +147,10 @@ func (c *Client) writePump() {
 
 	for {
 		select {
-		case msg, ok := <-c.send:
+		case <-c.done:
+			return
+		case msg := <-c.send:
 			_ = c.conn.SetWriteDeadline(time.Now().Add(c.hub.config.WriteTimeout))
-			if !ok {
-				// Channel closed
-				_ = c.conn.WriteMessage(websocket.CloseMessage, []byte{})
-				return
-			}
 			if err := c.conn.WriteMessage(websocket.TextMessage, msg); err != nil {
 				return
 			}

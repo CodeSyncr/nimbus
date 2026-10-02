@@ -13,11 +13,14 @@ package queue
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log"
 	"reflect"
 	"sync"
 	"time"
 
+	"github.com/CodeSyncr/nimbus/tracing"
 	"github.com/google/uuid"
 )
 
@@ -112,6 +115,7 @@ func NewManager(adapter Adapter) *Manager {
 	if adapter == nil {
 		m.adapter = NewSyncAdapter(m)
 	}
+	m.registry["WithoutOverlapping"] = func() Job { return &WithoutOverlapping{manager: m} }
 	return m
 }
 
@@ -156,7 +160,16 @@ type DispatchBuilder struct {
 	delay      time.Duration
 	maxRetries int
 	priority   int
+	meta       map[string]interface{}
 	noop       bool // true when no global manager
+}
+
+func (b *DispatchBuilder) withMeta(key string, value interface{}) *DispatchBuilder {
+	if b.meta == nil {
+		b.meta = map[string]interface{}{}
+	}
+	b.meta[key] = value
+	return b
 }
 
 // OnQueue sets the queue name.
@@ -192,6 +205,14 @@ func (b *DispatchBuilder) Dispatch(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// Carry the caller's trace to the worker.
+	if tracing.SpanContextFromContext(ctx).IsValid() {
+		var span *tracing.Span
+		ctx, span = tracing.Start(ctx, "queue publish "+payload.JobName, tracing.WithKind(tracing.KindProducer),
+			tracing.WithAttrs(map[string]any{"messaging.destination.name": payload.Queue, "messaging.message.id": payload.ID}))
+		defer span.End()
+		payload.Meta[metaTraceparent] = span.SpanContext().Traceparent()
+	}
 	if err := b.manager.adapter.Push(ctx, payload); err != nil {
 		return err
 	}
@@ -208,6 +229,10 @@ func (b *DispatchBuilder) serialize() (*JobPayload, error) {
 	if b.delay > 0 {
 		runAt = runAt.Add(b.delay)
 	}
+	meta := map[string]interface{}{"priority": b.priority}
+	for k, v := range b.meta {
+		meta[k] = v
+	}
 	return &JobPayload{
 		ID:         uuid.New().String(),
 		JobName:    jobName(b.job),
@@ -217,8 +242,47 @@ func (b *DispatchBuilder) serialize() (*JobPayload, error) {
 		MaxRetries: b.maxRetries,
 		Delay:      b.delay,
 		RunAt:      runAt,
-		Meta:       map[string]interface{}{"priority": b.priority},
+		Meta:       meta,
 	}, nil
+}
+
+// ReleaseError tells the worker to put the job back on the queue after
+// Delay without counting an attempt. Return it from Handle with Release.
+type ReleaseError struct {
+	Delay time.Duration
+}
+
+func (e *ReleaseError) Error() string {
+	return fmt.Sprintf("queue: job released for %s", e.Delay)
+}
+
+// Release returns an error that puts the job back on the queue after delay
+// without counting it as a failed attempt.
+func Release(delay time.Duration) error {
+	return &ReleaseError{Delay: delay}
+}
+
+// transientMetaKeys are delivery-specific and never copied onto a requeued job.
+var transientMetaKeys = []string{metaRedisLeaseToken, metaDBClaimToken, "sqs_receipt_handle",
+	"redis_processing_key", "redis_inflight_key", "redis_raw_payload"}
+
+func requeueCopy(p *JobPayload, delay time.Duration) *JobPayload {
+	cp := *p
+	cp.Meta = make(map[string]interface{}, len(p.Meta))
+	for k, v := range p.Meta {
+		cp.Meta[k] = v
+	}
+	for _, k := range transientMetaKeys {
+		delete(cp.Meta, k)
+	}
+	cp.Delay = delay
+	cp.RunAt = time.Now().Add(delay)
+	return &cp
+}
+
+func (m *Manager) isSync() bool {
+	_, ok := m.adapter.(*SyncAdapter)
+	return ok
 }
 
 // Process pops a job from the adapter, deserializes, and runs it.
@@ -227,47 +291,180 @@ func (m *Manager) Process(ctx context.Context, queue string) error {
 	if err != nil || payload == nil {
 		return err
 	}
+	// Acks and requeues must land even when the worker is shutting down.
+	bg := context.WithoutCancel(ctx)
 	ack := func() {
 		if ca, ok := m.adapter.(CompletableAdapter); ok {
-			_ = ca.Complete(ctx, payload)
+			_ = ca.Complete(bg, payload)
 		}
 	}
 	job, err := m.deserialize(payload)
 	if err != nil {
-		ack()
 		notifyProcessed(payload, 0, err)
+		m.finish(bg, payload, nil, err)
+		ack()
 		return err
 	}
+	if payload.Attempts > payload.MaxRetries {
+		// Earlier deliveries were lost (the worker crashed or stalled past
+		// its lease) often enough to use up the job's retries.
+		err = fmt.Errorf("queue: job %q exceeded %d retries: its worker was lost or timed out", payload.JobName, payload.MaxRetries)
+		m.fail(bg, job, payload, 0, err)
+		ack()
+		return err
+	}
+
+	ctx, span := m.startSpan(ctx, payload)
+	defer span.End()
+	bg = context.WithoutCancel(ctx) // so chained jobs continue the trace
+
+	stopHeartbeat := m.heartbeat(ctx, payload)
 	start := time.Now()
-	err = job.Handle(ctx)
+	err = m.handle(ctx, job)
 	duration := time.Since(start)
+	stopHeartbeat()
+	if err != nil {
+		span.RecordError(err)
+	}
+
+	var rel *ReleaseError
+	if errors.As(err, &rel) {
+		if pushErr := m.adapter.Push(bg, requeueCopy(payload, rel.Delay)); pushErr != nil {
+			return fmt.Errorf("queue: release requeue failed: %w", pushErr)
+		}
+		ack()
+		return nil
+	}
 	if err != nil {
 		payload.Attempts++
 		if payload.Attempts <= payload.MaxRetries {
 			retryDelay := nextRetryDelay(payload.Attempts, payload.Delay)
-			payload.Delay = retryDelay
-			payload.RunAt = time.Now().Add(retryDelay)
-			if pushErr := m.adapter.Push(ctx, payload); pushErr != nil {
+			retry := requeueCopy(payload, retryDelay)
+			if pushErr := m.adapter.Push(bg, retry); pushErr != nil {
 				return fmt.Errorf("queue: retry requeue failed: %w", pushErr)
 			}
-			notifyRetried(payload, retryDelay)
+			notifyRetried(retry, retryDelay)
 			ack()
 			return nil
 		}
-		if fj, ok := job.(FailedJob); ok {
-			fj.Failed(ctx, err)
-		}
-		// Laravel Horizon: record in failed job store for dashboard (list/forget/retry)
-		if store := GetFailedJobStore(); store != nil {
-			_ = store.Push(ctx, payload, err.Error())
-		}
-		notifyProcessed(payload, duration, err)
+		m.fail(bg, job, payload, duration, err)
 		ack()
 		return err
 	}
-	ack()
 	notifyProcessed(payload, duration, nil)
+	m.finish(bg, payload, job, nil)
+	ack()
 	return nil
+}
+
+const metaTraceparent = "traceparent"
+
+// startSpan opens the consumer span for a job, continuing the trace of the
+// request that dispatched it when there is one.
+func (m *Manager) startSpan(ctx context.Context, payload *JobPayload) (context.Context, *tracing.Span) {
+	opts := []tracing.StartOption{
+		tracing.WithKind(tracing.KindConsumer),
+		tracing.WithAttrs(map[string]any{
+			"messaging.destination.name": payload.Queue,
+			"messaging.message.id":       payload.ID,
+			"messaging.message.attempt":  payload.Attempts + 1,
+		}),
+	}
+	if tp, _ := payload.Meta[metaTraceparent].(string); tp != "" {
+		if sc, err := tracing.ParseTraceparent(tp); err == nil {
+			opts = append(opts, tracing.WithParent(sc))
+		}
+	}
+	return tracing.Start(ctx, "queue process "+payload.JobName, opts...)
+}
+
+// handle runs the job, holding its overlap lock if it has one.
+func (m *Manager) handle(ctx context.Context, job Job) error {
+	no, ok := job.(NonOverlapping)
+	if !ok {
+		return job.Handle(ctx)
+	}
+	key := overlapLockKey(job, no.OverlapKey())
+	expiry, release := overlapTimings(job)
+	locker := GetLocker()
+	token, got, err := locker.Acquire(ctx, key, expiry)
+	if err != nil {
+		return fmt.Errorf("queue: overlap lock: %w", err)
+	}
+	if !got {
+		return Release(release)
+	}
+	defer func() { _ = locker.Release(context.WithoutCancel(ctx), key, token) }()
+	return job.Handle(context.WithValue(ctx, overlapHeldKey{}, key))
+}
+
+// fail records a job that will not be retried.
+func (m *Manager) fail(ctx context.Context, job Job, payload *JobPayload, duration time.Duration, err error) {
+	if fj, ok := job.(FailedJob); ok {
+		fj.Failed(ctx, err)
+	}
+	// Laravel Horizon: record in failed job store for dashboard (list/forget/retry)
+	if store := GetFailedJobStore(); store != nil {
+		_ = store.Push(ctx, payload, err.Error())
+	}
+	notifyProcessed(payload, duration, err)
+	m.finish(ctx, payload, job, err)
+}
+
+// finish runs once per job when it succeeded or failed for good: it frees
+// the unique lock, advances an async chain and counts it toward its batch.
+func (m *Manager) finish(ctx context.Context, payload *JobPayload, job Job, jobErr error) {
+	if payload.Meta == nil {
+		return
+	}
+	releaseUniqueFromMeta(ctx, payload)
+	if err := m.continueChain(ctx, payload, job, jobErr); err != nil {
+		log.Printf("[queue] chain after job %s: %v", payload.ID, err)
+	}
+	if id, _ := payload.Meta[metaBatchID].(string); id != "" {
+		m.recordBatch(ctx, id, payload.ID, job, jobErr)
+	}
+}
+
+// heartbeat keeps the job's lease alive while it runs, for adapters whose
+// deliveries expire. The returned func stops it.
+func (m *Manager) heartbeat(ctx context.Context, payload *JobPayload) func() {
+	le, ok := m.adapter.(LeaseExtender)
+	if !ok {
+		return func() {}
+	}
+	lease := le.LeaseDuration()
+	if lease <= 0 {
+		return func() {}
+	}
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		t := time.NewTicker(lease / 3)
+		defer t.Stop()
+		bg := context.WithoutCancel(ctx)
+		for {
+			select {
+			case <-done:
+				return
+			case <-t.C:
+				err := le.ExtendLease(bg, payload)
+				if errors.Is(err, ErrLeaseLost) {
+					log.Printf("[queue] job %s (%s) lost its lease while running; it may run again elsewhere", payload.ID, payload.JobName)
+					return
+				}
+				if err != nil {
+					log.Printf("[queue] extend lease for job %s: %v", payload.ID, err)
+				}
+			}
+		}
+	}()
+	return func() {
+		close(done)
+		wg.Wait()
+	}
 }
 
 func nextRetryDelay(attempt int, base time.Duration) time.Duration {

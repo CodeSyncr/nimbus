@@ -11,6 +11,7 @@ import (
 	stdhttp "net/http"
 	"os"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -159,24 +160,37 @@ type CSRFStore interface {
 	Valid(ctx context.Context, token string) bool
 }
 
-// MemoryCSRFStore keeps valid tokens in a process-global set (single-node
-// only). It is a minimal helper: tokens are NOT bound to a session (any valid
-// token authorizes any caller) and the set is not pruned, so it can grow
-// unbounded. For production CSRF protection prefer shield.CSRFGuard, which
-// uses a signed, session-bound double-submit cookie.
+// MemoryCSRFStore keeps valid tokens in process memory (single-node only).
+// It is a minimal helper: tokens are NOT bound to a session (any valid
+// token authorizes any caller). Tokens expire after TTL (default 2h) and at
+// most MaxTokens (default 100,000) are kept, oldest dropped first. For
+// production CSRF protection prefer shield.CSRFGuard, which uses a signed,
+// session-bound double-submit cookie.
 type MemoryCSRFStore struct {
-	mu     sync.RWMutex
-	tokens map[string]struct{}
+	TTL       time.Duration
+	MaxTokens int
+
+	mu     sync.Mutex
+	tokens map[string]time.Time // token -> expiry
+	order  []string             // creation order, for eviction
 }
 
 func NewMemoryCSRFStore() *MemoryCSRFStore {
-	return &MemoryCSRFStore{tokens: make(map[string]struct{})}
+	return &MemoryCSRFStore{
+		TTL:       2 * time.Hour,
+		MaxTokens: 100_000,
+		tokens:    make(map[string]time.Time),
+	}
 }
 
 func (m *MemoryCSRFStore) Valid(ctx context.Context, token string) bool {
-	m.mu.RLock()
-	_, ok := m.tokens[token]
-	m.mu.RUnlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	exp, ok := m.tokens[token]
+	if ok && time.Now().After(exp) {
+		delete(m.tokens, token)
+		return false
+	}
 	return ok
 }
 
@@ -187,9 +201,38 @@ func (m *MemoryCSRFStore) Create() string {
 	}
 	token := hex.EncodeToString(b)
 	m.mu.Lock()
-	m.tokens[token] = struct{}{}
-	m.mu.Unlock()
+	defer m.mu.Unlock()
+	now := time.Now()
+	m.tokens[token] = now.Add(m.TTL)
+	m.order = append(m.order, token)
+	m.pruneLocked(now)
 	return token
+}
+
+// Len returns the number of tokens held (including expired ones not yet pruned).
+func (m *MemoryCSRFStore) Len() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.tokens)
+}
+
+// pruneLocked drops tokens from the front of the creation order while they
+// are expired, already gone, or over MaxTokens. Tokens share one TTL, so the
+// oldest always expire first and this stays amortized O(1) per Create.
+func (m *MemoryCSRFStore) pruneLocked(now time.Time) {
+	i := 0
+	for ; i < len(m.order); i++ {
+		tok := m.order[i]
+		exp, ok := m.tokens[tok]
+		over := m.MaxTokens > 0 && len(m.tokens) > m.MaxTokens
+		if ok && now.Before(exp) && !over {
+			break
+		}
+		delete(m.tokens, tok)
+	}
+	if i > 0 {
+		m.order = append(m.order[:0], m.order[i:]...)
+	}
 }
 
 // GenerateCSRFToken returns a new token (store in session and put in form/header).
@@ -201,12 +244,13 @@ func GenerateCSRFToken() string {
 	return hex.EncodeToString(b)
 }
 
-// rateLimiter holds state for in-memory rate limiting.
+// rateLimiter holds state for in-memory rate limiting (fixed windows).
 type rateLimiter struct {
-	mu     sync.Mutex
-	counts map[string]*rateEntry
-	limit  int
-	window time.Duration
+	mu        sync.Mutex
+	counts    map[string]*rateEntry
+	limit     int
+	window    time.Duration
+	lastSweep time.Time
 }
 
 type rateEntry struct {
@@ -215,15 +259,21 @@ type rateEntry struct {
 }
 
 // RateLimit returns middleware that allows limit requests per window per key (keyFn extracts key from request, e.g. IP).
+// State is per process; use RateLimitRedis when running several instances.
 func RateLimit(limit int, window time.Duration, keyFn func(*http.Request) string) router.Middleware {
-	rl := &rateLimiter{counts: make(map[string]*rateEntry), limit: limit, window: window}
+	rl := &rateLimiter{counts: make(map[string]*rateEntry), limit: limit, window: window, lastSweep: time.Now()}
 	return func(next router.HandlerFunc) router.HandlerFunc {
 		return func(c *http.Context) error {
 			key := keyFn(c.Request)
 			if key == "" {
 				key = c.Request.RemoteAddr
 			}
-			if !rl.allow(key) {
+			ok, remaining, reset := rl.allow(key)
+			h := c.Response.Header()
+			h.Set("X-RateLimit-Limit", strconv.Itoa(limit))
+			h.Set("X-RateLimit-Remaining", strconv.Itoa(remaining))
+			if !ok {
+				h.Set("Retry-After", strconv.Itoa(retryAfterSeconds(time.Until(reset))))
 				c.JSON(http.StatusTooManyRequests, map[string]string{"error": "rate limit exceeded"})
 				return nil
 			}
@@ -232,20 +282,50 @@ func RateLimit(limit int, window time.Duration, keyFn func(*http.Request) string
 	}
 }
 
-func (r *rateLimiter) allow(key string) bool {
+// allow counts a request for key and reports whether it is within the
+// limit, how many requests remain, and when the window resets.
+func (r *rateLimiter) allow(key string) (bool, int, time.Time) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	now := time.Now()
+	r.sweep(now)
 	e, ok := r.counts[key]
-	if !ok || now.Sub(e.start) > r.window {
-		r.counts[key] = &rateEntry{count: 1, start: now}
-		return true
+	if !ok || now.Sub(e.start) >= r.window {
+		e = &rateEntry{start: now}
+		r.counts[key] = e
 	}
+	reset := e.start.Add(r.window)
 	if e.count >= r.limit {
-		return false
+		return false, 0, reset
 	}
 	e.count++
-	return true
+	return true, r.limit - e.count, reset
+}
+
+// sweep drops expired windows once per window, so keys from clients that
+// went away (every IP that ever made a request) do not pile up forever.
+func (r *rateLimiter) sweep(now time.Time) {
+	if now.Sub(r.lastSweep) < r.window {
+		return
+	}
+	r.lastSweep = now
+	for k, e := range r.counts {
+		if now.Sub(e.start) >= r.window {
+			delete(r.counts, k)
+		}
+	}
+}
+
+func (r *rateLimiter) size() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.counts)
+}
+
+// retryAfterSeconds rounds up, so clients never retry before the reset.
+func retryAfterSeconds(d time.Duration) int {
+	secs := int((d + time.Second - 1) / time.Second)
+	return max(secs, 1)
 }
 
 // ---------------------------------------------------------------------------

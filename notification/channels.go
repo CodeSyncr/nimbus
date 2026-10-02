@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 )
 
 // ── Slack Channel ───────────────────────────────────────────────
@@ -43,9 +44,21 @@ type SlackField struct {
 	Short bool   `json:"short,omitempty"`
 }
 
+// webhookClient bounds webhook calls so a slow endpoint cannot hang the caller.
+var webhookClient = &http.Client{Timeout: 10 * time.Second}
+
+func postJSON(client *http.Client, url string, body []byte) (*http.Response, error) {
+	if client == nil {
+		client = webhookClient
+	}
+	return client.Post(url, "application/json", bytes.NewReader(body))
+}
+
 // SlackChannel sends notifications via Slack incoming webhooks.
 type SlackChannel struct {
 	WebhookURL string
+	// Client overrides the HTTP client (default: 10s timeout).
+	Client *http.Client
 }
 
 // NewSlackChannel creates a Slack channel with the given webhook URL.
@@ -65,7 +78,7 @@ func (c *SlackChannel) Send(n SlackNotification) error {
 		return fmt.Errorf("notification/slack: marshal: %w", err)
 	}
 
-	resp, err := http.Post(c.WebhookURL, "application/json", bytes.NewReader(body))
+	resp, err := postJSON(c.Client, c.WebhookURL, body)
 	if err != nil {
 		return fmt.Errorf("notification/slack: post: %w", err)
 	}
@@ -122,6 +135,8 @@ type DiscordEmbedFooter struct {
 // DiscordChannel sends notifications via Discord webhooks.
 type DiscordChannel struct {
 	WebhookURL string
+	// Client overrides the HTTP client (default: 10s timeout).
+	Client *http.Client
 }
 
 // NewDiscordChannel creates a Discord channel with the given webhook URL.
@@ -141,7 +156,7 @@ func (c *DiscordChannel) Send(n DiscordNotification) error {
 		return fmt.Errorf("notification/discord: marshal: %w", err)
 	}
 
-	resp, err := http.Post(c.WebhookURL, "application/json", bytes.NewReader(body))
+	resp, err := postJSON(c.Client, c.WebhookURL, body)
 	if err != nil {
 		return fmt.Errorf("notification/discord: post: %w", err)
 	}

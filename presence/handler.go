@@ -1,12 +1,10 @@
 package presence
 
 import (
-	"fmt"
 	"log"
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 
 	"github.com/gorilla/websocket"
 )
@@ -43,7 +41,7 @@ func (h *Hub) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		id := r.URL.Query().Get("user_id")
 		name := r.URL.Query().Get("user_name")
 		if id == "" {
-			id = fmt.Sprintf("anon-%d", time.Now().UnixNano()%100000)
+			id = "anon-" + randomID()
 		}
 		if name == "" {
 			name = id
@@ -60,13 +58,7 @@ func (h *Hub) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	client := &Client{
-		user:    user,
-		conn:    conn,
-		channel: channel,
-		send:    make(chan []byte, 256),
-		hub:     h,
-	}
+	client := newClient(h, user, conn, channel)
 
 	ch := h.getOrCreateChannel(channel)
 	ch.Join(client)

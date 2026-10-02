@@ -15,8 +15,9 @@ type Notification interface {
 	ToBroadcast() (channel string, payload any)
 }
 
-// Send delivers the notification on all supported channels.
-// If mail.Default is nil, the mail channel is skipped.
+// Send delivers the notification on all supported channels. A notification
+// with a mail message fails to send when no mail driver is configured
+// (mail.Default is nil); return nil from ToMail to skip mail.
 func Send(n Notification) error {
 	if err := SendMail(n); err != nil {
 		runAfterSendHooks(n, err)

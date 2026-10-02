@@ -20,4 +20,3 @@ func TestBootWithErrorRejectsMissingDatabaseConnection(t *testing.T) {
 		t.Fatal("expected error when database queue is configured without connection")
 	}
 }
-

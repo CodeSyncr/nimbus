@@ -18,8 +18,8 @@ queue.Boot(&queue.BootConfig{RegisterJobs: start.RegisterQueueJobs})
 |----------|-------------|---------|
 | `QUEUE_DRIVER` | `sync`, `redis`, `database`, `sqs`, `kafka` | `sync` |
 | `REDIS_URL` | Redis URL (for redis driver) | `redis://localhost:6379` |
-| `QUEUE_REDIS_VISIBILITY_TIMEOUT_SECONDS` | Redis in-flight lease timeout before reclaim | `60` |
-| `QUEUE_DB_LEASE_SECONDS` | Database processing lease before reclaim | `120` |
+| `QUEUE_REDIS_VISIBILITY_TIMEOUT_SECONDS` | How long a Redis job stays leased without a worker heartbeat | `60` |
+| `QUEUE_DB_LEASE_SECONDS` | How long a database job stays leased without a worker heartbeat | `120` |
 | `QUEUE_BOOT_STRICT` | Fail boot on unknown driver values | `false` |
 | `SQS_QUEUE_URL` | AWS SQS queue URL | — |
 | `KAFKA_BROKERS` | Kafka brokers (comma-separated) | — |
@@ -110,7 +110,43 @@ queue.RunWorker(ctx, "default")
 
 ## Rate limiting
 
-Pass `RateLimitPerSec` and `RateLimitBurst` in `BootConfig` to throttle job processing.
+Pass `RateLimitPerSec` and `RateLimitBurst` in `BootConfig` to throttle job processing. The limit is per queue. With the Redis driver it is kept in Redis, so it holds across all workers and instances; with other drivers each worker process gets the full limit.
+
+## Delivery guarantees
+
+- With `redis` and `database`, each job is handed to one worker at a time. While a job runs, its worker renews the job's lease every third of the lease period, so long jobs are not picked up twice.
+- If a worker dies, its job returns to the queue after one lease period and the lost run **counts as an attempt**. A job that keeps killing its worker fails for good once it uses up its retries, instead of looping forever.
+- Delivery is still at least once (a network partition can outlast a lease), so keep handlers idempotent.
+- Return `queue.Release(delay)` from `Handle` to put a job back without counting an attempt.
+- Database driver: finished jobs are deleted, and retries reuse their job's row.
+
+## Batches, chains, unique jobs, overlap
+
+All four work across workers and instances with the `redis` and `database` drivers: `queue.Boot` keeps their locks and progress in the same backend.
+
+```go
+// At boot, in every process that runs workers:
+queue.RegisterBatch("import-users", queue.BatchCallbacks{
+    Then:    func(ctx context.Context, b *queue.Batch) { /* all succeeded */ },
+    Catch:   func(ctx context.Context, b *queue.Batch, err error) { /* one job failed */ },
+    Finally: func(ctx context.Context, b *queue.Batch) { /* all done */ },
+})
+
+// Anywhere: queues every job and returns. Progress: queue.FindBatch(ctx, b.ID)
+b := queue.NewBatch(jobs...).Named("import-users")
+err := b.Dispatch(ctx)
+
+// Each job is queued by the worker that finished the previous one.
+queue.NewChain(&Fetch{}, &Transform{}, &Load{}).DispatchAsync(ctx)
+
+// Skips the dispatch while an identical job is pending (lock released when it finishes).
+queue.DispatchUnique(ctx, &RebuildIndex{TenantID: 7}) // implements UniqueID() / UniqueFor()
+
+// Only one at a time per key; a blocked job is put back and retried shortly.
+queue.Dispatch(queue.NewWithoutOverlapping(&SyncAccount{ID: 7}, "account-7")).Dispatch(ctx)
+```
+
+Jobs can also implement `OverlapKey() string` (`queue.NonOverlapping`) instead of using the wrapper. With the `sync` driver (or no manager), `Batch.Dispatch` runs the jobs concurrently in-process; `Batch.Run` always does.
 
 ## Production guide (recommended defaults)
 
@@ -126,8 +162,8 @@ Use this section as a starting baseline for reliable queue processing.
 
 - Redis (`QUEUE_REDIS_VISIBILITY_TIMEOUT_SECONDS`): start at `60`.
 - Database (`QUEUE_DB_LEASE_SECONDS`): start at `120`.
-- Rule of thumb: timeout should be at least `2x` your p95 job runtime.
-- Too low: duplicate work from premature reclaim.
+- Workers heartbeat running jobs, so the timeout does not need to cover job runtime: it is how long a crashed worker's job waits before another worker takes it.
+- Too low: a worker stalled longer than the lease (long GC pause, network blip) can lose its job to another worker.
 - Too high: slow recovery when workers crash.
 
 You can also set these in code:

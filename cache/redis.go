@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/CodeSyncr/nimbus/redis"
+	"golang.org/x/sync/singleflight"
 )
 
 const redisPrefix = "nimbus:cache:"
@@ -14,6 +15,7 @@ const redisPrefix = "nimbus:cache:"
 type RedisStore struct {
 	client *redis.Client
 	prefix string
+	group  singleflight.Group
 }
 
 // NewRedisStore creates a Redis cache store.
@@ -63,16 +65,23 @@ func (r *RedisStore) Delete(key string) error {
 }
 
 // Remember returns the cached value or calls fn, stores the result, and returns it.
+// Concurrent misses for the same key in this process share one call to fn.
 func (r *RedisStore) Remember(key string, ttl time.Duration, fn func() (any, error)) (any, error) {
 	if v, ok := r.Get(key); ok {
 		return v, nil
 	}
-	v, err := fn()
-	if err != nil {
-		return nil, err
-	}
-	_ = r.Set(key, v, ttl)
-	return v, nil
+	v, err, _ := r.group.Do(key, func() (any, error) {
+		if v, ok := r.Get(key); ok {
+			return v, nil
+		}
+		v, err := fn()
+		if err != nil {
+			return nil, err
+		}
+		_ = r.Set(key, v, ttl)
+		return v, nil
+	})
+	return v, err
 }
 
 // InvalidatePrefix deletes all keys with the given prefix using SCAN.

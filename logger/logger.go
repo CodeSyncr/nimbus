@@ -3,6 +3,7 @@ package logger
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -125,8 +126,7 @@ func buildChannel(name string, ch ChannelConfig, global Config) (*zap.SugaredLog
 			return nil, fmt.Errorf("file channel requires path")
 		}
 		// Ensure parent directory exists
-		dir := ch.Path[:strings.LastIndex(ch.Path, "/")]
-		if dir != "" {
+		if dir := filepath.Dir(ch.Path); dir != "." {
 			_ = os.MkdirAll(dir, 0755)
 		}
 		outputPaths = []string{ch.Path}

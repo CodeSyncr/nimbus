@@ -18,6 +18,9 @@
 |   })
 |   app.Use(hub.Plugin())
 |
+|   // Several app instances: share presence through Redis.
+|   presence.NewPlugin(presence.Config{AuthFunc: ..., Redis: redisClient})
+|
 |   // Client-side (JavaScript)
 |   const ws = new WebSocket("ws://localhost:3333/_presence?channel=room-1")
 |   ws.send(JSON.stringify({type: "typing", data: {typing: true}}))
@@ -42,6 +45,7 @@ import (
 
 	"github.com/CodeSyncr/nimbus"
 	nhttp "github.com/CodeSyncr/nimbus/http"
+	"github.com/CodeSyncr/nimbus/redis"
 	"github.com/CodeSyncr/nimbus/router"
 )
 
@@ -87,6 +91,14 @@ type Config struct {
 	// AllowedOrigins controls accepted websocket Origin hosts.
 	// When empty, same-origin requests are allowed by default.
 	AllowedOrigins []string
+
+	// Redis shares membership and events between app instances. Without
+	// it, each instance only sees its own connections.
+	Redis *redis.Client
+
+	// RedisPrefix namespaces the Redis keys and Pub/Sub topic (default
+	// "nimbus:presence:"). Hubs that should see each other must match.
+	RedisPrefix string
 }
 
 // ---------------------------------------------------------------------------
@@ -94,8 +106,9 @@ type Config struct {
 // ---------------------------------------------------------------------------
 
 var (
-	_ nimbus.Plugin    = (*PresencePlugin)(nil)
-	_ nimbus.HasRoutes = (*PresencePlugin)(nil)
+	_ nimbus.Plugin      = (*PresencePlugin)(nil)
+	_ nimbus.HasRoutes   = (*PresencePlugin)(nil)
+	_ nimbus.HasShutdown = (*PresencePlugin)(nil)
 )
 
 // PresencePlugin integrates presence channels with Nimbus.
@@ -122,6 +135,11 @@ func (p *PresencePlugin) Register(app *nimbus.App) error {
 
 func (p *PresencePlugin) Boot(app *nimbus.App) error {
 	return nil
+}
+
+// Shutdown stops cross-instance syncing.
+func (p *PresencePlugin) Shutdown() error {
+	return p.Hub.Close()
 }
 
 // RegisterRoutes mounts presence endpoints.

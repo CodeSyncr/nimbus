@@ -30,6 +30,7 @@ import (
 	"github.com/CodeSyncr/nimbus/openapi"
 	"github.com/CodeSyncr/nimbus/router"
 	"github.com/CodeSyncr/nimbus/schedule"
+	"github.com/CodeSyncr/nimbus/tracing"
 )
 
 // Provider is the service provider interface (AdonisJS/Laravel style).
@@ -401,6 +402,16 @@ func (a *App) Boot() error {
 		for _, w := range warnings {
 			fmt.Fprintf(os.Stderr, "  \033[33m⚠\033[0m  config: %s\n", w)
 		}
+	}
+
+	// Export traces when OTEL_EXPORTER_OTLP_* is set (no-op otherwise);
+	// flush what is buffered on shutdown.
+	if exp := tracing.ConfigureFromEnv(); exp != nil {
+		a.OnShutdown(func(*App) {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = exp.Shutdown(ctx)
+		})
 	}
 
 	// Pass 1 — Provider.Register

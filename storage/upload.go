@@ -8,7 +8,9 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -149,19 +151,22 @@ func NewSignedURLGenerator(secret, baseURL string) *SignedURLGenerator {
 //	url := gen.TemporaryURL("avatars/photo.jpg", 15*time.Minute)
 //	// => https://example.com/files/avatars/photo.jpg?expires=1700000000&signature=abc123
 func (g *SignedURLGenerator) TemporaryURL(path string, expiry time.Duration) string {
+	path = strings.TrimLeft(path, "/")
 	expires := time.Now().Add(expiry).Unix()
 	signature := g.sign(path, expires)
 
-	sep := "?"
-	if strings.Contains(g.BaseURL, "?") {
-		sep = "&"
+	u, err := url.Parse(g.BaseURL)
+	if err != nil {
+		// Unparseable base: fall back to plain concatenation.
+		return fmt.Sprintf("%s/%s?expires=%d&signature=%s", strings.TrimRight(g.BaseURL, "/"), path, expires, signature)
 	}
-
-	return fmt.Sprintf("%s/%s%sexpires=%d&signature=%s",
-		strings.TrimRight(g.BaseURL, "/"),
-		strings.TrimLeft(path, "/"),
-		sep, expires, signature,
-	)
+	u.Path = strings.TrimRight(u.Path, "/") + "/" + path
+	u.RawPath = ""
+	q := u.Query()
+	q.Set("expires", strconv.FormatInt(expires, 10))
+	q.Set("signature", signature)
+	u.RawQuery = q.Encode()
+	return u.String()
 }
 
 // Verify checks if a signed URL is still valid.
@@ -169,7 +174,7 @@ func (g *SignedURLGenerator) Verify(path, signature string, expires int64) bool 
 	if time.Now().Unix() > expires {
 		return false
 	}
-	expected := g.sign(path, expires)
+	expected := g.sign(strings.TrimLeft(path, "/"), expires)
 	return hmac.Equal([]byte(signature), []byte(expected))
 }
 

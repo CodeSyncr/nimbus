@@ -1,6 +1,9 @@
 package cache
 
 import (
+	"fmt"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -260,5 +263,66 @@ func TestMemoryStore_ComplexValues(t *testing.T) {
 	m := v.(map[string]int)
 	if m["a"] != 1 || m["b"] != 2 {
 		t.Errorf("unexpected map values: %v", m)
+	}
+}
+
+// ── MemoryStore: bounds and stampede protection ─────────────────
+
+func TestMemoryStore_EvictsLeastRecentlyUsed(t *testing.T) {
+	s := NewMemoryStoreWith(MemoryOptions{MaxEntries: 3})
+	_ = s.Set("a", 1, 0)
+	_ = s.Set("b", 2, 0)
+	_ = s.Set("c", 3, 0)
+	s.Get("a") // a is now most recently used
+	_ = s.Set("d", 4, 0)
+	if _, ok := s.Get("b"); ok {
+		t.Fatal("least recently used key should have been evicted")
+	}
+	for _, k := range []string{"a", "c", "d"} {
+		if _, ok := s.Get(k); !ok {
+			t.Fatalf("key %q should still be cached", k)
+		}
+	}
+	if s.Len() != 3 {
+		t.Fatalf("Len = %d, want 3", s.Len())
+	}
+}
+
+func TestMemoryStore_SweepsExpiredKeysNobodyReads(t *testing.T) {
+	s := NewMemoryStoreWith(MemoryOptions{SweepInterval: 10 * time.Millisecond, MaxEntries: -1})
+	for i := 0; i < 500; i++ {
+		_ = s.Set(fmt.Sprintf("k%d", i), i, 5*time.Millisecond)
+	}
+	time.Sleep(20 * time.Millisecond)
+	_ = s.Set("fresh", 1, 0)
+	if n := s.Len(); n != 1 {
+		t.Fatalf("expired keys were not swept: %d entries left", n)
+	}
+}
+
+func TestMemoryStore_RememberSharesConcurrentMisses(t *testing.T) {
+	s := NewMemoryStore()
+	var calls int32
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			v, err := s.Remember("slow", time.Minute, func() (any, error) {
+				atomic.AddInt32(&calls, 1)
+				time.Sleep(50 * time.Millisecond)
+				return "value", nil
+			})
+			if err != nil || v != "value" {
+				t.Errorf("Remember = %v, %v", v, err)
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	if calls != 1 {
+		t.Fatalf("fn ran %d times for one key, want 1", calls)
 	}
 }

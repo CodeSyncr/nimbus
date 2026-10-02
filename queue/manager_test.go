@@ -3,8 +3,11 @@ package queue
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/CodeSyncr/nimbus/tracing"
 )
 
 type testJob struct {
@@ -120,4 +123,54 @@ func TestManagerProcessAckOnPermanentFailure(t *testing.T) {
 // DispatchBuilderForTest exposes serialization for test payload setup.
 func (b *DispatchBuilder) DispatchBuilderForTest() (*JobPayload, error) {
 	return b.serialize()
+}
+
+type spanSink struct {
+	mu    sync.Mutex
+	spans []tracing.SpanData
+}
+
+func (s *spanSink) ExportSpans(d []tracing.SpanData) {
+	s.mu.Lock()
+	s.spans = append(s.spans, d...)
+	s.mu.Unlock()
+}
+func (s *spanSink) Shutdown(context.Context) error { return nil }
+
+func TestTraceFollowsJobFromDispatchToWorker(t *testing.T) {
+	sink := &spanSink{}
+	tracing.Global().SetExporter(sink)
+	t.Cleanup(func() { tracing.Global().SetExporter(nil) })
+
+	adapter := &stubCompletableAdapter{}
+	m := NewManager(adapter)
+	m.Register(&testJob{})
+
+	ctx, request := tracing.Start(context.Background(), "POST /orders")
+	if err := m.Dispatch(&testJob{}).Dispatch(ctx); err != nil {
+		t.Fatal(err)
+	}
+	request.End()
+	adapter.popPayload = adapter.pushes[0]
+	if err := m.Process(context.Background(), "default"); err != nil {
+		t.Fatal(err)
+	}
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	var publish, process *tracing.SpanData
+	for i := range sink.spans {
+		switch sink.spans[i].Name {
+		case "queue publish testJob":
+			publish = &sink.spans[i]
+		case "queue process testJob":
+			process = &sink.spans[i]
+		}
+	}
+	if publish == nil || process == nil {
+		t.Fatalf("spans = %+v", sink.spans)
+	}
+	if process.TraceID != request.SpanContext().TraceID || process.Parent != publish.SpanID {
+		t.Fatal("worker span is not part of the dispatching request's trace")
+	}
 }

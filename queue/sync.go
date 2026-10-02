@@ -27,8 +27,9 @@ func (s *SyncAdapter) Push(ctx context.Context, payload *JobPayload) error {
 		return err
 	}
 	start := time.Now()
-	err = job.Handle(ctx)
+	err = s.manager.handle(ctx, job)
 	notifyProcessed(payload, time.Since(start), err)
+	s.manager.finish(context.WithoutCancel(ctx), payload, job, err)
 	return err
 }
 

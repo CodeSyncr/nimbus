@@ -2,12 +2,18 @@ package websocket
 
 import (
 	"bytes"
+	"context"
+	"log"
 	"net/http"
 	"net/url"
 	"sync"
 
+	"github.com/CodeSyncr/nimbus/redis"
 	"github.com/gorilla/websocket"
 )
+
+// DefaultRedisTopic is the Pub/Sub topic hubs use to share broadcasts.
+const DefaultRedisTopic = "nimbus:websocket:broadcast"
 
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
@@ -15,14 +21,20 @@ var upgrader = websocket.Upgrader{
 	CheckOrigin:     func(r *http.Request) bool { return true },
 }
 
-// Hub holds connected clients and broadcasts (plan: realtime chat, notifications).
+// Hub holds connected clients and broadcasts to them. With UseRedis, a
+// broadcast on any instance reaches the clients of every instance.
 type Hub struct {
-	mu         sync.RWMutex
-	clients    map[*Conn]struct{}
-	broadcast  chan []byte
-	register   chan *Conn
-	unregister chan *Conn
+	mu             sync.RWMutex
+	clients        map[*Conn]struct{}
+	broadcast      chan []byte
+	register       chan *Conn
+	unregister     chan *Conn
 	allowedOrigins map[string]struct{}
+
+	redis  *redis.Client
+	topic  string
+	pubsub *redis.PubSub
+	cancel context.CancelFunc
 }
 
 // Conn wraps a websocket connection.
@@ -48,6 +60,44 @@ func (h *Hub) SetAllowedOrigins(origins []string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.allowedOrigins = normalizeOrigins(origins)
+}
+
+// UseRedis makes Broadcast go through Redis Pub/Sub so every hub
+// subscribed to topic (default DefaultRedisTopic) delivers it to its own
+// clients. Call before Run.
+func (h *Hub) UseRedis(client *redis.Client, topic string) error {
+	if topic == "" {
+		topic = DefaultRedisTopic
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	ps := client.Subscribe(ctx, topic)
+	if _, err := ps.Receive(ctx); err != nil {
+		cancel()
+		_ = ps.Close()
+		return err
+	}
+	h.mu.Lock()
+	h.redis, h.topic, h.pubsub, h.cancel = client, topic, ps, cancel
+	h.mu.Unlock()
+	go func() {
+		for msg := range ps.Channel() {
+			h.broadcast <- []byte(msg.Payload)
+		}
+	}()
+	return nil
+}
+
+// Close stops the Redis subscription, if any.
+func (h *Hub) Close() error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.cancel != nil {
+		h.cancel()
+	}
+	if h.pubsub != nil {
+		return h.pubsub.Close()
+	}
+	return nil
 }
 
 // Run runs the hub (blocks). Call in a goroutine.
@@ -77,9 +127,26 @@ func (h *Hub) Run() {
 	}
 }
 
-// Broadcast sends a message to all connected clients.
+// Broadcast sends a message to all connected clients (of every instance,
+// with UseRedis).
 func (h *Hub) Broadcast(msg []byte) {
+	h.mu.RLock()
+	client, topic := h.redis, h.topic
+	h.mu.RUnlock()
+	if client != nil {
+		if err := client.Publish(context.Background(), topic, msg).Err(); err != nil {
+			log.Printf("[websocket] redis publish: %v", err)
+		}
+		return
+	}
 	h.broadcast <- msg
+}
+
+// Len returns the number of clients connected to this instance.
+func (h *Hub) Len() int {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return len(h.clients)
 }
 
 // Upgrade upgrades the HTTP request to WebSocket and registers the conn with the hub.

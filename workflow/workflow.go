@@ -24,6 +24,12 @@
 |   // Resume from external event
 |   engine.Signal("onboard-user", runID, "approval.granted", data)
 |
+| Runs live in a Store. The default MemoryStore loses them on restart; use
+| NewRedisStore or NewDatabaseStore to share runs between instances and
+| have Engine.Resume (started by the plugin) continue interrupted runs.
+| Signals and cancellations work from any instance: signals are kept in
+| the store until the waiting step picks them up.
+|
 */
 
 package workflow
@@ -191,4 +197,14 @@ type RunInstance struct {
 	UpdatedAt   time.Time                `json:"updated_at"`
 	CompletedAt *time.Time               `json:"completed_at,omitempty"`
 	Error       string                   `json:"error,omitempty"`
+}
+
+// step returns the step definition with this name, or nil.
+func (d *Definition) step(name string) *StepDef {
+	for _, s := range d.Steps {
+		if s.Name == name {
+			return s
+		}
+	}
+	return nil
 }

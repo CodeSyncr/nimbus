@@ -14,6 +14,19 @@ import (
 // keyFn extracts a key from the request (e.g. IP). Limit is requests per window.
 // FailOpen controls behavior on Redis errors: true allows requests through,
 // false (default) returns 503 Service Unavailable.
+// rateLimitScript counts a request in a fixed window. The expiry is set
+// only when the window opens; re-arming it on every request would keep a
+// client that never stops hitting the limit blocked forever.
+var rateLimitScript = redis.NewScript(`
+local n = redis.call('INCR', KEYS[1])
+local ttl = redis.call('PTTL', KEYS[1])
+if ttl < 0 then
+  redis.call('PEXPIRE', KEYS[1], ARGV[1])
+  ttl = tonumber(ARGV[1])
+end
+return {n, ttl}
+`)
+
 func RateLimitRedis(rdb *redis.Client, limit int, window time.Duration, keyFn func(*http.Request) string, failOpen ...bool) router.Middleware {
 	open := false
 	if len(failOpen) > 0 {
@@ -28,10 +41,8 @@ func RateLimitRedis(rdb *redis.Client, limit int, window time.Duration, keyFn fu
 			}
 			rkey := keyPrefix + key
 			ctx := c.Request.Context()
-			pipe := rdb.Pipeline()
-			incr := pipe.Incr(ctx, rkey)
-			pipe.Expire(ctx, rkey, window)
-			if _, err := pipe.Exec(ctx); err != nil {
+			res, err := rateLimitScript.Run(ctx, rdb, []string{rkey}, window.Milliseconds()).Int64Slice()
+			if err != nil || len(res) != 2 {
 				if open {
 					return next(c)
 				}
@@ -40,7 +51,7 @@ func RateLimitRedis(rdb *redis.Client, limit int, window time.Duration, keyFn fu
 					"error": "service temporarily unavailable",
 				})
 			}
-			count := incr.Val()
+			count, ttlMs := res[0], res[1]
 			remaining := int64(limit) - count
 			if remaining < 0 {
 				remaining = 0
@@ -49,10 +60,7 @@ func RateLimitRedis(rdb *redis.Client, limit int, window time.Duration, keyFn fu
 			c.Response.Header().Set("X-RateLimit-Remaining", strconv.FormatInt(remaining, 10))
 
 			if count > int64(limit) {
-				// Set Retry-After header only on 429
-				if ttl, err := rdb.TTL(ctx, rkey).Result(); err == nil && ttl > 0 {
-					c.Response.Header().Set("Retry-After", strconv.Itoa(int(ttl.Seconds())))
-				}
+				c.Response.Header().Set("Retry-After", strconv.Itoa(retryAfterSeconds(time.Duration(ttlMs)*time.Millisecond)))
 				c.JSON(http.StatusTooManyRequests, map[string]string{"error": "rate limit exceeded"})
 				return nil
 			}

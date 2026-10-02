@@ -121,11 +121,16 @@ func (w *RotatingWriter) rotate() error {
 		w.file.Close()
 	}
 
-	// Rename current → timestamped backup.
-	timestamp := time.Now().Format("2006-01-02T15-04-05")
+	// Rename current → timestamped backup. Milliseconds keep two rotations
+	// in the same second from overwriting each other; the layout still
+	// sorts oldest first.
+	timestamp := time.Now().Format("2006-01-02T15-04-05.000")
 	ext := filepath.Ext(w.cfg.Path)
 	base := w.cfg.Path[:len(w.cfg.Path)-len(ext)]
 	backupPath := fmt.Sprintf("%s-%s%s", base, timestamp, ext)
+	for i := 1; fileExists(backupPath); i++ {
+		backupPath = fmt.Sprintf("%s-%s.%d%s", base, timestamp, i, ext)
+	}
 
 	if err := os.Rename(w.cfg.Path, backupPath); err != nil {
 		return fmt.Errorf("logger: rotate rename: %w", err)
@@ -142,7 +147,9 @@ func (w *RotatingWriter) cleanOldBackups() {
 	dir := filepath.Dir(w.cfg.Path)
 	base := filepath.Base(w.cfg.Path)
 	ext := filepath.Ext(base)
-	prefix := base[:len(base)-len(ext)]
+	// Backups are "<name>-<timestamp><ext>"; match on "<name>-" so other
+	// files sharing a prefix (app.log vs application.log) are left alone.
+	prefix := base[:len(base)-len(ext)] + "-"
 
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -170,4 +177,9 @@ func (w *RotatingWriter) cleanOldBackups() {
 	for _, f := range toRemove {
 		os.Remove(f)
 	}
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }

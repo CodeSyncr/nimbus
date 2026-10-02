@@ -21,6 +21,15 @@ type Z = goredis.Z
 // ZRangeBy represents score range bounds for sorted-set queries.
 type ZRangeBy = goredis.ZRangeBy
 
+// Pipeliner batches commands (see Client.Pipelined / TxPipelined).
+type Pipeliner = goredis.Pipeliner
+
+// Script is a Lua script that is run with EVALSHA, falling back to EVAL.
+type Script = goredis.Script
+
+// NewScript wraps Lua source for repeated, atomic execution.
+func NewScript(src string) *Script { return goredis.NewScript(src) }
+
 // Nil is returned by Redis operations when a key/member does not exist.
 var Nil = goredis.Nil
 

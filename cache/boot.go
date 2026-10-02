@@ -3,6 +3,7 @@ package cache
 import (
 	"context"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -101,7 +102,11 @@ func Boot(cfg *BootConfig) Store {
 		}
 		store = NewCloudflareKVStore(config.CloudflareAccountID, config.CloudflareNamespaceID, config.CloudflareAPIToken)
 	default:
-		store = NewMemoryStore()
+		opts := MemoryOptions{}
+		if v, err := strconv.Atoi(os.Getenv("CACHE_MEMORY_MAX_ENTRIES")); err == nil {
+			opts.MaxEntries = v
+		}
+		store = NewMemoryStoreWith(opts)
 	}
 
 	SetGlobal(store)

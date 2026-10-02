@@ -153,15 +153,19 @@ func GenerateKey256() (string, error) {
 // used verbatim as the AES key with no stretching. Always supply a
 // high-entropy key — 32 random bytes, hex- or base64-encoded (see
 // GenerateKey256) — rather than a human-chosen passphrase.
+//
+// A decoding is only used when it yields a valid AES key length, so a
+// 16-character passphrase that happens to be valid base64 is not decoded
+// into a 12-byte key and rejected.
 func decodeKey(key string) ([]byte, error) {
 	// Try hex
-	if b, err := hex.DecodeString(key); err == nil && len(key)%2 == 0 {
+	if b, err := hex.DecodeString(key); err == nil && len(key)%2 == 0 && validKeyLen(len(b)) {
 		return b, nil
 	}
 
 	// Try base64
 	if strings.HasSuffix(key, "=") || len(key)%4 == 0 {
-		if b, err := base64.StdEncoding.DecodeString(key); err == nil {
+		if b, err := base64.StdEncoding.DecodeString(key); err == nil && validKeyLen(len(b)) {
 			return b, nil
 		}
 	}
@@ -169,6 +173,8 @@ func decodeKey(key string) ([]byte, error) {
 	// Raw bytes (see security note above).
 	return []byte(key), nil
 }
+
+func validKeyLen(n int) bool { return n == 16 || n == 24 || n == 32 }
 
 // ── Hash helpers (deterministic, for comparison — NOT for passwords) ──
 

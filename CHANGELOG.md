@@ -6,6 +6,111 @@ This project follows Semantic Versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`queue`: the Redis driver delivered delayed and retried jobs many times
+  over.** Every worker moved due delayed jobs (and expired leases) back onto
+  the queue without checking whether another worker already had, so with 16
+  workers almost every delayed job ran more than once. Moving and claiming
+  are now one Lua script, so each job goes to one worker. Jobs are now
+  delivered FIFO (they were LIFO).
+- **`queue`: long jobs ran twice.** Redis and database jobs past the lease
+  (60s / 120s) were handed to a second worker while still running. Workers
+  now renew the lease while a job runs (`queue.LeaseExtender`), and a lease
+  is recorded atomically with the claim, closing the window where a crash
+  lost a job for good.
+- **`queue`: a job that crashes its worker no longer loops forever.** A
+  delivery lost to a dead worker counts as an attempt (Redis and database).
+- **`queue`: database driver.** Retries failed with a duplicate-key error
+  (they reused the job's ID); they now reuse its row. Finished jobs are
+  deleted instead of piling up as `done` (old `done` rows are dropped at
+  boot); there is a `(queue, status, run_at)` index; reclaiming stale jobs
+  runs every quarter lease instead of on every 500ms poll.
+- **`queue`: unique jobs, `WithoutOverlapping` and rate limits only held
+  within one process.** Locks live in a `queue.Locker` and queue rate limits
+  in Redis; `queue.Boot` picks Redis or the database to match the driver.
+  `WithoutOverlapping` did nothing (each wrapper had its own mutex) and could
+  not be serialized; it now takes a shared lock and travels through the
+  queue. A unique job's lock is released when the job finishes.
+- **`queue`: `Chain.DispatchAsync` queued an empty job** (its wrapper had no
+  exported fields). Each worker now queues the chain's next job.
+- **`presence`: a second tab kicked out the first, and closing one tab sent
+  `presence:leave` for a user still online.** Members are tracked per
+  connection; join/leave fire on a user's first and last connection.
+- **`middleware.RateLimit`** never forgot a key (memory grew with every new
+  IP) and sent no `Retry-After`. **`RateLimitRedis`** re-armed the window on
+  every request, so a client that kept retrying stayed blocked.
+- **`cache`: the memory store** only dropped expired keys when read and had
+  no size limit. It now sweeps expired keys, evicts least recently used past
+  100,000 entries (`CACHE_MEMORY_MAX_ENTRIES`), and `Remember` (memory and
+  Redis) runs one fill per key when many requests miss at once.
+- **`schedule`**: sub-second interval tasks shared one 60s lock bucket.
+- **`metrics`: histograms were wrong.** `_sum` added float bit patterns as
+  integers and bucket counts were cumulated twice. Label values are now
+  escaped.
+- **`storage`**: `LocalDriver` paths could escape the root (`../`), and a
+  failed `Put` left a partial file. `S3Driver.Get` cancelled its context on
+  return, cutting off unread body bytes, and `Exists` reported every error
+  as "missing". Signed URLs made from a path with a leading `/`, or a base
+  URL with a query string, never verified.
+- **`logger`**: a file channel path without a directory panicked; log
+  rotation could overwrite a backup made in the same second and deleted
+  unrelated files sharing the log's prefix (`app.log` vs `application.log`).
+- **`encryption`**: a 16-character key that happened to be valid base64 was
+  decoded to 12 bytes and rejected instead of used as-is.
+- **`notification`**: Slack and Discord webhooks had no timeout.
+- **`workflow`: parallel steps raced on the run's payload** (and with saves
+  of the run). Steps now get their own copy of the payload and outputs are
+  merged under a per-run lock.
+- **`workflow`: `Cancel` did not stop a running run**, and the run then
+  overwrote the cancellation when it finished. The step's context is now
+  cancelled (on another instance, within `SetPollInterval`, default 1s),
+  later steps are skipped, and the run stays cancelled.
+- **`workflow`: `Signal` only worked on the instance running the waiting
+  step, and only once it was waiting.** Stores now keep signals
+  (`SignalStore`) until the step picks them up.
+- **`middleware.MemoryCSRFStore`** kept every token forever. Tokens now
+  expire (`TTL`, default 2h) and at most `MaxTokens` (100,000) are kept.
+
+### Added
+
+- **`tracing`**: distributed tracing without the OpenTelemetry SDK. W3C
+  `traceparent` propagation, spans, and an OTLP/HTTP exporter configured from
+  the standard `OTEL_*` variables (wired into app boot). `middleware.Tracing()`
+  (now in `nimbus new` apps) continues incoming traces, `tracing.Transport`
+  propagates outbound, and queue jobs carry the dispatching request's trace
+  to the worker. `logger.ForRequest` adds `trace_id`.
+- **`queue`: durable batches.** With the redis/database drivers,
+  `Batch.Dispatch` queues every job and returns; progress lives in a
+  `BatchStore` and the worker that finishes the batch runs its callbacks,
+  registered by name with `queue.RegisterBatch`. `Batch.Run` keeps the old
+  in-process behaviour. `queue.Release(delay)` requeues a job without
+  counting an attempt.
+- **`schedule`: tasks lock across instances by default** when the queue
+  driver is redis/database or `REDIS_URL` is set (`SCHEDULE_LOCK=off` opts
+  out).
+- **`presence`: `Config.Redis`** shares members and events between
+  instances; a crashed instance's users are announced as left.
+- **`websocket`: `Hub.UseRedis`** fans broadcasts out to every instance.
+- **`workflow`: Redis and database stores** with run leases; `Engine.Resume`
+  (run periodically by the plugin) continues runs interrupted by a restart
+  or a crashed instance.
+- Tests for `encryption`, `hash`, `lucid`, `events`, `health`, `logger`,
+  `metrics`, `notification`, `resource`, `storage`, `presence`, `websocket`
+  and the Redis queue driver (via miniredis; set `NIMBUS_TEST_REDIS_URL` to
+  run the Redis tests against a real server).
+
+### Changed
+
+- **`queue`:** `Batch.Dispatch` no longer blocks when a real driver is
+  configured, and a batch with callbacks needs `Named(...)`.
+  `RedisQueueWorkload.Processing` now counts leased jobs. Redis keys for
+  in-flight jobs changed; jobs leased by an older version are still
+  reclaimed.
+- **README:** OAuth (`plugins/passport`) and Sanctum-style token abilities
+  are documented as shipped; new "Running more than one instance" section;
+  removed the affiliate link that was added in the v1.1.0 release commit.
+
 ## [1.9.0] - 2026-09-29
 
 ### Added
