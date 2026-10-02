@@ -23,6 +23,7 @@ require (
 	github.com/hashicorp/yamux v0.1.2
 	github.com/jinzhu/inflection v1.0.0
 	github.com/joho/godotenv v1.5.1
+	github.com/ledongthuc/pdf v0.0.0-20260907135840-6c8c28e0e8a0
 	github.com/mark3labs/mcp-go v0.45.0
 	github.com/petaki/inertia-go v1.7.0
 	github.com/redis/go-redis/v9 v9.18.0

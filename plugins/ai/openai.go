@@ -98,14 +98,7 @@ func (p *openAIProvider) Generate(ctx context.Context, req *GenerateRequest) (*G
 	var err error
 
 	for attempt := 1; attempt <= maxDroppedAttempts; attempt++ {
-		resp, err = p.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
-			Model:       model,
-			Messages:    messages,
-			MaxTokens:   maxTokens,
-			Temperature: req.Temperature,
-			Tools:       toOpenAITools(req.Tools),
-			Stop:        req.Stop,
-		})
+		resp, err = p.client.CreateChatCompletion(ctx, openAIChatRequest(req, model, messages, maxTokens, false))
 		if err == nil && len(resp.Choices) > 0 {
 			break
 		}
@@ -134,9 +127,16 @@ func (p *openAIProvider) Generate(ctx context.Context, req *GenerateRequest) (*G
 		CompletionTokens: resp.Usage.CompletionTokens,
 		TotalTokens:      resp.Usage.TotalTokens,
 	}
+	if d := resp.Usage.PromptTokensDetails; d != nil {
+		usage.CacheReadTokens = d.CachedTokens
+	}
+	if d := resp.Usage.CompletionTokensDetails; d != nil {
+		usage.ReasoningTokens = d.ReasoningTokens
+	}
 
 	choice := resp.Choices[0]
 	return &GenerateResponse{
+		Reasoning:    choice.Message.ReasoningContent, // DeepSeek-style compatible APIs
 		Text:         choice.Message.Content,
 		ToolCalls:    fromOpenAIToolCalls(choice.Message.ToolCalls),
 		Usage:        usage,
@@ -166,15 +166,7 @@ func (p *openAIProvider) Stream(ctx context.Context, req *GenerateRequest) (*Str
 		var stream *openai.ChatCompletionStream
 		var err error
 		for attempt := 1; attempt <= maxDroppedAttempts; attempt++ {
-			stream, err = p.client.CreateChatCompletionStream(ctx, openai.ChatCompletionRequest{
-				Model:       model,
-				Messages:    messages,
-				MaxTokens:   maxTokens,
-				Temperature: req.Temperature,
-				Tools:       toOpenAITools(req.Tools),
-				Stop:        req.Stop,
-				Stream:      true,
-			})
+			stream, err = p.client.CreateChatCompletionStream(ctx, openAIChatRequest(req, model, messages, maxTokens, true))
 			if err == nil {
 				break
 			}
@@ -262,19 +254,27 @@ func (p *openAIProvider) toOpenAIMessages(req *GenerateRequest) []openai.ChatCom
 		if role == "" {
 			role = openai.ChatMessageRoleUser
 		}
+		content := m.Content
+		images := m.Images
+		if len(m.Files) > 0 {
+			// Chat Completions takes no documents through this client:
+			// PDFs and text go in as their text, images as image parts.
+			content = contentWithDocuments(m)
+			images = imageRefs(m)
+		}
 		msg := openai.ChatCompletionMessage{
 			Role:    role,
-			Content: m.Content,
+			Content: content,
 		}
 		// A user turn with pictures goes as parts: the text, then each
 		// image, which is how vision models on OpenAI-compatible APIs
 		// receive them.
-		if len(m.Images) > 0 && (role == RoleUser || role == openai.ChatMessageRoleUser) {
+		if len(images) > 0 && (role == RoleUser || role == openai.ChatMessageRoleUser) {
 			var parts []openai.ChatMessagePart
-			if strings.TrimSpace(m.Content) != "" {
-				parts = append(parts, openai.ChatMessagePart{Type: openai.ChatMessagePartTypeText, Text: m.Content})
+			if strings.TrimSpace(content) != "" {
+				parts = append(parts, openai.ChatMessagePart{Type: openai.ChatMessagePartTypeText, Text: content})
 			}
-			for _, ref := range m.Images {
+			for _, ref := range images {
 				if u := openAIImageURL(ref); u != "" {
 					parts = append(parts, openai.ChatMessagePart{Type: openai.ChatMessagePartTypeImageURL, ImageURL: &openai.ChatMessageImageURL{URL: u, Detail: openai.ImageURLDetailAuto}})
 				}
@@ -440,4 +440,37 @@ func droppedConnection(err error) bool {
 		}
 	}
 	return strings.HasSuffix(msg, ": eof")
+}
+
+// StreamsToolCalls implements ToolCallStreamer: the OpenAI stream (and the
+// OpenAI-compatible ones built on this provider) reports tool calls.
+func (p *openAIProvider) StreamsToolCalls() bool { return true }
+
+// openAIChatRequest builds a chat completion request. Reasoning models
+// take max_completion_tokens (thinking counts against it) and
+// reasoning_effort, and reject temperature.
+func openAIChatRequest(req *GenerateRequest, model string, messages []openai.ChatCompletionMessage, maxTokens int, stream bool) openai.ChatCompletionRequest {
+	r := openai.ChatCompletionRequest{
+		Model:       model,
+		Messages:    messages,
+		MaxTokens:   maxTokens,
+		Temperature: req.Temperature,
+		Tools:       toOpenAITools(req.Tools),
+		Stop:        req.Stop,
+		Stream:      stream,
+	}
+	switch c := req.ToolChoice; {
+	case len(r.Tools) == 0, c == "":
+	case c == ToolChoiceAuto || c == ToolChoiceNone || c == ToolChoiceRequired:
+		r.ToolChoice = c
+	default:
+		r.ToolChoice = openai.ToolChoice{Type: openai.ToolTypeFunction, Function: openai.ToolFunction{Name: c}}
+	}
+	if req.Reasoning != nil {
+		r.ReasoningEffort = req.Reasoning.effort()
+		r.MaxCompletionTokens = maxTokens
+		r.MaxTokens = 0
+		r.Temperature = 0
+	}
+	return r
 }

@@ -49,6 +49,19 @@ type Tool struct {
 	// and U is the output (marshaled to JSON for the model).
 	Run any `json:"-"`
 
+	// Exec is an alternative to Run for tools whose arguments are only known
+	// as JSON at run time (MCP tools, agents used as tools). It receives the
+	// model's raw arguments and returns raw JSON. Set Parameters with it.
+	Exec RawToolFunc `json:"-"`
+
+	// Parameters is the tool's JSON Schema. Leave it empty with Run (it is
+	// generated from the input struct); set it with Exec.
+	Parameters json.RawMessage `json:"-"`
+
+	// NeedsApproval marks a tool whose calls must be approved before they
+	// run (see Agent.OnApproval).
+	NeedsApproval bool `json:"-"`
+
 	// schema is lazily computed from the Run function's input type.
 	schema     json.RawMessage
 	inputType  reflect.Type
@@ -58,6 +71,9 @@ type Tool struct {
 // Schema returns the JSON-Schema representation of the tool's input
 // parameters, suitable for sending to model APIs.
 func (t *Tool) Schema() json.RawMessage {
+	if len(t.Parameters) > 0 {
+		return t.Parameters
+	}
 	if t.schema == nil {
 		t.schema = structToJSONSchema(t.inputType)
 	}
@@ -75,6 +91,12 @@ func (t *Tool) ToSpec() ToolSpec {
 
 // Execute invokes the tool handler with JSON arguments.
 func (t *Tool) Execute(ctx context.Context, argsJSON json.RawMessage) (json.RawMessage, error) {
+	if t.Exec != nil {
+		if len(argsJSON) == 0 {
+			argsJSON = json.RawMessage("{}")
+		}
+		return t.Exec(ctx, argsJSON)
+	}
 	// Unmarshal args into the input type.
 	inputPtr := reflect.New(t.inputType)
 	if len(argsJSON) > 0 {
@@ -107,6 +129,15 @@ func (t *Tool) Execute(ctx context.Context, argsJSON json.RawMessage) (json.RawM
 // Tool builder (fluent API)
 // ---------------------------------------------------------------------------
 
+// RawToolFunc handles a tool call given the model's raw JSON arguments.
+type RawToolFunc func(ctx context.Context, args json.RawMessage) (json.RawMessage, error)
+
+// NewRawTool builds a tool from a JSON Schema and a raw handler, for tools
+// whose shape is only known at run time.
+func NewRawTool(name, description string, schema json.RawMessage, fn RawToolFunc) (*Tool, error) {
+	return validateTool(&Tool{Name: name, Description: description, Parameters: schema, Exec: fn})
+}
+
 // ToolBuilder provides a fluent API for constructing tools.
 type ToolBuilder struct {
 	tool Tool
@@ -126,6 +157,13 @@ func (b *ToolBuilder) Desc(desc string) *ToolBuilder {
 // Handler sets the typed handler function.
 func (b *ToolBuilder) Handler(fn any) *ToolBuilder {
 	b.tool.Run = fn
+	return b
+}
+
+// RequireApproval marks the tool's calls as needing approval before they
+// run (see Agent.OnApproval).
+func (b *ToolBuilder) RequireApproval() *ToolBuilder {
+	b.tool.NeedsApproval = true
 	return b
 }
 
@@ -213,8 +251,17 @@ func validateTool(t *Tool) (*Tool, error) {
 	if t.Name == "" {
 		return nil, fmt.Errorf("ai: tool name is required")
 	}
+	if t.Exec != nil {
+		if len(t.Parameters) == 0 {
+			t.Parameters = json.RawMessage(`{"type":"object","properties":{}}`)
+		}
+		if !json.Valid(t.Parameters) {
+			return nil, fmt.Errorf("ai: tool %q: Parameters is not valid JSON", t.Name)
+		}
+		return t, nil
+	}
 	if t.Run == nil {
-		return nil, fmt.Errorf("ai: tool %q: handler (Run) is required", t.Name)
+		return nil, fmt.Errorf("ai: tool %q: handler (Run or Exec) is required", t.Name)
 	}
 
 	fn := reflect.TypeOf(t.Run)

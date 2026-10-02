@@ -40,6 +40,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"sync/atomic"
 
 	"github.com/CodeSyncr/nimbus"
@@ -169,6 +170,15 @@ func (p *Plugin) loadConfig(app *nimbus.App) *Config {
 	}
 
 	// Override from env
+	if v, err := strconv.Atoi(os.Getenv("AI_MAX_RETRIES")); err == nil {
+		cfg.MaxRetries = v
+		if v == 0 {
+			cfg.MaxRetries = -1 // AI_MAX_RETRIES=0 means no retries
+		}
+	}
+	if v := strings.ToLower(os.Getenv("AI_PROMPT_CACHE")); v == "1" || v == "true" || v == "yes" {
+		cfg.PromptCache = true
+	}
 	cfg.OpenAIKey = os.Getenv("OPENAI_API_KEY")
 	cfg.OpenAIBaseURL = os.Getenv("OPENAI_BASE_URL")
 	if cfg.OpenAIBaseURL == "" {

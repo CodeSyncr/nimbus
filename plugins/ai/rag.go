@@ -49,6 +49,8 @@ type RAG struct {
 	preprocess  func(query string) string
 	postprocess func(answer string, docs []Document) string
 	client      *Client
+	reranker    *Client
+	rerankKeep  int
 }
 
 // NewRAG creates a RAG engine backed by the given vector store.
@@ -58,6 +60,49 @@ func NewRAG(store *Store) *RAG {
 		topK:   5,
 		system: "You are a helpful assistant. Answer the question based on the provided context. If the context doesn't contain enough information, say so.",
 	}
+}
+
+// WithReranker reorders the retrieved documents by relevance with a
+// reranking model (see Rerank) and keeps the best keep. Retrieve more than
+// you keep (TopK(20).WithReranker(c, 5)) so the reranker has a choice.
+func (r *RAG) WithReranker(c *Client, keep int) *RAG {
+	r.reranker, r.rerankKeep = c, keep
+	return r
+}
+
+// retrieve searches, filters by MinScore and reranks.
+func (r *RAG) retrieve(ctx context.Context, query string) ([]Document, error) {
+	docs, err := r.store.Search(ctx, query, r.topK)
+	if err != nil {
+		return nil, fmt.Errorf("ai: rag: search: %w", err)
+	}
+	if r.minScore > 0 {
+		filtered := docs[:0]
+		for _, d := range docs {
+			if d.Score >= r.minScore {
+				filtered = append(filtered, d)
+			}
+		}
+		docs = filtered
+	}
+	if r.reranker == nil || len(docs) == 0 {
+		return docs, nil
+	}
+	texts := make([]string, len(docs))
+	for i, d := range docs {
+		texts[i] = d.Text
+	}
+	ranked, err := r.reranker.Rerank(ctx, query, texts, r.rerankKeep)
+	if err != nil {
+		return nil, fmt.Errorf("ai: rag: rerank: %w", err)
+	}
+	out := make([]Document, 0, len(ranked))
+	for _, rr := range ranked {
+		d := docs[rr.Index]
+		d.Score = float32(rr.Score)
+		out = append(out, d)
+	}
+	return out, nil
 }
 
 // TopK sets the number of documents to retrieve.
@@ -126,21 +171,10 @@ func (r *RAG) Ask(ctx context.Context, question string, opts ...GenerateOption) 
 		query = r.preprocess(query)
 	}
 
-	// Step 1–2: Vector search.
-	docs, err := r.store.Search(ctx, query, r.topK)
+	// Step 1–2: Vector search (and rerank).
+	docs, err := r.retrieve(ctx, query)
 	if err != nil {
-		return nil, fmt.Errorf("ai: rag: search: %w", err)
-	}
-
-	// Filter by minimum score.
-	if r.minScore > 0 {
-		filtered := docs[:0]
-		for _, d := range docs {
-			if d.Score >= r.minScore {
-				filtered = append(filtered, d)
-			}
-		}
-		docs = filtered
+		return nil, err
 	}
 
 	// Step 3: Build augmented prompt.
@@ -182,19 +216,9 @@ func (r *RAG) AskStream(ctx context.Context, question string, opts ...GenerateOp
 		query = r.preprocess(query)
 	}
 
-	docs, err := r.store.Search(ctx, query, r.topK)
+	docs, err := r.retrieve(ctx, query)
 	if err != nil {
-		return nil, nil, fmt.Errorf("ai: rag: search: %w", err)
-	}
-
-	if r.minScore > 0 {
-		filtered := docs[:0]
-		for _, d := range docs {
-			if d.Score >= r.minScore {
-				filtered = append(filtered, d)
-			}
-		}
-		docs = filtered
+		return nil, nil, err
 	}
 
 	prompt := r.buildPrompt(question, docs)

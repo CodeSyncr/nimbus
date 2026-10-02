@@ -4,13 +4,11 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -115,13 +113,15 @@ func (p *anthropicProvider) effectiveMaxTokens(reqMax int) int {
 // ── Wire types (Anthropic Messages API) ──────────────────────────
 
 type anthropicRequest struct {
-	Model     string             `json:"model"`
-	MaxTokens int                `json:"max_tokens"`
-	System    string             `json:"system,omitempty"`
-	Messages  []anthropicMessage `json:"messages"`
-	Tools     []anthropicTool    `json:"tools,omitempty"`
-	Stop      []string           `json:"stop_sequences,omitempty"`
-	Stream    bool               `json:"stream,omitempty"`
+	Model      string               `json:"model"`
+	MaxTokens  int                  `json:"max_tokens"`
+	System     any                  `json:"system,omitempty"` // string, or blocks when caching
+	Messages   []anthropicMessage   `json:"messages"`
+	Tools      []anthropicTool      `json:"tools,omitempty"`
+	Stop       []string             `json:"stop_sequences,omitempty"`
+	Stream     bool                 `json:"stream,omitempty"`
+	Thinking   *anthropicThinking   `json:"thinking,omitempty"`
+	ToolChoice *anthropicToolChoice `json:"tool_choice,omitempty"`
 	// NOTE: temperature/top_p/top_k are not forwarded to Opus/Sonnet
 	// to avoid 400 rejection; behavior is steered via prompting.
 }
@@ -135,6 +135,7 @@ type anthropicContent struct {
 	Type   string                `json:"type"`
 	Text   string                `json:"text,omitempty"`
 	Source *anthropicImageSource `json:"source,omitempty"`
+	Title  string                `json:"title,omitempty"` // document blocks
 	// tool_use blocks (assistant turns)
 	ID    string          `json:"id,omitempty"`
 	Name  string          `json:"name,omitempty"`
@@ -143,11 +144,42 @@ type anthropicContent struct {
 	ToolUseID string `json:"tool_use_id,omitempty"`
 	Content   string `json:"content,omitempty"`
 	IsError   bool   `json:"is_error,omitempty"`
+	// thinking / redacted_thinking blocks (assistant turns)
+	Thinking  string `json:"thinking,omitempty"`
+	Signature string `json:"signature,omitempty"`
+	Data      string `json:"data,omitempty"`
+
+	CacheControl *anthropicCacheControl `json:"cache_control,omitempty"`
+}
+
+type anthropicToolChoice struct {
+	Type string `json:"type"` // auto, any, tool, none
+	Name string `json:"name,omitempty"`
+}
+
+// anthropicThinking turns on extended thinking.
+type anthropicThinking struct {
+	Type         string `json:"type"` // "enabled"
+	BudgetTokens int    `json:"budget_tokens"`
+}
+
+// anthropicCacheControl marks a prompt-cache breakpoint: everything up to
+// and including the marked block is cached.
+type anthropicCacheControl struct {
+	Type string `json:"type"` // "ephemeral"
+}
+
+var anthropicEphemeral = &anthropicCacheControl{Type: "ephemeral"}
+
+type anthropicSystemBlock struct {
+	Type         string                 `json:"type"`
+	Text         string                 `json:"text"`
+	CacheControl *anthropicCacheControl `json:"cache_control,omitempty"`
 }
 
 type anthropicImageSource struct {
-	Type      string `json:"type"`       // "base64"
-	MediaType string `json:"media_type"` // e.g. image/png
+	Type      string `json:"type"`       // "base64", or "text" for a text document
+	MediaType string `json:"media_type"` // e.g. image/png, application/pdf, text/plain
 	Data      string `json:"data"`
 }
 
@@ -155,22 +187,45 @@ type anthropicTool struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description,omitempty"`
 	InputSchema json.RawMessage `json:"input_schema"`
+
+	CacheControl *anthropicCacheControl `json:"cache_control,omitempty"`
+}
+
+// anthropicUsage is the usage block of a response or message_start event.
+type anthropicUsage struct {
+	InputTokens              int `json:"input_tokens"`
+	OutputTokens             int `json:"output_tokens"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+}
+
+// toUsage reports every input token in PromptTokens (Anthropic counts
+// cached ones separately), so totals compare across providers.
+func (u anthropicUsage) toUsage() *Usage {
+	prompt := u.InputTokens + u.CacheCreationInputTokens + u.CacheReadInputTokens
+	return &Usage{
+		PromptTokens:     prompt,
+		CompletionTokens: u.OutputTokens,
+		TotalTokens:      prompt + u.OutputTokens,
+		CacheReadTokens:  u.CacheReadInputTokens,
+		CacheWriteTokens: u.CacheCreationInputTokens,
+	}
 }
 
 type anthropicResponse struct {
 	Content []struct {
-		Type  string          `json:"type"`
-		Text  string          `json:"text"`
-		ID    string          `json:"id"`
-		Name  string          `json:"name"`
-		Input json.RawMessage `json:"input"`
+		Type      string          `json:"type"`
+		Text      string          `json:"text"`
+		ID        string          `json:"id"`
+		Name      string          `json:"name"`
+		Input     json.RawMessage `json:"input"`
+		Thinking  string          `json:"thinking"`
+		Signature string          `json:"signature"`
+		Data      string          `json:"data"`
 	} `json:"content"`
-	Model      string `json:"model"`
-	StopReason string `json:"stop_reason"`
-	Usage      struct {
-		InputTokens  int `json:"input_tokens"`
-		OutputTokens int `json:"output_tokens"`
-	} `json:"usage"`
+	Model      string         `json:"model"`
+	StopReason string         `json:"stop_reason"`
+	Usage      anthropicUsage `json:"usage"`
 }
 
 // ── Generate ─────────────────────────────────────────────────────
@@ -187,10 +242,16 @@ func (p *anthropicProvider) Generate(ctx context.Context, req *GenerateRequest) 
 		return nil, fmt.Errorf("anthropic: failed to parse response: %w", err)
 	}
 
-	var text strings.Builder
+	var text, thinking strings.Builder
 	var toolCalls []ToolCall
+	var reasoning []ReasoningBlock
 	for _, block := range ar.Content {
 		switch block.Type {
+		case "thinking":
+			thinking.WriteString(block.Thinking)
+			reasoning = append(reasoning, ReasoningBlock{Text: block.Thinking, Signature: block.Signature})
+		case "redacted_thinking":
+			reasoning = append(reasoning, ReasoningBlock{Redacted: block.Data})
 		case "text":
 			text.WriteString(block.Text)
 		case "tool_use":
@@ -203,15 +264,13 @@ func (p *anthropicProvider) Generate(ctx context.Context, req *GenerateRequest) 
 	}
 
 	return &GenerateResponse{
-		Text:         text.String(),
-		ToolCalls:    toolCalls,
-		Model:        ar.Model,
-		FinishReason: ar.StopReason,
-		Usage: &Usage{
-			PromptTokens:     ar.Usage.InputTokens,
-			CompletionTokens: ar.Usage.OutputTokens,
-			TotalTokens:      ar.Usage.InputTokens + ar.Usage.OutputTokens,
-		},
+		Text:            text.String(),
+		ToolCalls:       toolCalls,
+		Reasoning:       thinking.String(),
+		ReasoningBlocks: reasoning,
+		Model:           ar.Model,
+		FinishReason:    ar.StopReason,
+		Usage:           ar.Usage.toUsage(),
 	}, nil
 }
 
@@ -243,7 +302,7 @@ func (p *anthropicProvider) do(ctx context.Context, body *anthropicRequest) ([]b
 		return nil, err
 	}
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("anthropic error (%d): %s", resp.StatusCode, string(respBody))
+		return nil, &APIError{Provider: "anthropic", StatusCode: resp.StatusCode, Body: string(respBody), RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"))}
 	}
 	return respBody, nil
 }
@@ -251,22 +310,38 @@ func (p *anthropicProvider) do(ctx context.Context, body *anthropicRequest) ([]b
 // ── Stream ───────────────────────────────────────────────────────
 
 type anthropicStreamEvent struct {
-	Type  string `json:"type"`
+	Type         string `json:"type"`
+	Index        int    `json:"index"`
+	ContentBlock struct {
+		Type string `json:"type"`
+		ID   string `json:"id"`
+		Name string `json:"name"`
+		Data string `json:"data"` // redacted_thinking
+	} `json:"content_block"`
 	Delta struct {
-		Type       string `json:"type"`
-		Text       string `json:"text"`
-		StopReason string `json:"stop_reason"`
+		Type        string `json:"type"`
+		Text        string `json:"text"`
+		PartialJSON string `json:"partial_json"`
+		Thinking    string `json:"thinking"`
+		Signature   string `json:"signature"`
+		StopReason  string `json:"stop_reason"`
 	} `json:"delta"`
 	Message struct {
-		Usage struct {
-			InputTokens  int `json:"input_tokens"`
-			OutputTokens int `json:"output_tokens"`
-		} `json:"usage"`
+		Usage anthropicUsage `json:"usage"`
 	} `json:"message"`
 	Usage struct {
 		OutputTokens int `json:"output_tokens"`
 	} `json:"usage"`
 }
+
+// anthropicStreamBlock accumulates one content block of a stream.
+type anthropicStreamBlock struct {
+	kind, id, name, signature, redacted string
+	buf                                 strings.Builder
+}
+
+// StreamsToolCalls implements ToolCallStreamer.
+func (p *anthropicProvider) StreamsToolCalls() bool { return true }
 
 func (p *anthropicProvider) Stream(ctx context.Context, req *GenerateRequest) (*StreamResponse, error) {
 	body := p.buildRequest(req, true)
@@ -292,8 +367,7 @@ func (p *anthropicProvider) Stream(ctx context.Context, req *GenerateRequest) (*
 	}
 	if resp.StatusCode != 200 {
 		defer resp.Body.Close()
-		respBody, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("anthropic stream error (%d): %s", resp.StatusCode, string(respBody))
+		return nil, newAPIError("anthropic", resp)
 	}
 
 	chunks := make(chan StreamChunk, 32)
@@ -305,6 +379,16 @@ func (p *anthropicProvider) Stream(ctx context.Context, req *GenerateRequest) (*
 		defer close(errCh)
 
 		usage := &Usage{}
+		blocks := map[int]*anthropicStreamBlock{}
+		send := func(c StreamChunk) bool {
+			select {
+			case chunks <- c:
+				return true
+			case <-ctx.Done():
+				errCh <- ctx.Err()
+				return false
+			}
+		}
 		scanner := bufio.NewScanner(resp.Body)
 		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 		for scanner.Scan() {
@@ -325,15 +409,52 @@ func (p *anthropicProvider) Stream(ctx context.Context, req *GenerateRequest) (*
 
 			switch ev.Type {
 			case "message_start":
-				usage.PromptTokens = ev.Message.Usage.InputTokens
+				usage = ev.Message.Usage.toUsage()
+			case "content_block_start":
+				blocks[ev.Index] = &anthropicStreamBlock{kind: ev.ContentBlock.Type, id: ev.ContentBlock.ID, name: ev.ContentBlock.Name, redacted: ev.ContentBlock.Data}
 			case "content_block_delta":
-				if ev.Delta.Type == "text_delta" && ev.Delta.Text != "" {
-					select {
-					case chunks <- StreamChunk{Text: ev.Delta.Text}:
-					case <-ctx.Done():
-						errCh <- ctx.Err()
+				b := blocks[ev.Index]
+				switch ev.Delta.Type {
+				case "text_delta":
+					if ev.Delta.Text != "" && !send(StreamChunk{Text: ev.Delta.Text}) {
 						return
 					}
+				case "input_json_delta":
+					if b != nil {
+						b.buf.WriteString(ev.Delta.PartialJSON)
+					}
+				case "thinking_delta":
+					if b != nil {
+						b.buf.WriteString(ev.Delta.Thinking)
+					}
+				case "signature_delta":
+					if b != nil {
+						b.signature += ev.Delta.Signature
+					}
+				}
+			case "content_block_stop":
+				b := blocks[ev.Index]
+				delete(blocks, ev.Index)
+				if b == nil {
+					break
+				}
+				var c StreamChunk
+				switch b.kind {
+				case "tool_use":
+					args := json.RawMessage(b.buf.String())
+					if len(strings.TrimSpace(string(args))) == 0 {
+						args = json.RawMessage("{}")
+					}
+					c.ToolCalls = []ToolCall{{ID: b.id, Name: b.name, Args: args}}
+				case "thinking":
+					c.Reasoning = []ReasoningBlock{{Text: b.buf.String(), Signature: b.signature}}
+				case "redacted_thinking":
+					c.Reasoning = []ReasoningBlock{{Redacted: b.redacted}}
+				default:
+					break
+				}
+				if (len(c.ToolCalls) > 0 || len(c.Reasoning) > 0) && !send(c) {
+					return
 				}
 			case "message_delta":
 				usage.CompletionTokens = ev.Usage.OutputTokens
@@ -422,10 +543,19 @@ func (p *anthropicProvider) buildRequest(req *GenerateRequest, stream bool) *ant
 				IsError:   strings.HasPrefix(result, "Error:"),
 			})
 		} else {
+			// Thinking comes first in an assistant turn, exactly as returned.
+			for _, rb := range msg.Reasoning {
+				switch {
+				case rb.Redacted != "":
+					content = append(content, anthropicContent{Type: "redacted_thinking", Data: rb.Redacted})
+				case rb.Signature != "":
+					content = append(content, anthropicContent{Type: "thinking", Thinking: rb.Text, Signature: rb.Signature})
+				}
+			}
 			if msg.Content != "" {
 				content = append(content, anthropicContent{Type: "text", Text: msg.Content})
 			}
-			content = append(content, anthropicImageBlocks(msg.Images)...)
+			content = append(content, anthropicAttachmentBlocks(msg)...)
 			for _, tc := range msg.ToolCalls {
 				input := tc.Args
 				if len(strings.TrimSpace(string(input))) == 0 {
@@ -453,35 +583,73 @@ func (p *anthropicProvider) buildRequest(req *GenerateRequest, stream bool) *ant
 	if len(systemParts) > 0 {
 		ar.System = strings.Join(systemParts, "\n\n")
 	}
+	if req.Cache {
+		applyAnthropicCache(ar)
+	}
+	if len(ar.Tools) > 0 {
+		switch c := req.ToolChoice; {
+		case c == "" || c == ToolChoiceAuto:
+		case c == ToolChoiceNone:
+			ar.ToolChoice = &anthropicToolChoice{Type: "none"}
+		case req.Reasoning != nil:
+			// With extended thinking the API allows only auto and none.
+		case c == ToolChoiceRequired:
+			ar.ToolChoice = &anthropicToolChoice{Type: "any"}
+		default:
+			ar.ToolChoice = &anthropicToolChoice{Type: "tool", Name: c}
+		}
+	}
+	if req.Reasoning != nil {
+		budget := req.Reasoning.budget()
+		if budget < 1024 {
+			budget = 1024 // the API's minimum
+		}
+		ar.Thinking = &anthropicThinking{Type: "enabled", BudgetTokens: budget}
+		if ar.MaxTokens <= budget {
+			ar.MaxTokens = budget + 4096 // max_tokens must leave room for the answer
+		}
+	}
 
 	return ar
 }
 
-func anthropicImageBlocks(paths []string) []anthropicContent {
+// applyAnthropicCache sets up to three cache breakpoints, in prefix order:
+// the tools, the system prompt, and the last block of the conversation.
+// Each request then reuses everything the previous one cached. Prompts
+// shorter than the model's minimum are simply not cached.
+func applyAnthropicCache(ar *anthropicRequest) {
+	if n := len(ar.Tools); n > 0 {
+		ar.Tools[n-1].CacheControl = anthropicEphemeral
+	}
+	if s, ok := ar.System.(string); ok && s != "" {
+		ar.System = []anthropicSystemBlock{{Type: "text", Text: s, CacheControl: anthropicEphemeral}}
+	}
+	if n := len(ar.Messages); n > 0 {
+		blocks := ar.Messages[n-1].Content
+		if m := len(blocks); m > 0 {
+			blocks[m-1].CacheControl = anthropicEphemeral
+		}
+	}
+}
+
+// anthropicAttachmentBlocks turns a message's images and files into
+// content blocks: images as image blocks, PDFs and text as document blocks
+// (Claude reads PDFs page by page, figures and tables included).
+func anthropicAttachmentBlocks(msg Message) []anthropicContent {
 	var blocks []anthropicContent
-	for _, imgPath := range paths {
-		cleanPath := strings.TrimPrefix(imgPath, "/")
-		data, err := os.ReadFile(cleanPath)
-		if err != nil {
-			continue
+	for _, a := range loadAttachments(append(append([]string(nil), msg.Images...), msg.Files...)) {
+		switch {
+		case a.IsImage():
+			blocks = append(blocks, anthropicContent{Type: "image", Source: &anthropicImageSource{Type: "base64", MediaType: a.MediaType, Data: a.Base64()}})
+		case a.IsPDF():
+			blocks = append(blocks, anthropicContent{Type: "document", Source: &anthropicImageSource{Type: "base64", MediaType: "application/pdf", Data: a.Base64()}, Title: a.Name})
+		default:
+			text, err := DocumentText(a)
+			if err != nil {
+				continue
+			}
+			blocks = append(blocks, anthropicContent{Type: "document", Source: &anthropicImageSource{Type: "text", MediaType: "text/plain", Data: text}, Title: a.Name})
 		}
-		mediaType := "image/jpeg"
-		switch strings.ToLower(filepath.Ext(cleanPath)) {
-		case ".png":
-			mediaType = "image/png"
-		case ".gif":
-			mediaType = "image/gif"
-		case ".webp":
-			mediaType = "image/webp"
-		}
-		blocks = append(blocks, anthropicContent{
-			Type: "image",
-			Source: &anthropicImageSource{
-				Type:      "base64",
-				MediaType: mediaType,
-				Data:      base64.StdEncoding.EncodeToString(data),
-			},
-		})
 	}
 	return blocks
 }

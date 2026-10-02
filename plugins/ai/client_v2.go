@@ -126,10 +126,15 @@ func (c *Client) GenerateRequest(ctx context.Context, req *GenerateRequest) (*Ge
 	if req.MaxTokens <= 0 {
 		req.MaxTokens = c.config.MaxTokens
 	}
+	if c.config.PromptCache {
+		req.Cache = true
+	}
 	attachRequestImages(req)
 
 	start := time.Now()
-	resp, err := c.provider.Generate(ctx, req)
+	resp, err := withRetries(ctx, c.maxRetries(), func() (*GenerateResponse, error) {
+		return c.provider.Generate(ctx, req)
+	})
 	latency := time.Since(start)
 
 	// Emit observability event.
@@ -225,8 +230,14 @@ func (c *Client) StreamRequest(ctx context.Context, req *GenerateRequest) (*Stre
 	if req.MaxTokens <= 0 {
 		req.MaxTokens = c.config.MaxTokens
 	}
+	if c.config.PromptCache {
+		req.Cache = true
+	}
+	attachRequestImages(req)
 	req.Stream = true
-	return c.provider.Stream(ctx, req)
+	return withRetries(ctx, c.maxRetries(), func() (*StreamResponse, error) {
+		return c.provider.Stream(ctx, req)
+	})
 }
 
 // ---------------------------------------------------------------------------
@@ -280,15 +291,16 @@ func newClientLegacy(cfg *Config) (*Client, error) {
 // message, where providers read them, as Agent.Prompt already does. The
 // caller's message slice is copied, not changed.
 func attachRequestImages(req *GenerateRequest) {
-	if len(req.Images) == 0 {
+	if len(req.Images) == 0 && len(req.Files) == 0 {
 		return
 	}
 	msgs := append([]Message(nil), req.Messages...)
 	for i := len(msgs) - 1; i >= 0; i-- {
 		if msgs[i].Role == RoleUser || msgs[i].Role == "" {
 			msgs[i].Images = append(append([]string(nil), msgs[i].Images...), req.Images...)
+			msgs[i].Files = append(append([]string(nil), msgs[i].Files...), req.Files...)
 			req.Messages = msgs
-			req.Images = nil
+			req.Images, req.Files = nil, nil
 			return
 		}
 	}

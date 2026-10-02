@@ -45,6 +45,13 @@ type Provider interface {
 // Capability interfaces — implement what your provider supports
 // ---------------------------------------------------------------------------
 
+// ToolCallStreamer is implemented by providers whose Stream reports the
+// model's tool calls (in StreamChunk.ToolCalls). Agents stream every step
+// on such providers; on others they stream only tool-free turns.
+type ToolCallStreamer interface {
+	StreamsToolCalls() bool
+}
+
 // EmbeddingProvider generates vector embeddings.
 type EmbeddingProvider interface {
 	Embed(ctx context.Context, req *EmbeddingRequest) (*EmbeddingResponse, error)

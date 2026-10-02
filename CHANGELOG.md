@@ -6,6 +6,73 @@ This project follows Semantic Versioning.
 
 ## [Unreleased]
 
+### Added
+
+- **`plugins/ai`: agent skills.** `agent.WithSkills(ai.LoadSkills(fsys, dir))`
+  lists each skill (a `SKILL.md` with name and description, the format
+  `nimbus ai` uses) in the system prompt and adds a `load_skill` tool that
+  returns its instructions, or a file from its folder, when a request needs
+  it. Load from `embed.FS` to keep single-binary deploys; `ai.NewSkill`
+  builds one in code. `nimbus ai` and the SDK now share one SKILL.md parser,
+  which also reads multi-line YAML descriptions.
+- **`plugins/ai`: `ai.NewFake`**, a scripted provider that records every
+  request (and embeds deterministically), for testing agents, tools, prompts
+  and RAG without a model.
+- **`plugins/ai`: MCP client.** `ai.ConnectMCP` over stdio, streamable HTTP,
+  SSE or in-process; `agent.WithMCP(...)`. Prefixing, allow-lists and
+  opt-in approval for destructive tools.
+- **`plugins/ai`: retries for every provider.** 429, 5xx, Anthropic's 529
+  and dropped connections back off with jitter and honour `Retry-After`
+  (`AI_MAX_RETRIES`, default 2). Providers return `*ai.APIError`.
+- **`plugins/ai`: prompt caching.** `ai.WithPromptCache()`,
+  `agent.WithPromptCache()` or `AI_PROMPT_CACHE`: Anthropic cache
+  breakpoints on tools, system prompt and the latest message; cached tokens
+  reported in `Usage` for Anthropic, OpenAI and Gemini and priced at their
+  own rates by cost tracking.
+- **`plugins/ai`: reasoning.** `ai.WithReasoning(effort)` /
+  `WithThinkingBudget(n)` / `agent.WithReasoning`: OpenAI reasoning_effort,
+  Anthropic extended thinking, Gemini thinking budgets, Ollama `think`.
+  Thinking is returned (`resp.Reasoning`) and kept, signed, across tool turns.
+- **`plugins/ai`: tool approval.** `RequireApproval()` tools go to
+  `agent.OnApproval`, or pause the agent with `ApprovalRequiredError` until
+  `agent.Resume(ctx, ai.Approve(id), ai.Deny(id, why))`.
+- **`plugins/ai`: context limits.** `agent.WithContextLimit(tokens,
+  ai.SummarizeOlder())` drops or summarises the oldest turns, never splitting
+  a tool call from its result.
+- **`plugins/ai`: files and PDFs.** `ai.WithFiles(...)` (paths, data: URIs,
+  URLs): native PDF documents on Anthropic and Gemini, extracted text
+  elsewhere. `ai.LoadAttachment`, `ai.DocumentText`.
+- **`plugins/ai`: multi-agent.** `agent.AsTool(name, desc)` and
+  `agent.Named(...).WithHandoffs(...)`; `resp.Agent` says who answered.
+- **`plugins/ai`: speech.** `ai.Transcribe` (OpenAI Whisper and
+  gpt-4o-transcribe, Gemini) and `ai.Speak` (OpenAI TTS, Gemini TTS as WAV).
+- **`plugins/ai`: tool choice, parallel tools, reranking.**
+  `ai.WithToolChoice` on every provider; `agent.WithParallelTools()`;
+  `ai.Rerank` (Cohere) and `RAG.WithReranker`.
+
+### Fixed
+
+- **`plugins/ai`: `Agent.Stream` asked the model twice** for the final
+  answer, never saved that answer to memory, and dropped `WithImages`. It
+  now streams every step on providers that stream tool calls (OpenAI,
+  OpenAI-compatible) and reuses the final response elsewhere.
+- **`plugins/ai`: agents sent each image twice** on every step.
+- **`plugins/ai`: `NewAgent` panicked without the global plugin** even when
+  given a client with `WithClient`; the client is now resolved when the
+  agent runs.
+- **`plugins/ai`: Gemini ignored tools** (agents on Gemini never called
+  them), returned only the first part of an answer, and ignored the
+  per-request model. Gemini now supports function calling (streamed too),
+  structured output and thinking.
+- **`plugins/ai`: Ollama ignored tools and images**; both are supported, with
+  streamed tool calls and usage.
+- **`plugins/ai`: Cohere agents failed after their first tool call** (tool
+  calls and results were sent without ids) and ignored the per-request model.
+- **`plugins/ai`: Anthropic and Gemini accepted images only as local
+  paths**; `data:` URIs and URLs now work, as documented.
+- **`plugins/ai`: Anthropic streams tool calls and thinking**, so agents on
+  Claude stream every step.
+
 ## [1.9.1] - 2026-10-02
 
 ### Fixed

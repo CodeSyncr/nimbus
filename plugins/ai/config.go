@@ -38,6 +38,12 @@ type Config struct {
 	mediaOf   string
 	Timeout   int
 	MaxTokens int
+	// MaxRetries is how many times a rate-limited or failed request is
+	// retried (0 = DefaultMaxRetries, negative = never). See retry.go.
+	MaxRetries int
+	// PromptCache turns on prompt caching for every request (see
+	// WithPromptCache). AI_PROMPT_CACHE=true.
+	PromptCache bool
 	// Text generation providers
 	OpenAIKey        string
 	OpenAIBaseURL    string

@@ -48,12 +48,37 @@ type cohereRequest struct {
 	Temperature float32         `json:"temperature,omitempty"`
 	Stop        []string        `json:"stop_sequences,omitempty"`
 	Tools       []cohereTool    `json:"tools,omitempty"`
+	ToolChoice  string          `json:"tool_choice,omitempty"` // REQUIRED, NONE
 	Stream      bool            `json:"stream,omitempty"`
 }
 
 type cohereMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role       string           `json:"role"`
+	Content    string           `json:"content,omitempty"`
+	ToolCalls  []cohereToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string           `json:"tool_call_id,omitempty"`
+}
+
+type cohereToolCall struct {
+	ID       string `json:"id"`
+	Type     string `json:"type"` // "function"
+	Function struct {
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"` // a JSON document, as a string
+	} `json:"function"`
+}
+
+// cohereArgs normalises tool-call arguments, which v2 sends as a string
+// holding JSON (older responses sent the object).
+func cohereArgs(raw json.RawMessage) json.RawMessage {
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		raw = json.RawMessage(s)
+	}
+	if len(strings.TrimSpace(string(raw))) == 0 || !json.Valid(raw) {
+		return json.RawMessage("{}")
+	}
+	return raw
 }
 
 type cohereTool struct {
@@ -118,7 +143,7 @@ func (p *cohereProvider) Generate(ctx context.Context, req *GenerateRequest) (*G
 		return nil, err
 	}
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("cohere error (%d): %s", resp.StatusCode, string(respBody))
+		return nil, &APIError{Provider: "cohere", StatusCode: resp.StatusCode, Body: string(respBody), RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"))}
 	}
 
 	var cr cohereResponse
@@ -138,14 +163,14 @@ func (p *cohereProvider) Generate(ctx context.Context, req *GenerateRequest) (*G
 		toolCalls = append(toolCalls, ToolCall{
 			ID:   tc.ID,
 			Name: tc.Function.Name,
-			Args: tc.Function.Arguments,
+			Args: cohereArgs(tc.Function.Arguments),
 		})
 	}
 
 	return &GenerateResponse{
 		Text:         text.String(),
 		ToolCalls:    toolCalls,
-		Model:        p.model,
+		Model:        body.Model,
 		FinishReason: cr.FinishReason,
 		Usage: &Usage{
 			PromptTokens:     cr.Usage.Tokens.InputTokens,
@@ -192,8 +217,7 @@ func (p *cohereProvider) Stream(ctx context.Context, req *GenerateRequest) (*Str
 	}
 	if resp.StatusCode != 200 {
 		defer resp.Body.Close()
-		respBody, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("cohere stream error (%d): %s", resp.StatusCode, string(respBody))
+		return nil, newAPIError("cohere", resp)
 	}
 
 	chunks := make(chan StreamChunk, 32)
@@ -267,8 +291,12 @@ func (p *cohereProvider) setHeaders(req *http.Request) {
 }
 
 func (p *cohereProvider) buildRequest(req *GenerateRequest, stream bool) *cohereRequest {
+	model := req.Model
+	if model == "" {
+		model = p.model
+	}
 	cr := &cohereRequest{
-		Model:       p.model,
+		Model:       model,
 		MaxTokens:   req.MaxTokens,
 		Temperature: req.Temperature,
 		Stop:        req.Stop,
@@ -283,7 +311,17 @@ func (p *cohereProvider) buildRequest(req *GenerateRequest, stream bool) *cohere
 		if role == "" {
 			role = RoleUser
 		}
-		cr.Messages = append(cr.Messages, cohereMessage{Role: role, Content: msg.Content})
+		cm := cohereMessage{Role: role, Content: contentWithDocuments(msg)}
+		for _, tc := range msg.ToolCalls {
+			var c cohereToolCall
+			c.ID, c.Type = tc.ID, "function"
+			c.Function.Name, c.Function.Arguments = tc.Name, string(cohereArgs(tc.Args))
+			cm.ToolCalls = append(cm.ToolCalls, c)
+		}
+		if role == RoleTool {
+			cm.ToolCallID = msg.ToolCallID
+		}
+		cr.Messages = append(cr.Messages, cm)
 	}
 
 	for _, tool := range req.Tools {
@@ -301,5 +339,16 @@ func (p *cohereProvider) buildRequest(req *GenerateRequest, stream bool) *cohere
 		})
 	}
 
+	switch req.ToolChoice {
+	case ToolChoiceNone:
+		if len(cr.Tools) > 0 {
+			cr.ToolChoice = "NONE"
+		}
+	case "", ToolChoiceAuto:
+	default: // required, or a named tool: Cohere can only require some tool
+		if len(cr.Tools) > 0 {
+			cr.ToolChoice = "REQUIRED"
+		}
+	}
 	return cr
 }

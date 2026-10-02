@@ -5,11 +5,11 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 
 	"github.com/CodeSyncr/nimbus/cli/auth"
+	"github.com/CodeSyncr/nimbus/internal/skillmd"
 )
 
 // Skill represents a lightweight index entry for an agent skill.
@@ -19,12 +19,6 @@ type Skill struct {
 	Path        string `json:"path"`
 	Source      string `json:"source"` // "project" | "global" | "embedded"
 }
-
-var (
-	reFrontmatter = regexp.MustCompile(`(?s)^---\r?\n(.*?)\r?\n---\r?\n(.*)$`)
-	reName        = regexp.MustCompile(`(?m)^name:\s*(.+)$`)
-	reDesc        = regexp.MustCompile(`(?m)^description:\s*(.+)$`)
-)
 
 // EnsureDefaultSkills writes embedded default skills to ~/.nimbus/skills/ if not already present.
 // EnsureDefaultSkills is retained as a no-op.
@@ -98,22 +92,18 @@ func scanSkillsDirectory(dir string, source string, out map[string]Skill) {
 	})
 }
 
-// parseSkillHeader extracts ONLY the minimal YAML frontmatter (name + description) for the lightweight index.
+// parseSkillHeader extracts the name and description for the lightweight
+// index. Frontmatter is parsed by the AI SDK's ParseSkill, so `nimbus ai`
+// and apps read SKILL.md the same way (including multi-line YAML
+// descriptions); a file without frontmatter is still indexed by its name.
 func parseSkillHeader(content, path, source string) Skill {
 	skill := Skill{
 		Path:   path,
 		Source: source,
 	}
 
-	matches := reFrontmatter.FindStringSubmatch(content)
-	if len(matches) == 3 {
-		frontmatter := matches[1]
-		if nameMatch := reName.FindStringSubmatch(frontmatter); len(nameMatch) == 2 {
-			skill.Name = strings.TrimSpace(nameMatch[1])
-		}
-		if descMatch := reDesc.FindStringSubmatch(frontmatter); len(descMatch) == 2 {
-			skill.Description = strings.TrimSpace(descMatch[1])
-		}
+	if name, desc, _, err := skillmd.Parse(content); err == nil {
+		skill.Name, skill.Description = name, desc
 	}
 
 	if skill.Name == "" {
@@ -183,9 +173,8 @@ func ReadSkillContent(appRoot, skillName string) (string, error) {
 }
 
 func extractSkillBody(content string) string {
-	matches := reFrontmatter.FindStringSubmatch(content)
-	if len(matches) == 3 {
-		return strings.TrimSpace(matches[2])
+	if _, _, body, err := skillmd.Parse(content); err == nil {
+		return body
 	}
 	return strings.TrimSpace(content)
 }

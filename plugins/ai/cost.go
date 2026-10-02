@@ -38,6 +38,27 @@ import (
 type ModelPricing struct {
 	PromptPer1K     float64 `json:"prompt_per_1k"`
 	CompletionPer1K float64 `json:"completion_per_1k"`
+	// CacheReadPer1K and CacheWritePer1K price prompt-cache hits and
+	// writes. Zero means half the prompt price for reads (OpenAI's
+	// discount) and the prompt price for writes.
+	CacheReadPer1K  float64 `json:"cache_read_per_1k,omitempty"`
+	CacheWritePer1K float64 `json:"cache_write_per_1k,omitempty"`
+}
+
+// promptCost prices a request's input, cached tokens at their own rates.
+func (p ModelPricing) promptCost(u *Usage) float64 {
+	read, write := p.CacheReadPer1K, p.CacheWritePer1K
+	if read == 0 {
+		read = p.PromptPer1K / 2
+	}
+	if write == 0 {
+		write = p.PromptPer1K
+	}
+	uncached := u.PromptTokens - u.CacheReadTokens - u.CacheWriteTokens
+	if uncached < 0 {
+		uncached = 0
+	}
+	return (float64(uncached)*p.PromptPer1K + float64(u.CacheReadTokens)*read + float64(u.CacheWriteTokens)*write) / 1000.0
 }
 
 // DefaultPricing is the built-in pricing table (USD per 1K tokens).
@@ -53,11 +74,11 @@ var DefaultPricing = map[string]ModelPricing{
 	"o1-mini":       {PromptPer1K: 0.003, CompletionPer1K: 0.012},
 	"o3-mini":       {PromptPer1K: 0.0011, CompletionPer1K: 0.0044},
 	// Anthropic
-	"claude-3-5-sonnet-20241022": {PromptPer1K: 0.003, CompletionPer1K: 0.015},
-	"claude-3-5-haiku-20241022":  {PromptPer1K: 0.0008, CompletionPer1K: 0.004},
-	"claude-3-opus-20240229":     {PromptPer1K: 0.015, CompletionPer1K: 0.075},
-	"claude-sonnet-4-20250514":   {PromptPer1K: 0.003, CompletionPer1K: 0.015},
-	"claude-opus-4-20250514":     {PromptPer1K: 0.015, CompletionPer1K: 0.075},
+	"claude-3-5-sonnet-20241022": {PromptPer1K: 0.003, CompletionPer1K: 0.015, CacheReadPer1K: 0.0003, CacheWritePer1K: 0.00375},
+	"claude-3-5-haiku-20241022":  {PromptPer1K: 0.0008, CompletionPer1K: 0.004, CacheReadPer1K: 8e-05, CacheWritePer1K: 0.001},
+	"claude-3-opus-20240229":     {PromptPer1K: 0.015, CompletionPer1K: 0.075, CacheReadPer1K: 0.0015, CacheWritePer1K: 0.01875},
+	"claude-sonnet-4-20250514":   {PromptPer1K: 0.003, CompletionPer1K: 0.015, CacheReadPer1K: 0.0003, CacheWritePer1K: 0.00375},
+	"claude-opus-4-20250514":     {PromptPer1K: 0.015, CompletionPer1K: 0.075, CacheReadPer1K: 0.0015, CacheWritePer1K: 0.01875},
 	// Google
 	"gemini-2.0-flash": {PromptPer1K: 0.0001, CompletionPer1K: 0.0004},
 	"gemini-1.5-pro":   {PromptPer1K: 0.00125, CompletionPer1K: 0.005},
@@ -296,7 +317,7 @@ func (ct *costTracker) recordCost(e RequestEvent) {
 	}
 
 	pricing := ct.getPricing(e.Model)
-	promptCost := float64(e.Usage.PromptTokens) / 1000.0 * pricing.PromptPer1K
+	promptCost := pricing.promptCost(e.Usage)
 	completionCost := float64(e.Usage.CompletionTokens) / 1000.0 * pricing.CompletionPer1K
 	totalCost := promptCost + completionCost
 
