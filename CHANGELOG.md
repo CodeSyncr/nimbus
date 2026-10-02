@@ -6,6 +6,8 @@ This project follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [1.10.0] - 2026-10-03
+
 ### Added
 
 - **`plugins/ai`: agent skills.** `agent.WithSkills(ai.LoadSkills(fsys, dir))`
