@@ -1,8 +1,12 @@
 package telescope
 
 import (
+	"bufio"
 	"bytes"
+	"errors"
 	"io"
+	"net"
+	stdhttp "net/http"
 	"strings"
 	"time"
 
@@ -52,9 +56,26 @@ func (r *responseRecorder) Flush() {
 	}
 }
 
-// The recorder must stay a Flusher: without it, streaming endpoints behind
-// the request watcher buffer until completion.
-var _ http.Flusher = (*responseRecorder)(nil)
+// Hijack forwards to the underlying writer so WebSocket upgrades work
+// behind the watcher. Without it no endpoint behind telescope can upgrade:
+// the upgrader finds no http.Hijacker and answers 500.
+func (r *responseRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	h, ok := r.ResponseWriter.(stdhttp.Hijacker)
+	if !ok {
+		return nil, nil, errors.New("telescope: the underlying ResponseWriter does not support hijacking")
+	}
+	return h.Hijack()
+}
+
+// Unwrap lets http.ResponseController reach the writer underneath.
+func (r *responseRecorder) Unwrap() http.ResponseWriter { return r.ResponseWriter }
+
+// The recorder must stay a Flusher and a Hijacker: without them streaming
+// endpoints buffer until completion and WebSocket upgrades fail.
+var (
+	_ http.Flusher     = (*responseRecorder)(nil)
+	_ stdhttp.Hijacker = (*responseRecorder)(nil)
+)
 
 // RequestWatcher returns middleware that records HTTP requests.
 func (p *Plugin) RequestWatcher() router.Middleware {

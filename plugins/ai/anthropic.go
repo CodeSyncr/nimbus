@@ -24,7 +24,22 @@ const defaultAnthropicModel = "claude-sonnet-5"
 // Anthropic Messages API requires max_tokens on every request.
 const defaultAnthropicMaxTokens = 8192
 
-var anthropicHTTPClient = &http.Client{Timeout: 120 * time.Second}
+// anthropicClients are the provider's two HTTP clients. A whole answer is
+// bounded by AI_TIMEOUT (it used to be a fixed 120s, which cut long
+// answers off and ignored the setting). A stream has no overall limit,
+// because http.Client.Timeout also covers reading the body and would kill
+// a long stream mid-answer; it must answer with headers within AI_TIMEOUT,
+// and the caller's context ends it.
+func anthropicClients(cfg *Config) (whole, stream *http.Client) {
+	secs := 600
+	if cfg != nil && cfg.Timeout > 0 {
+		secs = cfg.Timeout
+	}
+	limit := time.Duration(secs) * time.Second
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.ResponseHeaderTimeout = limit
+	return &http.Client{Timeout: limit, Transport: tr}, &http.Client{Transport: tr}
+}
 
 // anthropicBaseURL is the default Messages API endpoint.
 var anthropicBaseURL = "https://api.anthropic.com/v1/messages"
@@ -83,19 +98,38 @@ func newAnthropicProvider(cfg *Config) (Provider, error) {
 		maxTokens = defaultAnthropicMaxTokens
 	}
 
+	whole, stream := anthropicClients(cfg)
 	return &anthropicProvider{
-		apiKey:    apiKey,
-		model:     model,
-		endpoint:  normalizeAnthropicURL(apiURL),
-		maxTokens: maxTokens,
+		apiKey:     apiKey,
+		model:      model,
+		endpoint:   normalizeAnthropicURL(apiURL),
+		maxTokens:  maxTokens,
+		client:     whole,
+		streamHTTP: stream,
 	}, nil
 }
 
 type anthropicProvider struct {
-	apiKey    string
-	model     string
-	endpoint  string
-	maxTokens int
+	apiKey     string
+	model      string
+	endpoint   string
+	maxTokens  int
+	client     *http.Client
+	streamHTTP *http.Client
+}
+
+func (p *anthropicProvider) httpClient(stream bool) *http.Client {
+	c := p.client
+	if stream {
+		c = p.streamHTTP
+	}
+	if c == nil {
+		whole, s := anthropicClients(nil)
+		if c = whole; stream {
+			c = s
+		}
+	}
+	return c
 }
 
 func (p *anthropicProvider) Name() string { return "anthropic" }
@@ -291,7 +325,7 @@ func (p *anthropicProvider) do(ctx context.Context, body *anthropicRequest) ([]b
 	}
 	p.setHeaders(httpReq)
 
-	resp, err := anthropicHTTPClient.Do(httpReq)
+	resp, err := p.httpClient(false).Do(httpReq)
 	if err != nil {
 		return nil, err
 	}
@@ -361,7 +395,7 @@ func (p *anthropicProvider) Stream(ctx context.Context, req *GenerateRequest) (*
 	}
 	p.setHeaders(httpReq)
 
-	resp, err := anthropicHTTPClient.Do(httpReq)
+	resp, err := p.httpClient(true).Do(httpReq)
 	if err != nil {
 		return nil, err
 	}

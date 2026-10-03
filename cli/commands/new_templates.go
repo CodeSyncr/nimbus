@@ -28,6 +28,7 @@ const mainTmpl = `/*
 package main
 
 import (
+	"fmt"
 	"os"
 
 	"{{.AppName}}/bin"
@@ -47,7 +48,10 @@ func main() {
 		return
 	}
 	app := bin.Boot()
-	_ = app.Run()
+	if err := app.Run(); err != nil {
+		fmt.Fprintln(os.Stderr, "nimbus:", err)
+		os.Exit(1)
+	}
 }
 `
 
