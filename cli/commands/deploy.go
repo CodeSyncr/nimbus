@@ -49,7 +49,7 @@ func (c *DeployCommand) Aliases() []string { return []string{"forge"} }
 func (c *DeployCommand) Args() int         { return -1 }
 
 func (c *DeployCommand) Flags(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&c.target, "target", "", "Deploy target: fly, railway, docker, render, aws, gcp, netlify")
+	cmd.Flags().StringVar(&c.target, "target", "", "Deploy target: nimbus (Nimbus Cloud, the default), fly, railway, docker, render, aws, gcp, netlify")
 	cmd.Flags().StringVar(&c.region, "region", "", "Deployment region")
 	cmd.Flags().StringVar(&c.app, "app", "", "Application name")
 	cmd.Flags().BoolVar(&c.skipBuild, "skip-build", false, "Skip build step")
@@ -59,7 +59,17 @@ func (c *DeployCommand) Flags(cmd *cobra.Command) {
 }
 
 func (c *DeployCommand) Run(ctx *cli.Context) error {
+	// Nimbus Cloud is the default: asked for by name, or when the app has
+	// no Forge config for another target.
+	if c.target == "nimbus" || (c.target == "" && !hasDeployConfig()) {
+		return runNimbusDeploy(c.app, ctx.Stdout)
+	}
 	return runDeploy(ctx.Cmd, ctx.Args)
+}
+
+func hasDeployConfig() bool {
+	_, err := loadDeployConfig()
+	return err == nil
 }
 
 // DeployInitCommand initializes deployment config.
