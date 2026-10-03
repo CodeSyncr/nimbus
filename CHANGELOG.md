@@ -6,6 +6,32 @@ This project follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [1.11.0] - 2026-10-04
+
+### Added
+
+- **`nimbus deploy` ships to Nimbus Cloud by default.** With no Forge config
+  for another target (or `--target nimbus`), the command packs the app's
+  folder, uploads it to Nimbus Deployments with the `nimbus login` token and
+  follows the build log until the app is live or the build fails. `--app`
+  names the project, which is created on the first deploy. `.env*`, `.git`,
+  `storage/`, `tmp/`, `node_modules/` and paths listed in `.nimbusignore` are
+  never uploaded. The Fly, Railway, Render, AWS, GCP, Netlify and Docker
+  targets are unchanged.
+
+### Fixed
+
+- **`plugins/telescope`: WebSocket upgrades behind the request watcher.** The
+  recorder now forwards `Hijack` (and `Unwrap`), so WebSocket endpoints in an
+  app with telescope enabled upgrade instead of failing with a 500.
+- **`plugins/ai`: Anthropic timeouts.** Each provider has its own HTTP
+  clients: a whole answer is bounded by `AI_TIMEOUT` (it was a fixed 120s that
+  ignored the setting), and streams have no overall limit, since
+  `Client.Timeout` also covers the body and cut long streams off mid-answer.
+- **`nimbus new`: startup errors are reported.** The generated `main.go`
+  prints `app.Run`'s error and exits 1 instead of discarding it, so a failed
+  boot no longer exits 0 silently.
+
 ## [1.10.0] - 2026-10-03
 
 ### Added
