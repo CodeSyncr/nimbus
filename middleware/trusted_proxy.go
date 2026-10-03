@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"net"
 	"strings"
 
@@ -20,12 +21,29 @@ func TrustedProxies(cidrs ...string) router.Middleware {
 	return func(next router.HandlerFunc) router.HandlerFunc {
 		return func(c *http.Context) error {
 			remoteIP := extractIP(c.Request.RemoteAddr)
+			clientIP := remoteIP
+			if isTrusted(remoteIP, cidrs, networks) {
+				if xff := c.Request.Header.Get("X-Forwarded-For"); xff != "" {
+					chain := strings.Split(xff, ",")
+					for i := len(chain) - 1; i >= 0 && isTrusted(clientIP, cidrs, networks); i-- {
+						parsed := net.ParseIP(strings.TrimSpace(chain[i]))
+						if parsed == nil {
+							clientIP = remoteIP
+							break
+						}
+						clientIP = parsed.String()
+					}
+				} else if ip := net.ParseIP(c.Request.Header.Get("X-Real-Ip")); ip != nil {
+					clientIP = ip.String()
+				}
+			}
 			if !isTrusted(remoteIP, cidrs, networks) {
 				c.Request.Header.Del("X-Forwarded-For")
 				c.Request.Header.Del("X-Real-Ip")
 				c.Request.Header.Del("X-Forwarded-Proto")
 				c.Request.Header.Del("X-Forwarded-Host")
 			}
+			c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), clientIPKey{}, clientIP))
 			return next(c)
 		}
 	}
@@ -49,15 +67,24 @@ func parseCIDRs(cidrs []string) []*net.IPNet {
 
 // extractIP strips the port from addr (e.g. "10.0.0.1:1234" -> "10.0.0.1").
 func extractIP(addr string) string {
-	if i := strings.LastIndex(addr, ":"); i > 0 {
-		if addr[0] == '[' {
-			if j := strings.LastIndex(addr, "]"); j > 0 {
-				return addr[1:j]
-			}
-		}
-		return addr[:i]
+	if host, _, err := net.SplitHostPort(addr); err == nil {
+		addr = host
+	}
+	if ip := net.ParseIP(addr); ip != nil {
+		return ip.String()
 	}
 	return addr
+}
+
+type clientIPKey struct{}
+
+// ClientIP uses forwarding information only after TrustedProxies has validated
+// the peer and walked the proxy chain. Without it, only RemoteAddr is used.
+func ClientIP(r *http.Request) string {
+	if ip, ok := r.Context().Value(clientIPKey{}).(string); ok {
+		return ip
+	}
+	return extractIP(r.RemoteAddr)
 }
 
 // isTrusted checks if the IP falls within any of the given CIDR ranges or matches exactly.

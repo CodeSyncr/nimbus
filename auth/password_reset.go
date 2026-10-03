@@ -96,7 +96,11 @@ func (b *PasswordResetBroker) Reset(ctx context.Context, email, token, newPasswo
 		return fmt.Errorf("password reset: invalid email")
 	}
 
-	if !b.tokens.Verify(user.GetID(), token) {
+	valid, err := b.tokens.VerifyWithError(user.GetID(), token)
+	if err != nil {
+		return err
+	}
+	if !valid {
 		return fmt.Errorf("password reset: invalid or expired token")
 	}
 
@@ -106,4 +110,13 @@ func (b *PasswordResetBroker) Reset(ctx context.Context, email, token, newPasswo
 // Cleanup removes expired tokens. Call via scheduler.
 func (b *PasswordResetBroker) Cleanup() {
 	b.tokens.Cleanup()
+}
+
+// WithTokenStore selects a shared token store. Configure before serving requests.
+func (b *PasswordResetBroker) WithTokenStore(store *TokenStore) *PasswordResetBroker {
+	if store == nil {
+		panic("auth: token store is required")
+	}
+	b.tokens = store
+	return b
 }

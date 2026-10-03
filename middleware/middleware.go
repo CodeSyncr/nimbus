@@ -264,9 +264,12 @@ func RateLimit(limit int, window time.Duration, keyFn func(*http.Request) string
 	rl := &rateLimiter{counts: make(map[string]*rateEntry), limit: limit, window: window, lastSweep: time.Now()}
 	return func(next router.HandlerFunc) router.HandlerFunc {
 		return func(c *http.Context) error {
-			key := keyFn(c.Request)
+			key := ""
+			if keyFn != nil {
+				key = keyFn(c.Request)
+			}
 			if key == "" {
-				key = c.Request.RemoteAddr
+				key = ClientIP(c.Request)
 			}
 			ok, remaining, reset := rl.allow(key)
 			h := c.Response.Header()

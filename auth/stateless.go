@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"aidanwoods.dev/go-paseto"
@@ -19,32 +20,63 @@ type TokenDriver interface {
 
 // ── JWT Driver ───────────────────────────────────────────────────
 
-type JWTDriver struct {
-	secret []byte
+// JWTOptions scopes tokens to an issuer and audience when configured.
+type JWTOptions struct {
+	Issuer   string
+	Audience string
 }
 
-func NewJWTDriver(secret string) *JWTDriver {
-	return &JWTDriver{secret: []byte(secret)}
+type JWTDriver struct {
+	options   JWTOptions
+	secret    []byte
+	configErr error
+}
+
+func NewJWTDriver(secret string, options ...JWTOptions) *JWTDriver {
+	d := &JWTDriver{secret: []byte(secret), configErr: ValidateTokenSecret(secret)}
+	if len(options) > 0 {
+		d.options = options[0]
+	}
+	return d
 }
 
 func (d *JWTDriver) Generate(claims map[string]any, expiresAt time.Time) (string, error) {
+	if d.configErr != nil {
+		return "", d.configErr
+	}
 	jwtClaims := jwt.MapClaims{}
 	for k, v := range claims {
 		jwtClaims[k] = v
 	}
 	jwtClaims["exp"] = expiresAt.Unix()
+	if d.options.Issuer != "" {
+		jwtClaims["iss"] = d.options.Issuer
+	}
+	if d.options.Audience != "" {
+		jwtClaims["aud"] = d.options.Audience
+	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwtClaims)
 	return token.SignedString(d.secret)
 }
 
 func (d *JWTDriver) Parse(tokenStr string) (map[string]any, error) {
+	if d.configErr != nil {
+		return nil, d.configErr
+	}
+	options := []jwt.ParserOption{jwt.WithValidMethods([]string{"HS256"}), jwt.WithExpirationRequired()}
+	if d.options.Issuer != "" {
+		options = append(options, jwt.WithIssuer(d.options.Issuer))
+	}
+	if d.options.Audience != "" {
+		options = append(options, jwt.WithAudience(d.options.Audience))
+	}
 	token, err := jwt.Parse(tokenStr, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
 		return d.secret, nil
-	})
+	}, options...)
 
 	if err != nil {
 		return nil, err
@@ -60,7 +92,8 @@ func (d *JWTDriver) Parse(tokenStr string) (map[string]any, error) {
 // ── PASETO Driver ────────────────────────────────────────────────
 
 type PasetoDriver struct {
-	key paseto.V4SymmetricKey
+	key       paseto.V4SymmetricKey
+	configErr error
 }
 
 // NewPasetoDriver builds a PASETO v4.local driver from keyStr. For strong
@@ -72,6 +105,9 @@ type PasetoDriver struct {
 // silently discarded the error and could fall back to a zero/garbage key,
 // weakening every token without any signal.
 func NewPasetoDriver(keyStr string) *PasetoDriver {
+	if err := ValidateTokenSecret(keyStr); err != nil {
+		return &PasetoDriver{configErr: err}
+	}
 	key, err := paseto.V4SymmetricKeyFromHex(keyStr)
 	if err != nil {
 		raw := []byte(keyStr)
@@ -89,6 +125,9 @@ func NewPasetoDriver(keyStr string) *PasetoDriver {
 }
 
 func (d *PasetoDriver) Generate(claims map[string]any, expiresAt time.Time) (string, error) {
+	if d.configErr != nil {
+		return "", d.configErr
+	}
 	token := paseto.NewToken()
 	for k, v := range claims {
 		token.Set(k, v)
@@ -99,6 +138,9 @@ func (d *PasetoDriver) Generate(claims map[string]any, expiresAt time.Time) (str
 }
 
 func (d *PasetoDriver) Parse(tokenStr string) (map[string]any, error) {
+	if d.configErr != nil {
+		return nil, d.configErr
+	}
 	parser := paseto.NewParser()
 	token, err := parser.ParseV4Local(d.key, tokenStr, nil)
 	if err != nil {
@@ -158,8 +200,17 @@ func (g *StatelessGuard) Logout(_ context.Context) error {
 func (g *StatelessGuard) GenerateToken(userID string, expiresIn time.Duration) (string, error) {
 	claims := map[string]any{
 		"sub": userID,
-		"iat": time.Now().Format(time.RFC3339),
+		"iat": time.Now().Unix(),
 	}
 	expiresAt := time.Now().Add(expiresIn)
 	return g.driver.Generate(claims, expiresAt)
+}
+
+// ValidateTokenSecret rejects missing, short, and known scaffold secrets.
+// Use a cryptographically random secret; length alone does not prove entropy.
+func ValidateTokenSecret(secret string) error {
+	if len(strings.TrimSpace(secret)) < 32 || strings.Contains(strings.ToLower(secret), "please-change-this-secret") {
+		return errors.New("auth: token secret must contain at least 32 random characters and must not be a scaffold placeholder")
+	}
+	return nil
 }

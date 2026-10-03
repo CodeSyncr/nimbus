@@ -46,7 +46,7 @@ Nimbus supports both in-memory and Redis-backed rate limiting.
 ### In-Memory
 ```go
 app.Router.Use(middleware.RateLimit(100, time.Minute, func(r *http.Request) string {
-    return r.RemoteAddr // Limit by IP
+    return middleware.ClientIP(r) // Limit by validated client IP
 }))
 ```
 
@@ -55,3 +55,7 @@ Requires the Redis plugin.
 ```go
 app.Router.Use(middleware.RateLimitRedis(rdb, 1000, time.Hour))
 ```
+
+## Trusted client IP for rate limits
+
+middleware.ClientIP(request) and DefaultKeyFn ignore forwarding headers unless TrustedProxies has validated the peer. Trusted proxy chains are walked right-to-left to the first untrusted address; malformed chains fall back to the peer. RateLimit and RateLimitRedis use this canonical IP when keyFn is nil or returns empty. Ports never participate in the default key. Install TrustedProxies before rate limiting with only your actual proxy addresses.

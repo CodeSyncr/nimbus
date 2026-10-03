@@ -1,6 +1,8 @@
 package commands
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 )
@@ -231,7 +233,7 @@ type StatelessTokenConfig struct {
 
 var StatelessToken = StatelessTokenConfig{
 	Driver:    "jwt", // or "paseto"
-	Secret:    "please-change-this-secret",
+	Secret:    "",
 	ExpiresIn: 24 * time.Hour,
 }
 
@@ -462,7 +464,7 @@ func authEnvVars(guard string) []string {
 	case "session":
 		return []string{
 			"SESSION_DRIVER=cookie",
-			"SESSION_SECRET=please-change-this-secret",
+			"SESSION_SECRET=" + newAuthSecret(),
 		}
 	case "access_token":
 		return []string{
@@ -475,10 +477,18 @@ func authEnvVars(guard string) []string {
 	case "stateless":
 		return []string{
 			"AUTH_TOKEN_DRIVER=jwt",
-			"AUTH_TOKEN_SECRET=please-change-this-secret-to-32-characters",
+			"AUTH_TOKEN_SECRET=" + newAuthSecret(),
 			"AUTH_TOKEN_EXPIRES_IN=24h",
 		}
 	default:
 		return nil
 	}
+}
+
+func newAuthSecret() string {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		panic(err)
+	}
+	return hex.EncodeToString(b)
 }

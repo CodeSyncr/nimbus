@@ -47,7 +47,7 @@ session fixation.
 | Store | Constructor | Notes |
 | --- | --- | --- |
 | Memory | `NewMemoryStore()` | Process-local; lost on restart, wrong for multi-instance |
-| Cookie | `NewCookieStore(key []byte)` | Encrypted client-side; no server state, but size-limited |
+| Cookie | `NewCookieStore(key []byte)` | Encrypted client-side with a process-local validity registry; size-limited |
 | Redis | `NewRedisStore(client)` / `NewRedisStoreWithPrefix(client, prefix)` | The usual production choice |
 | Database | `NewDatabaseStore(db, table)` | Call `EnsureTable()` once; rows are `SessionRecord` |
 
@@ -56,8 +56,7 @@ feed it `APP_KEY`, not a literal.
 
 ### Choosing
 
-- **Cookie store**: no infrastructure, but every byte rides on every request and
-  you cannot invalidate a session server-side.
+- **Cookie store**: encrypted payload plus a server-side fingerprint registry. The default registry is process-local; restart invalidates sessions. For multiple instances use NewCookieStoreWithRegistry(key []byte, registry Store) *CookieStoreImpl with Redis or database storage.
 - **Redis**: fast, shared across instances, supports immediate invalidation.
 - **Database**: same benefits as Redis without another service, at the cost of a
   query per request.
@@ -84,3 +83,7 @@ The middleware writes the session cookie lazily through a wrapped
 where in the handler you touch the session.
 
 Related: [auth](auth.md) for the session guard built on top of this.
+
+## Expiry and revocation
+
+Cookie payloads include authenticated expiry. Legacy cookies are rejected on upgrade, requiring login again. Replacement and Destroy revoke the old fingerprint. SessionGuard.Logout calls Session.Invalidate(ctx context.Context) error synchronously; storage errors propagate. Invalidate clears all session data. Use the same encryption key and shared registry on every instance.

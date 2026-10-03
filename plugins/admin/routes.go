@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"github.com/CodeSyncr/nimbus/packages/shield"
 	"reflect"
 
 	nhttp "github.com/CodeSyncr/nimbus/http"
@@ -18,7 +19,20 @@ import (
 //	POST /admin/:slug/:id          update
 //	POST /admin/:slug/:id/delete   destroy
 func (p *Plugin) RegisterRoutes(r *router.Router) {
-	g := r.Group(p.panel.cfg.RoutePrefix, p.panel.cfg.Middleware...)
+	guards := append([]router.Middleware{}, p.panel.cfg.Middleware...)
+	guards = append(guards, func(next router.HandlerFunc) router.HandlerFunc {
+		return func(c *nhttp.Context) error {
+			if p.panel.cfg.Authorize == nil || !p.panel.cfg.Authorize(c) {
+				return c.JSON(nhttp.StatusForbidden, map[string]string{"error": "admin access denied"})
+			}
+			return next(c)
+		}
+	})
+	csrf := shield.DefaultConfig().CSRF
+	csrf.Enabled = true
+	csrf.Secret = p.panel.cfg.CSRFSecret
+	guards = append(guards, shield.CSRFGuard(csrf))
+	g := r.Group(p.panel.cfg.RoutePrefix, guards...)
 	g.Get("", p.dashboard)
 	g.Get("/:slug", p.index)
 	g.Get("/:slug/create", p.createForm)

@@ -2,7 +2,6 @@ package middleware
 
 import (
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/CodeSyncr/nimbus/http"
@@ -35,9 +34,12 @@ func RateLimitRedis(rdb *redis.Client, limit int, window time.Duration, keyFn fu
 	keyPrefix := "rl:"
 	return func(next router.HandlerFunc) router.HandlerFunc {
 		return func(c *http.Context) error {
-			key := keyFn(c.Request)
+			key := ""
+			if keyFn != nil {
+				key = keyFn(c.Request)
+			}
 			if key == "" {
-				key = c.Request.RemoteAddr
+				key = ClientIP(c.Request)
 			}
 			rkey := keyPrefix + key
 			ctx := c.Request.Context()
@@ -70,9 +72,4 @@ func RateLimitRedis(rdb *redis.Client, limit int, window time.Duration, keyFn fu
 }
 
 // DefaultKeyFn returns the client IP for rate limiting.
-func DefaultKeyFn(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		return strings.TrimSpace(strings.Split(xff, ",")[0])
-	}
-	return r.RemoteAddr
-}
+func DefaultKeyFn(r *http.Request) string { return ClientIP(r) }

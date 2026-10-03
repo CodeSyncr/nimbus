@@ -89,7 +89,11 @@ func (v *EmailVerifier) Verify(ctx context.Context, userID, token string) error 
 		return nil // idempotent
 	}
 
-	if !v.tokens.Verify(userID, token) {
+	valid, err := v.tokens.VerifyWithError(userID, token)
+	if err != nil {
+		return err
+	}
+	if !valid {
 		return fmt.Errorf("email verification: invalid or expired token")
 	}
 
@@ -117,4 +121,13 @@ func RequireVerifiedEmail(redirectTo string) router.Middleware {
 			return next(c)
 		}
 	}
+}
+
+// WithTokenStore selects a shared token store. Configure before serving requests.
+func (v *EmailVerifier) WithTokenStore(store *TokenStore) *EmailVerifier {
+	if store == nil {
+		panic("auth: token store is required")
+	}
+	v.tokens = store
+	return v
 }

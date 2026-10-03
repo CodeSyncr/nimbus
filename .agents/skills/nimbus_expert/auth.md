@@ -22,7 +22,7 @@ Authenticates users via stateless tokens. Supports JWT (HMAC) and PASETO (V4 Loc
 import "github.com/CodeSyncr/nimbus/auth"
 
 // Initialize with a driver (JWT or PASETO)
-driver := auth.NewJWTDriver("my-secret")
+driver := auth.NewJWTDriver(os.Getenv("AUTH_TOKEN_SECRET"))
 // OR: driver := auth.NewPasetoDriver("my-32-byte-hex-key")
 
 guard := auth.NewStatelessGuard(driver, myUserLoader)
@@ -145,3 +145,15 @@ The `auth/socialite` package provides a unified interface for OAuth2 authenticat
 1.  **Use Loaders**: Always use a `UserLoader` to fetch users from the database during authentication.
 2.  **Context Extraction**: Use `auth.UserFromContext(ctx)` in your services and controllers.
 3.  **Strict Policies**: Define granular policies for any sensitive action.
+
+## Token secret validation
+
+Scaffolding generates a fresh random SESSION_SECRET or AUTH_TOKEN_SECRET for each application. Stateless boot validates its secret with auth.ValidateTokenSecret(secret) error. JWT/PASETO drivers refuse issuance and parsing with secrets shorter than 32 characters or known scaffold placeholders. Supply a cryptographically random secret; APP_KEY validation does not validate a separate AUTH_TOKEN_SECRET.
+
+## Single-use token storage
+
+Reset and email verification tokens are consumed atomically. For multiple instances use auth.NewRedisTokenStore(client, purposePrefix, secret, ttl) and configure the broker or verifier with WithTokenStore(store) before serving. Use different prefixes for reset and verification. VerifyWithError(userID, token) returns (bool, error); brokers propagate Redis failures. The default NewTokenStore remains process-local.
+
+## JWT claim validation
+
+NewJWTDriver(secret string, options ...JWTOptions) accepts only HS256 and requires exp. JWTOptions{Issuer: "issuer", Audience: "api"} configures required issuer and audience; generated tokens include these configured claims. Existing callers may omit options, but multi-service deployments should configure both. Stateless token iat is a numeric Unix timestamp. Tokens missing expiry or using HS384/HS512 are rejected after upgrade.

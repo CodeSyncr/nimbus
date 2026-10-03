@@ -22,7 +22,10 @@ import "github.com/CodeSyncr/nimbus/plugins/admin"
 panel := admin.New(db, admin.Config{
     BrandName:   "Acme Admin",
     RoutePrefix: "/admin",                                   // default "/admin"
-    Middleware:  []router.Middleware{auth.RequireAuth(guard)}, // GATE IT — else public
+    Middleware:  []router.Middleware{auth.RequireAuth(guard)}, // loads the authenticated user
+    Authorize: func(c *http.Context) bool {
+        return auth.Can(c.Ctx(), "access-admin")
+    },
 })
 panel.AddResource(admin.Resource{
     Model:  &models.Post{},
@@ -50,7 +53,7 @@ Chainable modifiers: `.WithLabel(s)`, `.AsSortable()`, `.AsReadonly()`, `.HideFr
 - `Resource.normalize()` caches the struct type, fills slug/labels, infers fields.
 - List: `db.Model(newPtr()).Order("id DESC").Limit/Offset.Find(newSlicePtr())`, then reflect each element into display cells via `fieldStringValue` (bools → "Yes"/"No", times formatted).
 - Store/update: `setField(model, name, formValue)` converts strings to the field's kind (string/bool/int/uint/float); `db.Create` / `db.Save`. Blank password on update is skipped.
-- Form inputs are pre-rendered to `template.HTML` by `renderInput` and injected with `{{ raw (index . "html") }}` (avoids nested template directives). CSRF injected via Shield when enabled.
+- Form inputs are pre-rendered to `template.HTML` by `renderInput` and injected with `{{ raw (index . "html") }}` (avoids nested template directives). CSRF enforced by the panel using Shield.
 
 ## Views
 
@@ -59,3 +62,7 @@ Namespaced under `admin/` via `view.RegisterPluginViews("admin", ViewsFS())` in 
 **Gotcha:** the view engine escapes `{{ }}` inside `<code>`/`<pre>` blocks (treats them as literal code) — never put template actions inside those tags in plugin views.
 
 **Tests:** `plugins/admin/admin_test.go` — field inference, humanize, setField conversions, renderInput per type, a CRUD round-trip, and `TestViewsRender` (renders all three templates to catch `$`-scope / directive mistakes).
+
+## Access protection
+
+Admin now requires Config.Authorize func(*http.Context) bool. Define an access-admin policy that checks administrative permission. Missing authorization fails boot and denies direct route access. Middleware loads authentication before the callback. CSRF is always enabled for admin routes; CSRFSecret defaults to APP_KEY at boot and must match across instances. Import github.com/CodeSyncr/nimbus/http for the callback context.

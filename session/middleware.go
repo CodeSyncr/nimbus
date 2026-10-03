@@ -278,3 +278,26 @@ func (s *Session) SetFlash(key string, val any) {
 	flash[key] = val
 	s.sd.dirty = true
 }
+
+// Invalidate revokes the current session before clearing local data.
+// A storage failure is returned so logout cannot falsely report success.
+func (s *Session) Invalidate(ctx context.Context) error {
+	if s == nil || s.sd == nil {
+		return nil
+	}
+	s.sd.mu.Lock()
+	defer s.sd.mu.Unlock()
+	if err := s.sd.store.Destroy(ctx, s.sd.id); err != nil {
+		return err
+	}
+	if s.sd.staleID != "" {
+		if err := s.sd.store.Destroy(ctx, s.sd.staleID); err != nil {
+			return err
+		}
+	}
+	s.sd.data = make(map[string]any)
+	s.sd.id = ""
+	s.sd.staleID = ""
+	s.sd.dirty = true
+	return nil
+}

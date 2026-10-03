@@ -102,6 +102,9 @@ func bootAuth(app *nimbus.App) {
 }
 
 func bootStatelessAuth(app *nimbus.App) {
+	if err := auth.ValidateTokenSecret(config.StatelessToken.Secret); err != nil {
+		panic(err)
+	}
 	var driver auth.TokenDriver
 	if config.StatelessToken.Driver == "paseto" {
 		driver = auth.NewPasetoDriver(config.StatelessToken.Secret)
@@ -1603,6 +1606,9 @@ func bootAuth(app *nimbus.App) {
 }
 
 func bootStatelessAuth(app *nimbus.App) {
+	if err := auth.ValidateTokenSecret(config.StatelessToken.Secret); err != nil {
+		panic(err)
+	}
 	var driver auth.TokenDriver
 	if config.StatelessToken.Driver == "paseto" {
 		driver = auth.NewPasetoDriver(config.StatelessToken.Secret)

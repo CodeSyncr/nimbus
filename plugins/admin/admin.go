@@ -28,6 +28,8 @@ package admin
 
 import (
 	"embed"
+	"fmt"
+	nhttp "github.com/CodeSyncr/nimbus/http"
 	"io/fs"
 
 	"github.com/CodeSyncr/nimbus"
@@ -53,8 +55,12 @@ type Config struct {
 	// BrandName shown in the sidebar header. Default "Nimbus Admin".
 	BrandName string
 	// Middleware gates every panel route (e.g. an auth guard). Strongly
-	// recommended — without it the panel is public.
+	// recommended for loading the authenticated user before Authorize runs.
 	Middleware []router.Middleware
+	// Authorize is required and must check administrative permission, not just login.
+	Authorize func(*nhttp.Context) bool
+	// CSRFSecret must be shared across instances. Boot defaults it to APP_KEY.
+	CSRFSecret string
 }
 
 // Panel holds the registered resources and the database handle.
@@ -108,7 +114,15 @@ func (p *Plugin) Register(app *nimbus.App) error {
 	return nil
 }
 
-func (p *Plugin) Boot(app *nimbus.App) error { return nil }
+func (p *Plugin) Boot(app *nimbus.App) error {
+	if p.panel.cfg.Authorize == nil {
+		return fmt.Errorf("admin: an explicit Authorize callback is required")
+	}
+	if p.panel.cfg.CSRFSecret == "" && app.Config != nil {
+		p.panel.cfg.CSRFSecret = app.Config.App.Key
+	}
+	return nil
+}
 
 // ViewsFS returns the embedded admin templates for the view engine.
 func (p *Plugin) ViewsFS() fs.FS {

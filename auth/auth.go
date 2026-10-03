@@ -120,7 +120,9 @@ func (g *SessionGuard) Logout(ctx context.Context) error {
 	sess := session.FromContext(ctx)
 	if sess != nil {
 		userID, _ := sess.Get(sessionUserKey).(string)
-		sess.Delete(sessionUserKey)
+		if err := sess.Invalidate(ctx); err != nil {
+			return err
+		}
 		if userID != "" && g.loader == nil {
 			g.mu.Lock()
 			delete(g.sessions, userID)

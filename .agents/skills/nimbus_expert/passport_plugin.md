@@ -69,3 +69,7 @@ Server returns sentinel errors (`ErrInvalidClient`, `ErrInvalidGrant`, `ErrInval
 Extend `Server` in server.go and dispatch in `routes.go handleToken`. The consent screen is `Config.ConsentView` (default `passport/oauth-authorize`), receiving `client_name`, `scopes []string`, `prefix`, and `params` (carried-through hidden fields).
 
 **Tests:** `plugins/passport/server_test.go` (all grants, PKCE, rotation, revocation, scope enforcement) + `view_test.go` (consent render). Uses in-memory sqlite.
+
+## Atomic token lifecycle
+
+Authorization-code exchange and refresh rotation are transactional. Conditional consumption permits one winner; revocation and replacement issuance commit together. Any write or commit failure returns no credentials and rolls back consumption/revocation. Refresh rejects a revoked parent access token. Handle database failures as errors and never retry with credentials from a failed operation.

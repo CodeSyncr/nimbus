@@ -113,3 +113,7 @@ Rules that matter:
    wrappers do, so that `Flush`, `Hijack`, and websocket upgrades keep working.
 
 `nimbus make:middleware Auth` scaffolds `app/middleware/auth.go`.
+
+## Trusted client IP for rate limits
+
+middleware.ClientIP(request) and DefaultKeyFn ignore forwarding headers unless TrustedProxies has validated the peer. Trusted proxy chains are walked right-to-left to the first untrusted address; malformed chains fall back to the peer. RateLimit and RateLimitRedis use this canonical IP when keyFn is nil or returns empty. Ports never participate in the default key. Install TrustedProxies before rate limiting with only your actual proxy addresses.

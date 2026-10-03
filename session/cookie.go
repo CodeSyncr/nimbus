@@ -15,15 +15,27 @@ import (
 	"golang.org/x/crypto/hkdf"
 )
 
-// NewCookieStore creates a cookie-based session store.
-// Session data is encrypted in the cookie. No server-side storage; suitable for small payloads (e.g. user_id).
-// Key should be 32 random bytes for AES-256; any other length is run through
-// HKDF-SHA256 to derive a 32-byte key. Use KeyFromString(APP_KEY) for strings.
+// NewCookieStore creates encrypted sessions with a process-local validity registry.
+// Sessions are invalidated on restart. For multiple instances use
+// NewCookieStoreWithRegistry with a shared Redis or database Store.
 func NewCookieStore(key []byte) *CookieStoreImpl {
+	return NewCookieStoreWithRegistry(key, NewMemoryStore())
+}
+
+// NewCookieStoreWithRegistry stores only cookie fingerprints server-side,
+// enabling expiry, replacement and logout revocation across instances.
+// registry must be a server-side Store, not another cookie store.
+func NewCookieStoreWithRegistry(key []byte, registry Store) *CookieStoreImpl {
+	if registry == nil {
+		panic("session: cookie registry is required")
+	}
+	if _, ok := registry.(*CookieStoreImpl); ok {
+		panic("session: cookie registry must be server-side")
+	}
 	if len(key) != 32 {
 		key = deriveKey(key)
 	}
-	return &CookieStoreImpl{key: key}
+	return &CookieStoreImpl{key: key, registry: registry}
 }
 
 // deriveKey derives a 32-byte AES-256 key from secret using HKDF-SHA256 with
@@ -43,11 +55,22 @@ func deriveKey(secret []byte) []byte {
 }
 
 type CookieStoreImpl struct {
-	key []byte
+	key      []byte
+	registry Store
+}
+
+type cookiePayload struct {
+	Version   int            `json:"v"`
+	ExpiresAt int64          `json:"expires_at"`
+	Data      map[string]any `json:"data"`
+}
+
+func cookieFingerprint(id string) string {
+	h := sha256.Sum256([]byte(id))
+	return "cookie:" + base64.RawURLEncoding.EncodeToString(h[:])
 }
 
 func (s *CookieStoreImpl) Get(ctx context.Context, id string) (map[string]any, error) {
-	// id is the cookie value
 	if id == "" {
 		return nil, nil
 	}
@@ -55,26 +78,50 @@ func (s *CookieStoreImpl) Get(ctx context.Context, id string) (map[string]any, e
 	if err != nil {
 		return nil, nil
 	}
-	var data map[string]any
-	if err := json.Unmarshal(dec, &data); err != nil {
+	var payload cookiePayload
+	if json.Unmarshal(dec, &payload) != nil || payload.Version != 1 ||
+		payload.ExpiresAt <= time.Now().UnixNano() {
 		return nil, nil
 	}
-	return data, nil
+	active, err := s.registry.Get(ctx, cookieFingerprint(id))
+	if err != nil {
+		return nil, err
+	}
+	if active == nil {
+		return nil, nil
+	}
+	return payload.Data, nil
 }
 
 func (s *CookieStoreImpl) Set(ctx context.Context, id string, data map[string]any, maxAge time.Duration) (string, error) {
-	enc, err := s.encrypt(data)
+	if maxAge <= 0 {
+		return "", fmt.Errorf("session: cookie lifetime must be positive")
+	}
+	enc, err := s.encrypt(cookiePayload{Version: 1, ExpiresAt: time.Now().Add(maxAge).UnixNano(), Data: data})
 	if err != nil {
 		return "", err
+	}
+	fingerprint := cookieFingerprint(enc)
+	if _, err := s.registry.Set(ctx, fingerprint, map[string]any{"active": true}, maxAge); err != nil {
+		return "", err
+	}
+	if id != "" {
+		if err := s.Destroy(ctx, id); err != nil {
+			_ = s.registry.Destroy(ctx, fingerprint)
+			return "", err
+		}
 	}
 	return enc, nil
 }
 
 func (s *CookieStoreImpl) Destroy(ctx context.Context, id string) error {
-	return nil
+	if id == "" {
+		return nil
+	}
+	return s.registry.Destroy(ctx, cookieFingerprint(id))
 }
 
-func (s *CookieStoreImpl) encrypt(data map[string]any) (string, error) {
+func (s *CookieStoreImpl) encrypt(data any) (string, error) {
 	raw, err := json.Marshal(data)
 	if err != nil {
 		return "", err

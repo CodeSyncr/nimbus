@@ -200,6 +200,12 @@ func (s *Server) IssueAuthCode(ctx context.Context, req *AuthorizeRequest, userI
 // ExchangeAuthCode runs the authorization_code grant: validates the code,
 // client, redirect, and PKCE verifier, then issues access + refresh tokens.
 func (s *Server) ExchangeAuthCode(ctx context.Context, clientID, clientSecret, code, redirectURI, codeVerifier string) (*TokenResponse, error) {
+	return s.tokenTransaction(ctx, func(tx *Server) (*TokenResponse, error) {
+		return tx.exchangeAuthCode(ctx, clientID, clientSecret, code, redirectURI, codeVerifier)
+	})
+}
+
+func (s *Server) exchangeAuthCode(ctx context.Context, clientID, clientSecret, code, redirectURI, codeVerifier string) (*TokenResponse, error) {
 	client, err := s.authenticateClient(ctx, clientID, clientSecret)
 	if err != nil {
 		return nil, err
@@ -218,9 +224,14 @@ func (s *Server) ExchangeAuthCode(ctx context.Context, clientID, clientSecret, c
 	if !verifyPKCE(ac.CodeChallenge, ac.CodeChallengeMethod, codeVerifier) {
 		return nil, ErrInvalidGrant
 	}
-	// Single-use: mark consumed before issuing.
-	if err := s.db.WithContext(ctx).Model(&ac).Update("used", true).Error; err != nil {
-		return nil, err
+	// Compare-and-swap consumption and token issuance share one transaction.
+	result := s.db.WithContext(ctx).Model(&ac).
+		Where("used = ? AND expires_at > ?", false, time.Now()).Update("used", true)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	if result.RowsAffected != 1 {
+		return nil, ErrInvalidGrant
 	}
 	return s.issueTokens(ctx, client.ClientID, ac.UserID, strings.Fields(ac.Scopes), true)
 }
@@ -249,6 +260,12 @@ func (s *Server) ClientCredentials(ctx context.Context, clientID, clientSecret, 
 
 // Refresh runs the refresh_token grant, rotating the refresh token.
 func (s *Server) Refresh(ctx context.Context, clientID, clientSecret, refreshToken, scope string) (*TokenResponse, error) {
+	return s.tokenTransaction(ctx, func(tx *Server) (*TokenResponse, error) {
+		return tx.refresh(ctx, clientID, clientSecret, refreshToken, scope)
+	})
+}
+
+func (s *Server) refresh(ctx context.Context, clientID, clientSecret, refreshToken, scope string) (*TokenResponse, error) {
 	client, err := s.authenticateClient(ctx, clientID, clientSecret)
 	if err != nil {
 		return nil, err
@@ -268,7 +285,7 @@ func (s *Server) Refresh(ctx context.Context, clientID, clientSecret, refreshTok
 	if err := s.db.WithContext(ctx).First(&old, rt.AccessTokenID).Error; err != nil {
 		return nil, ErrInvalidGrant
 	}
-	if old.ClientID != client.ClientID {
+	if old.ClientID != client.ClientID || old.Revoked {
 		return nil, ErrInvalidGrant
 	}
 	// Optionally narrow scopes; never widen them.
@@ -283,8 +300,21 @@ func (s *Server) Refresh(ctx context.Context, clientID, clientSecret, refreshTok
 		scopes = requested
 	}
 	// Rotate: revoke the old access + refresh tokens, then issue a new pair.
-	s.db.WithContext(ctx).Model(&old).Update("revoked", true)
-	s.db.WithContext(ctx).Model(&rt).Update("revoked", true)
+	result := s.db.WithContext(ctx).Model(&rt).
+		Where("revoked = ? AND expires_at > ?", false, time.Now()).Update("revoked", true)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	if result.RowsAffected != 1 {
+		return nil, ErrInvalidGrant
+	}
+	result = s.db.WithContext(ctx).Model(&old).Where("revoked = ?", false).Update("revoked", true)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	if result.RowsAffected != 1 {
+		return nil, ErrInvalidGrant
+	}
 	return s.issueTokens(ctx, client.ClientID, old.UserID, scopes, true)
 }
 
@@ -387,4 +417,18 @@ func verifyPKCE(challenge, method, verifier string) bool {
 	default: // "plain"
 		return subtle.ConstantTimeCompare([]byte(verifier), []byte(challenge)) == 1
 	}
+}
+
+// tokenTransaction never returns bearer credentials unless every state change commits.
+func (s *Server) tokenTransaction(ctx context.Context, run func(*Server) (*TokenResponse, error)) (*TokenResponse, error) {
+	var response *TokenResponse
+	err := s.db.WithContext(ctx).Transaction(func(db *lucid.DB) error {
+		var err error
+		response, err = run(&Server{db: db, cfg: s.cfg})
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return response, nil
 }
