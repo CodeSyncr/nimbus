@@ -6,6 +6,49 @@ This project follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [1.12.0] - 2026-10-04
+
+### Security
+
+- **`auth`: single-use tokens.** Password-reset and email-verification tokens
+  are consumed atomically on first use. `auth.NewRedisTokenStore` shares them
+  across instances; `WithTokenStore` sets one on the broker and verifier.
+  Logout invalidates the whole session.
+- **`auth`: stricter JWTs.** Only HS256 is accepted, every token must carry an
+  expiry, and `auth.JWTOptions{Issuer, Audience}` binds and checks `iss` and
+  `aud`. PASETO `iat` is now a number.
+- **`session`: revocable cookie sessions.** Cookie sessions keep a server-side
+  fingerprint registry, so expiry, replacement and logout revoke them.
+- **`middleware`: trusted client IPs.** Rate limiting keys on
+  `middleware.ClientIP`, which uses `X-Forwarded-For` / `X-Real-IP` only after
+  `TrustedProxies` has verified the peer and walked the proxy chain.
+- **`plugins/admin`: no public panel.** The panel requires an `Authorize`
+  callback that checks administrative permission, and guards its routes with
+  CSRF (`CSRFSecret`, defaulting to `APP_KEY`).
+- **`plugins/passport`: no double use.** Authorization-code exchange and
+  refresh-token rotation run in one transaction with compare-and-swap
+  consumption.
+- **`nimbus new`:** generated apps get random session and token secrets and
+  refuse to boot with a weak one.
+
+### Upgrading
+
+Four changes alter behaviour for existing apps:
+
+1. **Admin plugin:** `Boot` fails without `Config.Authorize`. Add a callback
+   that checks the user is an administrator.
+2. **Token secrets:** `auth.NewJWTDriver` and `auth.NewPasetoDriver` refuse
+   secrets under 32 characters or the scaffold placeholder
+   (`auth.ValidateTokenSecret`). Tokens already issued by the JWT driver stay
+   valid (they were HS256 with an expiry).
+3. **Rate limiting behind a proxy:** without the `TrustedProxies` middleware,
+   requests are keyed by the socket address, so every visitor behind a proxy
+   shares one bucket. Add `TrustedProxies` with your proxy's ranges.
+4. **Cookie sessions end on restart:** `session.NewCookieStore` keeps its
+   registry in memory. Apps with several instances, or that must keep sessions
+   across deploys, use `session.NewCookieStoreWithRegistry` with a Redis or
+   database store.
+
 ## [1.11.0] - 2026-10-04
 
 ### Added
