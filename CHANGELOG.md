@@ -6,6 +6,27 @@ This project follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [1.13.0-rc.1] - 2026-10-05
+
+Pre-release.
+
+### Added
+
+- **`plugins/ai`: progress while a tool's arguments are written.**
+  `StreamChunk` gains `ToolArgsDelta` and `ToolName`: each piece of a tool
+  call's arguments as the model writes them, on Anthropic and OpenAI streams.
+  The finished call still arrives whole in `ToolCalls`; a consumer that
+  ignores the new fields loses nothing. A model writing a large file as a
+  tool argument was otherwise silent for as long as that took.
+
+### Fixed
+
+- **`plugins/ai`: usage of streamed Anthropic-format replies.** Input and
+  cache-read token counts sent in `message_delta` (as relays in front of other
+  models do, with zeros in `message_start`) were dropped, so a streamed reply
+  reported no input tokens and no cache reads. Whichever event carries them is
+  now read.
+
 ## [1.12.0] - 2026-10-04
 
 ### Security
