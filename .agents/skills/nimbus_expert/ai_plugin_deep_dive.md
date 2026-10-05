@@ -73,3 +73,19 @@ Built-in support for OpenTelemetry tracing and cost tracking with budget alerts.
 2.  **Granular Tools**: Define specialized tools rather than general-purpose ones.
 3.  **Guardrails**: Apply `ai.Guardrails` to validate and filter the AI's output.
 4.  **Cost Monitoring**: Enable cost tracking in production to stay within budget.
+
+### Website Studio application architecture
+
+In `nimbus-starter`, Vani generation uses a persisted `sites.Plan` with `PlanPage.Scenes`
+(narrative beat, visual, layout, motion, evidence, transition). `generationGuidance`
+provides one bounded creative contract rather than keyword-selected skill bundles.
+The static HTML runtime uses locally bundled Motion JavaScript, not React JSX.
+
+Studio chat uses the same concise instructions in lean and cached modes. Per-turn
+results remain stable for prefix reuse. `memory.RecallSite` scopes recalled facts to
+sessions owned by the user for the current website; `sites.ProjectMemory` carries
+bounded design intent, not claims about current file contents. Context fingerprints
+include changed profile and project intent. Compaction sees unsummarized history
+before the replay cap and accounts for tool payloads. Cache counts are telemetry,
+not evidence that an unreported cache is unavailable. Full application notes and
+opt-in evaluation commands: `nimbus-starter/docs/engineering/vani-architecture.md`.
