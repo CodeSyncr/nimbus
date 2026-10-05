@@ -234,6 +234,9 @@ func (p *openAIProvider) Stream(ctx context.Context, req *GenerateRequest) (*Str
 					pending[idx].Name = tc.Function.Name
 				}
 				pendingArgs[idx].WriteString(tc.Function.Arguments)
+				if tc.Function.Arguments != "" {
+					chunks <- StreamChunk{ToolArgsDelta: tc.Function.Arguments, ToolName: pending[idx].Name}
+				}
 			}
 		}
 	}()

@@ -363,9 +363,7 @@ type anthropicStreamEvent struct {
 	Message struct {
 		Usage anthropicUsage `json:"usage"`
 	} `json:"message"`
-	Usage struct {
-		OutputTokens int `json:"output_tokens"`
-	} `json:"usage"`
+	Usage anthropicUsage `json:"usage"`
 }
 
 // anthropicStreamBlock accumulates one content block of a stream.
@@ -456,6 +454,9 @@ func (p *anthropicProvider) Stream(ctx context.Context, req *GenerateRequest) (*
 				case "input_json_delta":
 					if b != nil {
 						b.buf.WriteString(ev.Delta.PartialJSON)
+						if ev.Delta.PartialJSON != "" && !send(StreamChunk{ToolArgsDelta: ev.Delta.PartialJSON, ToolName: b.name}) {
+							return
+						}
 					}
 				case "thinking_delta":
 					if b != nil {
@@ -491,6 +492,14 @@ func (p *anthropicProvider) Stream(ctx context.Context, req *GenerateRequest) (*
 					return
 				}
 			case "message_delta":
+				// Anthropic counts the input in message_start; relays in
+				// front of other models send zeros there and the real
+				// input and cache counts here, at the end. Whichever
+				// event has them is believed.
+				if late := ev.Usage.toUsage(); late.PromptTokens > usage.PromptTokens {
+					usage.PromptTokens = late.PromptTokens
+					usage.CacheReadTokens, usage.CacheWriteTokens = late.CacheReadTokens, late.CacheWriteTokens
+				}
 				usage.CompletionTokens = ev.Usage.OutputTokens
 				usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
 			case "message_stop":

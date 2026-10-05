@@ -206,6 +206,13 @@ type StreamChunk struct {
 	Reasoning []ReasoningBlock `json:"reasoning,omitempty"`
 	Usage     *Usage           `json:"usage,omitempty"`
 	Done      bool             `json:"done,omitempty"`
+	// ToolArgsDelta is a piece of a tool call's arguments as the model
+	// writes them, with the tool's name in ToolName. It is progress only:
+	// the finished call still arrives whole in ToolCalls, and a consumer
+	// that ignores these loses nothing. A model writing a large file as a
+	// tool argument is otherwise silent for as long as that takes.
+	ToolArgsDelta string `json:"tool_args_delta,omitempty"`
+	ToolName      string `json:"tool_name,omitempty"`
 }
 
 // StreamResponse wraps a streaming channel plus a done channel.
