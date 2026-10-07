@@ -6,6 +6,25 @@ This project follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [1.12.2] - 2026-10-08
+
+### Fixed
+
+- **`plugins/ai`: usage of streamed OpenAI-format replies.** A streamed chat
+  completion reported no token counts at all: the request did not ask for
+  them and the stream's `usage` was not read. The request now sets
+  `stream_options.include_usage`, and the stream ends with a
+  `StreamChunk{Usage, Done}` carrying prompt, completion, cached and
+  reasoning tokens. Servers that send a running count on every chunk and the
+  total last (Cloudflare Workers AI) are read correctly: the largest count is
+  the answer's.
+- **`plugins/ai`: OpenAI's reasoning models without an effort.** `gpt-5*` and
+  the o-series (`o1`, `o3`, `o4`) refuse `max_tokens` and a temperature other
+  than their own. They were sent both unless the caller set `Reasoning`, so a
+  plain request to them failed. Requests to those models (named with or
+  without a gateway's `openai/` prefix) now send `max_completion_tokens` and
+  no temperature. Other models and other servers' models are unchanged.
+
 ## [1.12.1] - 2026-10-05
 
 ### Added

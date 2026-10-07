@@ -200,16 +200,21 @@ func (p *openAIProvider) Stream(ctx context.Context, req *GenerateRequest) (*Str
 			chunks <- StreamChunk{ToolCalls: calls}
 		}
 
+		var usage *Usage
 		for {
 			response, err := stream.Recv()
 			if err == io.EOF {
 				flushToolCalls()
+				if usage != nil {
+					chunks <- StreamChunk{Usage: usage, Done: true}
+				}
 				return
 			}
 			if err != nil {
 				errCh <- fmt.Errorf("ai: openai stream recv: %w", err)
 				return
 			}
+			usage = openAIStreamUsage(usage, response.Usage)
 			if len(response.Choices) == 0 {
 				continue
 			}
@@ -474,6 +479,50 @@ func openAIChatRequest(req *GenerateRequest, model string, messages []openai.Cha
 		r.MaxCompletionTokens = maxTokens
 		r.MaxTokens = 0
 		r.Temperature = 0
+	} else if openAIReasoningModel(model) {
+		// These refuse max_tokens and any temperature but their own,
+		// whether or not the caller asked for an effort.
+		r.MaxCompletionTokens = maxTokens
+		r.MaxTokens = 0
+		r.Temperature = 0
+	}
+	if stream {
+		// The counts of a streamed answer come in a last chunk, and only
+		// when asked for.
+		r.StreamOptions = &openai.StreamOptions{IncludeUsage: true}
 	}
 	return r
+}
+
+// openAIReasoningModel says a model is one of OpenAI's that thinks before
+// it answers (the o-series, GPT-5 and after), going by its name, with or
+// without a gateway's "openai/" in front. Those take
+// max_completion_tokens in place of max_tokens and no temperature.
+func openAIReasoningModel(model string) bool {
+	m := strings.ToLower(strings.TrimSpace(model))
+	m = strings.TrimPrefix(m, "openai/")
+	for _, p := range []string{"gpt-5", "gpt-6", "o1", "o3", "o4"} {
+		if strings.HasPrefix(m, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// openAIStreamUsage keeps the fullest count a stream has reported. OpenAI
+// sends one, in a last chunk with no choices; some compatible servers send
+// a running count on every chunk and the total at the end. Either way the
+// largest is the answer's.
+func openAIStreamUsage(have *Usage, u *openai.Usage) *Usage {
+	if u == nil || (have != nil && u.TotalTokens <= have.TotalTokens) || u.TotalTokens == 0 {
+		return have
+	}
+	got := &Usage{PromptTokens: u.PromptTokens, CompletionTokens: u.CompletionTokens, TotalTokens: u.TotalTokens}
+	if d := u.PromptTokensDetails; d != nil {
+		got.CacheReadTokens = d.CachedTokens
+	}
+	if d := u.CompletionTokensDetails; d != nil {
+		got.ReasoningTokens = d.ReasoningTokens
+	}
+	return got
 }
