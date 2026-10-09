@@ -6,6 +6,26 @@ This project follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [1.13.0] - 2026-10-09
+
+### Added
+
+- **`plugins/insights`: how an app is doing, from the inside.** One line,
+  `insights.Install(app)`, before the app's middleware and routes, and the
+  app collects: memory and the garbage collector sampled every ten seconds
+  (half an hour kept); each route's count, errors, average, 95th percentile
+  and the queries its requests make; slow requests; errors and panics with
+  their stacks; every query by its shape (values taken out) with time,
+  rows and the line of the app it is run from; slow and failed queries as
+  they were run; a query repeated within one request (N+1); the connection
+  pool; and, asked for by name, what holds the heap and what the goroutines
+  wait on. It also counts visits (page views, visitors, pages, referrers,
+  countries, devices) without cookies, written to `storage/insights` a day
+  at a time. All of it is read as JSON at `/_nimbus/insights` by a caller
+  that sends the app's `NIMBUS_INSIGHTS_TOKEN`; without that variable
+  nothing is collected and the endpoint does not exist. Nimbus Cloud reads
+  it for its Insights panel.
+
 ## [1.12.2] - 2026-10-08
 
 ### Fixed
