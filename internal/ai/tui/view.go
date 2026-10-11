@@ -177,9 +177,18 @@ func renderFooter(m *Model) string {
 		var hints string
 		if m.Mode.busy() {
 			hints = sMuted.Render("Esc") + sDim.Render(" interrupt   ") + sMuted.Render("PgUp/PgDn") + sDim.Render(" scroll")
-			if m.QueuedPrompt != "" {
+			waiting := 0
+			if m.Agent != nil {
+				waiting = m.Agent.SteerWaiting()
+			}
+			switch {
+			case waiting > 0:
+				hints += sDim.Render("   ") + sYellow.Render(fmt.Sprintf("%d to read at the next step", waiting))
+			case m.QueuedPrompt != "":
 				hints += sDim.Render("   ") + sYellow.Render("1 queued")
-			} else {
+			case m.Mode == ModeExecuting:
+				hints += sDim.Render("   type to add to the task")
+			default:
 				hints += sDim.Render("   type to queue a follow-up")
 			}
 		} else {

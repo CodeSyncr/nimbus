@@ -1,6 +1,6 @@
 // Package skillmd parses SKILL.md files: YAML frontmatter with a name and
 // description, then the skill's instructions. It is shared by the AI SDK
-// (plugins/ai) and the `nimbus ai` CLI so both read skills the same way,
+// (plugins/ai) and the `nimbus vani` CLI so both read skills the same way,
 // without the CLI depending on the SDK.
 package skillmd
 

@@ -93,7 +93,7 @@ func scanSkillsDirectory(dir string, source string, out map[string]Skill) {
 }
 
 // parseSkillHeader extracts the name and description for the lightweight
-// index. Frontmatter is parsed by the AI SDK's ParseSkill, so `nimbus ai`
+// index. Frontmatter is parsed by the AI SDK's ParseSkill, so `nimbus vani`
 // and apps read SKILL.md the same way (including multi-line YAML
 // descriptions); a file without frontmatter is still indexed by its name.
 func parseSkillHeader(content, path, source string) Skill {

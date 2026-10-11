@@ -40,6 +40,9 @@ type AgentCallbacks struct {
 	OnExecutionCompleted func(summary string)
 	// OnUsage reports the tokens a turn consumed and the session total.
 	OnUsage func(turn *TokenUsage, session SessionUsage)
+	// OnSteered reports that a message typed while the agent was working has
+	// been put in front of the model. See Agent.Steer.
+	OnSteered func(text string)
 }
 
 // Loop limits.
@@ -84,6 +87,12 @@ type Agent struct {
 	// reclaimed nothing, so the next one waits for real growth instead of
 	// paying for a summary every iteration. Zero means not stalled.
 	compactStalledAt int
+	// lastStop is why the most recent model turn ended, as the server said.
+	lastStop string
+	// steer holds messages typed while a turn is running, until the loop
+	// reaches a point where the model can be shown them. See Steer.
+	steerMu sync.Mutex
+	steer   []string
 }
 
 // NewAgent creates a new Nimbus AI Agent.
@@ -224,6 +233,9 @@ func (a *Agent) turn(ctx context.Context, mode TurnMode, messages []Message, too
 		Tools:    tools,
 		Plan:     plan,
 		Context:  a.Context,
+		// Only the conversational loop keeps one message list for a whole
+		// session; the staged modes build a fresh one per phase.
+		StableHistory: mode == TurnModeAgent && a.Session != nil && a.Session.Usage.CacheSeen(),
 	}, a.delta())
 	if err != nil {
 		if errors.Is(err, ErrTurnUnsupported) {
@@ -238,6 +250,7 @@ func (a *Agent) turn(ctx context.Context, mode TurnMode, messages []Message, too
 		return nil, err
 	}
 	a.turnSupport = 1
+	a.lastStop = resp.StopReason
 
 	// One place to account for spend: every model turn passes through here.
 	if a.Session != nil {
@@ -769,6 +782,9 @@ func (a *Agent) runToolGroup(ctx context.Context, group []ContentBlock, into []t
 // callbacks: those are the caller's, so that they stay ordered even when this
 // runs on several goroutines at once.
 func (a *Agent) runOneTool(ctx context.Context, tb ContentBlock) toolOutcome {
+	if a.cutOff(tb) {
+		return toolOutcome{err: errors.New(cutOffMessage)}
+	}
 	if !isSkillTool(tb.Name) {
 		out, diff, err := a.Tools.ExecuteTool(ctx, tb.Name, tb.Input)
 		return toolOutcome{out: out, diff: diff, err: err}

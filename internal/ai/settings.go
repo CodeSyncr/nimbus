@@ -13,7 +13,7 @@ import (
 /*
 Settings.
 
-Everything configurable about `nimbus ai` used to live in flags and
+Everything configurable about `nimbus vani` used to live in flags and
 environment variables: fine for a one-off run, useless for a preference. There
 was nowhere to say "always verify builds in this project" or "never auto
 compact" and have it stick, and no way to see what the current answers were.

@@ -36,7 +36,11 @@ type AICommand struct {
 	continueLast bool
 }
 
-func (c *AICommand) Name() string { return "ai" }
+func (c *AICommand) Name() string { return "vani" }
+
+// Aliases keeps the command's first name working: it shipped as `nimbus ai`,
+// and scripts and habits written against that should not break on upgrade.
+func (c *AICommand) Aliases() []string { return []string{"ai"} }
 func (c *AICommand) Description() string {
 	return "AI Copilot — plan and execute architectural code changes (powered by nimbusgo.space)"
 }
@@ -156,6 +160,18 @@ func (c *AICommand) Run(ctx *cli.Context) error {
 		}
 	}
 
+	// MCP servers the user listed in their settings. They are connected
+	// before the first turn so the model's tools are the same for the whole
+	// session; one that does not answer is left out and reported.
+	if len(settings.MCPServers) > 0 {
+		fmt.Fprintln(ctx.Stdout, lipgloss.NewStyle().Foreground(lipgloss.Color("#94a3b8")).Render("Connecting MCP servers…"))
+		tools.MCP = ai.ConnectMCPServers(context.Background(), settings.MCPServers)
+		defer tools.MCP.Close()
+		if line := tools.MCP.Summary(); line != "" {
+			fmt.Fprintln(ctx.Stdout, line)
+		}
+	}
+
 	// 6. Initialize Agent. ApplySettings is what makes the settings screen
 	// mean something: it pushes the resolved values into the agent, the
 	// session's context limits, and the tool executor's permission mode.
@@ -178,6 +194,9 @@ func (c *AICommand) Run(ctx *cli.Context) error {
 	// The default flow is one conversation in which the model decides what a
 	// request needs. --plan-only / --dry-run, and the plan_first setting, opt
 	// into the staged pipeline with its reviewable plan.
+	if line := tools.MCP.Summary(); line != "" {
+		model.Notice(line)
+	}
 	model.PlanFirst = settings.PlanFirst
 	model.ExpandDiffs = settings.ExpandDiffs
 
@@ -200,7 +219,7 @@ func (c *AICommand) Run(ctx *cli.Context) error {
 			if usage := m.Agent.Session.Usage.Summary(); usage != "" {
 				fmt.Fprintf(ctx.Stdout, "\n📊 %s\n", usage)
 			}
-			fmt.Fprintf(ctx.Stdout, "\n⚡ Session saved. Resume anytime with: nimbus ai --resume %s\n\n", m.Agent.Session.ID)
+			fmt.Fprintf(ctx.Stdout, "\n⚡ Session saved. Resume anytime with: nimbus vani --resume %s\n\n", m.Agent.Session.ID)
 		}
 	}
 
@@ -227,8 +246,8 @@ func (c *AICommand) listSessions(ctx *cli.Context) error {
 	for _, s := range sessions {
 		fmt.Fprintln(ctx.Stdout, s.Describe(now))
 	}
-	fmt.Fprintf(ctx.Stdout, "\nResume one with:  nimbus ai --resume %s\n", sessions[0].ID)
-	fmt.Fprintf(ctx.Stdout, "Or the latest with:  nimbus ai --continue\n\n")
+	fmt.Fprintf(ctx.Stdout, "\nResume one with:  nimbus vani --resume %s\n", sessions[0].ID)
+	fmt.Fprintf(ctx.Stdout, "Or the latest with:  nimbus vani --continue\n\n")
 	return nil
 }
 

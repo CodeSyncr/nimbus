@@ -122,7 +122,7 @@ type Model struct {
 	CurrentQuestionIdx int
 	PendingApproval    *pendingApproval
 	// PlanFirst routes requests through the staged plan → approve → execute
-	// pipeline instead of the conversational loop (nimbus ai --plan-only).
+	// pipeline instead of the conversational loop (nimbus vani --plan-only).
 	PlanFirst    bool
 	SessionUsage ai.SessionUsage
 	// ExpandDiffs shows full diffs instead of the collapsed change summary,
@@ -377,6 +377,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.SessionUsage = msg.session
 		return m, m.listenForExecEventsCmd()
 
+	case steeredMsg:
+		// The model has now been shown it: it is part of the conversation.
+		m.History = append(m.History, msg.text)
+		m.HistoryIndex = len(m.History)
+		m.say(ChatItem{Role: "user", Content: msg.text, Timestamp: time.Now()})
+		m.updateViewportContent()
+		return m, m.listenForExecEventsCmd()
+
 	case approvalRequestMsg:
 		prev := m.Mode
 		if prev == ModeCommandApproval {
@@ -446,9 +454,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case tea.KeyEsc:
 				// Interrupting hands back whatever was being typed, so a
 				// redirection can be edited rather than retyped.
-				if m.QueuedPrompt != "" {
-					m.TextInput.SetValue(m.QueuedPrompt)
-					m.QueuedPrompt = ""
+				if waiting := m.takeWaiting(); waiting != "" {
+					m.TextInput.SetValue(waiting)
 					m.growInput()
 				}
 				m.interrupt()
@@ -466,14 +473,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if val == "" {
 					return m, nil
 				}
-				m.QueuedPrompt = val
 				m.TextInput.Reset()
 				m.growInput()
-				m.say(ChatItem{
-					Role:      "system",
-					Content:   "Queued — I'll pick this up when the current task finishes: " + val,
-					Timestamp: time.Now(),
-				})
+				// While the agent is working, what is typed goes to it and
+				// is read before its next step, so the work carries on with
+				// it in mind. Planning has no such step to read it at, so
+				// there it waits for the plan, as before. Several messages
+				// are all kept: the old single slot held only the last.
+				if m.Mode == ModeExecuting && m.Agent != nil {
+					m.Agent.Steer(val)
+					m.say(ChatItem{
+						Role:      "system",
+						Content:   "Added — I'll read this before my next step: " + val,
+						Timestamp: time.Now(),
+					})
+				} else {
+					m.QueuedPrompt = strings.TrimSpace(m.QueuedPrompt + "\n\n" + val)
+					m.say(ChatItem{
+						Role:      "system",
+						Content:   "Queued — I'll pick this up when the current task finishes: " + val,
+						Timestamp: time.Now(),
+					})
+				}
 				m.updateViewportContent()
 				return m, nil
 			}
@@ -823,6 +844,9 @@ func (m *Model) handleSlashCommand(val string) (handled, quit bool, cmd tea.Cmd)
 	case "/context":
 		m.say(ChatItem{Role: "assistant", Content: m.Agent.Context.FormatSystemContext(), Timestamp: time.Now()})
 		return true, false, nil
+	case "/mcp":
+		m.say(ChatItem{Role: "system", Content: mcpReport(m.Agent), Timestamp: time.Now()})
+		return true, false, nil
 	case "/settings", "/config":
 		m.openSettings()
 		return true, false, nil
@@ -860,7 +884,7 @@ func (m *Model) handleSlashCommand(val string) (handled, quit bool, cmd tea.Cmd)
 				}
 				sb.WriteString(marker + s.Describe(now) + "\n")
 			}
-			sb.WriteString("\nResume one with:  nimbus ai --resume <id>")
+			sb.WriteString("\nResume one with:  nimbus vani --resume <id>")
 		}
 		m.say(ChatItem{Role: "system", Content: strings.TrimRight(sb.String(), "\n"), Timestamp: time.Now()})
 		return true, false, nil
@@ -872,7 +896,7 @@ func (m *Model) handleSlashCommand(val string) (handled, quit bool, cmd tea.Cmd)
 		if mem := s.ConversationSummary(); mem != "" {
 			sb.WriteString(mem)
 		}
-		sb.WriteString(fmt.Sprintf("\nResume later with: nimbus ai --resume %s", s.ID))
+		sb.WriteString(fmt.Sprintf("\nResume later with: nimbus vani --resume %s", s.ID))
 		m.say(ChatItem{Role: "system", Content: sb.String(), Timestamp: time.Now()})
 		return true, false, nil
 	}
@@ -1094,6 +1118,7 @@ func (m *Model) wireAgentCallbacks() (chan tea.Msg, context.Context) {
 		OnUsage: func(turn *ai.TokenUsage, session ai.SessionUsage) {
 			ch <- usageMsg{session: session}
 		},
+		OnSteered: func(text string) { ch <- steeredMsg{text: text} },
 	}
 
 	// A flagged command pauses the run and asks. This runs on the agent's
@@ -1182,6 +1207,50 @@ func (m *Model) show(item ChatItem) {
 // say shows a line and records it in the session transcript, so reopening the
 // session shows the conversation as it happened — including the notices that
 // never go to the model.
+// Notice puts a line in the transcript before the session starts: what was
+// set up for it that the user should know about.
+func (m *Model) Notice(text string) {
+	m.say(ChatItem{Role: "system", Content: text, Timestamp: time.Now()})
+}
+
+// mcpReport is what /mcp shows: each configured server, whether it is
+// connected, and the tools it gave.
+func mcpReport(agent *ai.Agent) string {
+	const how = "Add one under \"mcp_servers\" in ~/.nimbus/settings.json (every project) or .nimbus/settings.local.json (this one), then start a new session:\n" +
+		"  \"21st\": { \"url\": \"https://21st.dev/api/mcp\", \"headers\": { \"x-api-key\": \"${API_KEY_21ST}\" } }\n" +
+		"  \"files\": { \"command\": \"npx\", \"args\": [\"-y\", \"@modelcontextprotocol/server-filesystem\", \".\"] }\n" +
+		"${NAME} is read from your environment, so a key need not be written in the file."
+	var set *ai.MCPSet
+	if agent != nil && agent.Tools != nil {
+		set = agent.Tools.MCP
+	}
+	status := set.Status()
+	if len(status) == 0 {
+		return "No MCP servers are connected.\n\n" + how
+	}
+	var sb strings.Builder
+	sb.WriteString("MCP servers\n")
+	for _, s := range status {
+		switch {
+		case s.Off:
+			sb.WriteString(fmt.Sprintf("  ○ %s — disabled in settings\n", s.Name))
+		case s.Err != nil:
+			sb.WriteString(fmt.Sprintf("  ✗ %s — not connected: %v\n", s.Name, s.Err))
+		default:
+			trust := "asks before a call its server does not mark read-only"
+			if s.Trust {
+				trust = "trusted: calls run without asking"
+			}
+			sb.WriteString(fmt.Sprintf("  ● %s — %d tools (%s)\n      %s\n", s.Name, len(s.Tools), trust, strings.Join(s.Tools, ", ")))
+		}
+		if s.Where != "" {
+			sb.WriteString("      " + s.Where + "\n")
+		}
+	}
+	sb.WriteString("\n" + how)
+	return strings.TrimRight(sb.String(), "\n")
+}
+
 func (m *Model) say(item ChatItem) {
 	if item.Timestamp.IsZero() {
 		item.Timestamp = time.Now()
@@ -1209,11 +1278,25 @@ func (m *Model) updateStoredDiff(item ChatItem) {
 	}
 }
 
+// takeWaiting returns, and clears, everything typed mid-task that the model
+// has not been shown: what the agent was handed but had no step left to read
+// it at, then what was queued during planning.
+func (m *Model) takeWaiting() string {
+	var parts []string
+	if m.Agent != nil {
+		parts = append(parts, m.Agent.TakeSteer()...)
+	}
+	if q := strings.TrimSpace(m.QueuedPrompt); q != "" {
+		parts = append(parts, q)
+	}
+	m.QueuedPrompt = ""
+	return strings.TrimSpace(strings.Join(parts, "\n\n"))
+}
+
 // dispatchQueued sends a message typed while the agent was working, now that
 // the turn has finished. Returns nil when nothing is waiting.
 func (m *Model) dispatchQueued() tea.Cmd {
-	queued := strings.TrimSpace(m.QueuedPrompt)
-	m.QueuedPrompt = ""
+	queued := m.takeWaiting()
 	if queued == "" {
 		return nil
 	}
@@ -1271,6 +1354,10 @@ type compactDoneMsg struct {
 
 // usageMsg carries the running token/cost total reported by the server.
 type usageMsg struct{ session ai.SessionUsage }
+
+// steeredMsg reaches the TUI when a message typed mid-task has been shown to
+// the model.
+type steeredMsg struct{ text string }
 
 // approvalRequestMsg reaches the TUI when the agent hits a flagged command.
 // The agent's goroutine blocks on reply until a key is pressed.

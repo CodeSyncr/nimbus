@@ -259,7 +259,7 @@ func Login(ctx *cli.Context, serverURL string) (*Credentials, error) {
 
     <div class="terminal-tip">
       <span class="label">Ready in terminal:</span>
-      <span>$ <span class="cmd">nimbus ai "generate blog controller"</span></span>
+      <span>$ <span class="cmd">nimbus vani "generate blog controller"</span></span>
     </div>
 
     <div class="btn-group">

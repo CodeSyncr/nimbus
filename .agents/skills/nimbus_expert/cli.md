@@ -408,7 +408,7 @@ template lives in `cli/commands/deploy.go` and produces a multi-stage build on
 
 ## AI
 
-### `nimbus ai [prompt]`
+### `nimbus vani [prompt]`
 
 AI Copilot — plans and executes architectural code changes, powered by
 nimbusgo.space. With no prompt it opens the interactive TUI; with a prompt it

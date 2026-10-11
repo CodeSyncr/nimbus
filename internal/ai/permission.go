@@ -30,7 +30,7 @@ The modes:
 
   auto    assess every call; run the safe ones, ask about the rest (default)
   ask     ask before anything that writes, deletes or runs a command
-  allow   run everything the policy does not refuse outright (nimbus ai --yes)
+  allow   run everything the policy does not refuse outright (nimbus vani --yes)
 
 Nothing here is a security boundary — the agent runs with the user's own
 permissions and a determined model could phrase its way around any list. It is
@@ -106,6 +106,18 @@ func (t *ToolExecutor) AssessToolCall(name string, args map[string]any) Assessme
 
 	case "generate_image":
 		return t.applyTaint(t.assessWrite(strArg(args, "path")), "write")
+	}
+
+	// A tool of an MCP server: what it does is the server's to say. One its
+	// server marks read-only runs; any other may change something outside
+	// this project, where nothing here can undo it, so it waits for a yes
+	// unless the user has said they trust that server.
+	if asks, server := t.MCP.asks(name); server != "" {
+		if asks {
+			return t.applyTaint(Assessment{Risk: RiskAsk, Subject: name,
+				Reason: fmt.Sprintf("calls the MCP server %q, which does not mark this tool read-only (set \"trust\": true on the server to stop being asked)", server)}, "call")
+		}
+		return t.applyTaint(Assessment{Risk: RiskAllowed, Subject: name}, "call")
 	}
 
 	// Reading, searching, listing and fetching change nothing.

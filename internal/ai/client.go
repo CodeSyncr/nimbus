@@ -32,6 +32,11 @@ type ContentBlock struct {
 	ToolUseID string         `json:"tool_use_id,omitempty"`
 	Content   string         `json:"content,omitempty"`
 	IsError   bool           `json:"is_error,omitempty"`
+	// Incomplete marks a tool_use whose arguments never arrived whole: the
+	// reply reached the output limit while they were being written. Input
+	// then holds only what the server could tell of the call (its path).
+	// Such a call is answered, not run. See Agent.cutOff.
+	Incomplete bool `json:"incomplete,omitempty"`
 }
 
 // StreamHandler receives streaming delta chunks.
@@ -62,11 +67,21 @@ type TurnRequest struct {
 	Tools    []ToolDefinition
 	Plan     *PlanSummary
 	Context  *ProjectContext
+	// StableHistory sends earlier messages exactly as they were sent before,
+	// so a provider's prompt cache can read them back. Set once the server
+	// has been seen reporting cache reads; without that, older tool output
+	// is elided to keep an uncached request small. See wireMessages.
+	StableHistory bool
 }
 
 // ErrTurnUnsupported is returned when the cloud server predates the agent
 // turn endpoint; callers fall back to the legacy plan/execute endpoints.
 var ErrTurnUnsupported = errors.New("nimbus cloud server does not support agent turns (upgrade the server)")
+
+// ErrEmptyReply is returned when the server reports that the model sent back
+// neither text nor a tool call. It is a provider hiccup far more often than a
+// decision, so the agent loop asks again before giving up on the turn.
+var ErrEmptyReply = errors.New("the model sent back an empty reply")
 
 // AIClient is the interface for communicating with Nimbus Cloud AI backend.
 type AIClient interface {
@@ -95,6 +110,11 @@ type MessageResponse struct {
 type TokenUsage struct {
 	InputTokens  int `json:"input_tokens"`
 	OutputTokens int `json:"output_tokens"`
+	// CacheReadTokens is the part of InputTokens the provider read back from
+	// its prompt cache rather than processing anew; CacheWriteTokens, the
+	// part it wrote there. Zero from a server or provider that does not say.
+	CacheReadTokens  int `json:"cache_read_tokens,omitempty"`
+	CacheWriteTokens int `json:"cache_write_tokens,omitempty"`
 	// CostUSD is what the turn cost, when the server prices it. The CLI does
 	// not price locally: the server picks the model behind "optimal", so a
 	// client-side guess would put a wrong number against real money.
@@ -343,7 +363,7 @@ func (c *NimbusCloudClient) Turn(ctx context.Context, tr *TurnRequest, onDelta S
 		"mode":              string(tr.Mode),
 		"model":             tr.Model,
 		"prompt":            tr.Prompt,
-		"messages":          compactMessagesForWire(tr.Messages),
+		"messages":          wireMessages(tr.Messages, tr.StableHistory),
 		"tools":             tr.Tools,
 		"plan":              tr.Plan,
 		"project_context":   tr.Context,
@@ -453,6 +473,7 @@ func parseMessageResponse(resp *http.Response, onDelta StreamHandler) (*MessageR
 				Text       string         `json:"text"`
 				Error      string         `json:"error"`
 				StopReason string         `json:"stop_reason"`
+				Incomplete bool           `json:"incomplete"`
 				Delta      *struct {
 					Text string `json:"text"`
 				} `json:"delta"`
@@ -474,13 +495,17 @@ func parseMessageResponse(resp *http.Response, onDelta StreamHandler) (*MessageR
 				if event.Error == "" {
 					event.Error = "unknown server error"
 				}
+				if strings.Contains(strings.ToLower(event.Error), "empty response") {
+					return nil, fmt.Errorf("%w (%s)", ErrEmptyReply, event.Error)
+				}
 				return nil, errors.New(event.Error)
 			case event.Type == "tool_use" || (event.Name != "" && event.Input != nil):
 				response.Content = append(response.Content, ContentBlock{
-					Type:  "tool_use",
-					ID:    event.ID,
-					Name:  event.Name,
-					Input: event.Input,
+					Type:       "tool_use",
+					ID:         event.ID,
+					Name:       event.Name,
+					Input:      event.Input,
+					Incomplete: event.Incomplete,
 				})
 			case event.Type == "done":
 				response.StopReason = event.StopReason
@@ -609,6 +634,52 @@ const (
 	keepWriteContentTurns  = 2
 	elidedWriteContentNote = "[content omitted from history — the file was written to disk; read_file to see it]"
 )
+
+// wireMessages is the conversation as it is sent.
+//
+// There are two ways to keep a long turn affordable and they pull against each
+// other. Eliding older tool output makes every request smaller, but it changes
+// messages that were already sent, and a prompt cache reads back only a prefix
+// that is byte for byte what it saw before: each step then pays full price for
+// everything after the first altered message. Leaving history untouched makes
+// requests larger, and nearly free where the provider caches.
+//
+// So the choice follows the evidence: stable once the server has reported
+// reading from a cache, elided until then. In the stable form the only cut is
+// the per-result cap, which depends on nothing but the result itself and so
+// lands the same way every time. Growth is bounded by compaction instead.
+func wireMessages(messages []Message, stable bool) []Message {
+	if !stable {
+		return compactMessagesForWire(messages)
+	}
+	out := messages
+	copied := false
+	for i, msg := range messages {
+		blocks, ok := msg.Content.([]ContentBlock)
+		if !ok {
+			continue
+		}
+		var capped []ContentBlock
+		for j, cb := range blocks {
+			if cb.Type != "tool_result" || len(cb.Content) <= maxToolResultChars {
+				continue
+			}
+			if capped == nil {
+				capped = append([]ContentBlock{}, blocks...)
+			}
+			capped[j].Content = cb.Content[:maxToolResultChars] + "\n… [truncated]"
+		}
+		if capped == nil {
+			continue
+		}
+		if !copied {
+			out = append([]Message{}, messages...)
+			copied = true
+		}
+		out[i] = Message{Role: msg.Role, Content: capped}
+	}
+	return out
+}
 
 // compactMessagesForWire bounds payload growth across iterations while
 // preserving what the model needs: the newest tool results in full, older

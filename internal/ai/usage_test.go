@@ -136,3 +136,17 @@ func TestMissingUsageStaysNil(t *testing.T) {
 		t.Errorf("usage should be nil, got %+v", msg.Usage)
 	}
 }
+
+// Cache reads are part of the input, shown beside it so it is plain whether
+// the server is caching at all.
+func TestSummaryShowsWhatCameFromTheCache(t *testing.T) {
+	var u SessionUsage
+	u.Add(&TokenUsage{InputTokens: 9000, OutputTokens: 100})
+	if strings.Contains(u.Summary(), "cache") || u.CacheSeen() {
+		t.Errorf("no cache read was reported: %q", u.Summary())
+	}
+	u.Add(&TokenUsage{InputTokens: 9400, OutputTokens: 100, CacheReadTokens: 9000})
+	if !strings.Contains(u.Summary(), "9.0k from cache") || !u.CacheSeen() {
+		t.Errorf("Summary = %q", u.Summary())
+	}
+}

@@ -240,7 +240,15 @@ type SessionUsage struct {
 	OutputTokens int     `json:"output_tokens"`
 	Requests     int     `json:"requests"`
 	CostUSD      float64 `json:"cost_usd,omitempty"`
+	// CacheReadTokens is how much of InputTokens was read back from the
+	// provider's prompt cache. Any at all is the evidence that the server
+	// caches, which is what switches the conversation to its stable form.
+	CacheReadTokens int `json:"cache_read_tokens,omitempty"`
 }
+
+// CacheSeen reports whether the server has ever reported a cache read for
+// this session.
+func (u SessionUsage) CacheSeen() bool { return u.CacheReadTokens > 0 }
 
 // Add folds one response's usage into the session total. Responses without
 // usage still count as a request, so the request tally stays honest even
@@ -253,6 +261,7 @@ func (u *SessionUsage) Add(t *TokenUsage) {
 	u.InputTokens += t.InputTokens
 	u.OutputTokens += t.OutputTokens
 	u.CostUSD += t.CostUSD
+	u.CacheReadTokens += t.CacheReadTokens
 }
 
 // Summary renders the session's spend for humans, e.g.
@@ -264,6 +273,10 @@ func (u SessionUsage) Summary() string {
 	parts := []string{fmt.Sprintf("%d request%s", u.Requests, plural(u.Requests))}
 	if u.Reported() {
 		parts = append(parts, FormatTokens(u.Total())+" tokens")
+	}
+	if u.CacheReadTokens > 0 {
+		// part of the input above, read back rather than processed anew
+		parts = append(parts, FormatTokens(u.CacheReadTokens)+" from cache")
 	}
 	if u.CostUSD > 0 {
 		parts = append(parts, fmt.Sprintf("$%.4f", u.CostUSD))

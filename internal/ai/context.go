@@ -146,6 +146,23 @@ func (p *ProjectContext) Refresh() {
 	p.Instructions, p.InstructionFiles = loadProjectInstructions(p.AppRoot)
 }
 
+// RefreshVolatile re-reads only what is sent beside the conversation rather
+// than in the instructions: the branch and the uncommitted changes.
+//
+// The conversational loop uses this between turns instead of Refresh. The
+// directory tree, the file lists and the project instructions go into the
+// system prompt, and a system prompt that changes whenever the agent creates a
+// file is one no provider can cache: every later request is paid for in full.
+// They are captured once, when the session starts, and the model has list_dir
+// and the diff summary for anything newer.
+func (p *ProjectContext) RefreshVolatile() {
+	if p == nil || p.AppRoot == "" {
+		return
+	}
+	p.GitBranch = getGitBranch(p.AppRoot)
+	p.GitDiffSummary = getGitDiffSummary(p.AppRoot)
+}
+
 func hostOS() string {
 	switch runtime.GOOS {
 	case "darwin":

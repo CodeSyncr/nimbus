@@ -123,27 +123,97 @@ func TestCanTypeWhileTheAgentIsWorking(t *testing.T) {
 		t.Fatalf("typing was swallowed while busy: %q", m.TextInput.Value())
 	}
 
-	// Enter queues rather than sending into the middle of a run.
+	// Enter hands it to the working agent, which reads it before its next
+	// step; it neither interrupts the run nor waits for it to end.
 	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
-	if m.QueuedPrompt != "also add dark mode" {
-		t.Fatalf("Enter did not queue the message: %q", m.QueuedPrompt)
+	if m.Agent.SteerWaiting() != 1 || m.QueuedPrompt != "" {
+		t.Fatalf("Enter did not hand the message to the agent: waiting=%d queued=%q", m.Agent.SteerWaiting(), m.QueuedPrompt)
 	}
 	if m.TextInput.Value() != "" {
-		t.Error("the box should clear once the message is queued")
+		t.Error("the box should clear once the message is taken")
 	}
 	if m.Mode != ModeExecuting {
-		t.Error("queueing must not interrupt the running task")
+		t.Error("adding to the task must not interrupt it")
 	}
 
 	// The transcript says what happened.
 	var sawNotice bool
 	for _, item := range m.Messages {
-		if item.Role == "system" && strings.Contains(item.Content, "Queued") {
+		if item.Role == "system" && strings.Contains(item.Content, "before my next step") {
 			sawNotice = true
 		}
 	}
 	if !sawNotice {
-		t.Error("no confirmation that the message was queued")
+		t.Error("no confirmation that the message was taken")
+	}
+
+	// A second one is kept as well: the old single slot held only the last.
+	m = typeText(m, "and a light mode toggle")
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.Agent.SteerWaiting() != 2 {
+		t.Errorf("%d waiting, want 2", m.Agent.SteerWaiting())
+	}
+
+	// Once the model has been shown one, it is a user turn in the transcript.
+	updated, _ := m.Update(steeredMsg{text: "also add dark mode"})
+	m = updated.(Model)
+	var sawTurn bool
+	for _, item := range m.Messages {
+		if item.Role == "user" && item.Content == "also add dark mode" {
+			sawTurn = true
+		}
+	}
+	if !sawTurn {
+		t.Error("a message the model was shown should appear as a user turn")
+	}
+}
+
+// Planning has no step at which the model could read it, so there a message
+// still waits for the plan.
+func TestTypingWhilePlanningStillQueues(t *testing.T) {
+	m := chatModel(t)
+	m.Mode = ModePlanning
+	m = typeText(m, "keep it to two files")
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.QueuedPrompt != "keep it to two files" || m.Agent.SteerWaiting() != 0 {
+		t.Errorf("queued=%q waiting=%d", m.QueuedPrompt, m.Agent.SteerWaiting())
+	}
+}
+
+// The run ended before the model could be shown it: it goes out as the next
+// message instead of being lost.
+func TestWhatTheAgentNeverReadIsSentWhenTheRunFinishes(t *testing.T) {
+	m := chatModel(t)
+	m.Mode = ModeExecuting
+	m.Agent.Steer("now write the tests")
+
+	updated, cmd := m.Update(execDoneMsg{summary: "Added the feature."})
+	m = updated.(Model)
+	if cmd == nil {
+		t.Fatal("finishing a run with a message unread should send it")
+	}
+	if m.Agent.SteerWaiting() != 0 {
+		t.Error("it should no longer be waiting")
+	}
+	var sawUserTurn bool
+	for _, item := range m.Messages {
+		if item.Role == "user" && item.Content == "now write the tests" {
+			sawUserTurn = true
+		}
+	}
+	if !sawUserTurn {
+		t.Error("it should appear as the next user turn")
+	}
+}
+
+// Interrupting hands back what the agent had not read, for editing.
+func TestInterruptReturnsUnreadTextForEditing(t *testing.T) {
+	m := chatModel(t)
+	m.Mode = ModeExecuting
+	m.Agent.Steer("actually, use Postgres")
+	m = send(m, tea.KeyMsg{Type: tea.KeyEsc})
+	if m.Agent.SteerWaiting() != 0 || m.TextInput.Value() != "actually, use Postgres" {
+		t.Errorf("waiting=%d box=%q", m.Agent.SteerWaiting(), m.TextInput.Value())
 	}
 }
 
@@ -206,6 +276,19 @@ func TestNoQueuedMessageIsANoOp(t *testing.T) {
 	for _, item := range m.Messages {
 		if item.Role == "user" {
 			t.Errorf("a user turn appeared from nowhere: %q", item.Content)
+		}
+	}
+}
+
+// /mcp says what is connected, and with nothing connected, how to connect.
+func TestMCPCommandSaysHowToConnect(t *testing.T) {
+	m := chatModel(t)
+	m = typeText(m, "/mcp")
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	last := m.Messages[len(m.Messages)-1].Content
+	for _, want := range []string{"No MCP servers are connected", "mcp_servers", "settings.local.json", "${API_KEY_21ST}"} {
+		if !strings.Contains(last, want) {
+			t.Errorf("/mcp does not say %q:\n%s", want, last)
 		}
 	}
 }

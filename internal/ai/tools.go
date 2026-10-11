@@ -40,13 +40,18 @@ type ToolExecutor struct {
 	// a problem.
 	ApproveCommand func(cmd, reason string) bool
 
-	// AutoApprove runs flagged commands without asking (nimbus ai --yes).
+	// AutoApprove runs flagged commands without asking (nimbus vani --yes).
 	AutoApprove bool
 
 	// MaxCommandOutput caps the bytes of a command's output handed back to
 	// the model. Zero means the built-in cap, so a ToolExecutor built without
 	// settings is still bounded.
 	MaxCommandOutput int
+
+	// MCP holds the tools of the MCP servers the user connected, or nil.
+	// They are offered alongside the built-in ones and dispatched from
+	// ExecuteTool. See mcp.go.
+	MCP *MCPSet
 
 	// mode selects how much is decided without asking. See permission.go.
 	mode PermissionMode
@@ -146,7 +151,10 @@ func (t *ToolExecutor) imageToolDefinition() []ToolDefinition {
 
 func (t *ToolExecutor) GetToolDefinitions() []ToolDefinition {
 	tools := append(t.ReadOnlyToolDefinitions(), t.writeToolDefinitions()...)
-	return append(tools, t.imageToolDefinition()...)
+	tools = append(tools, t.imageToolDefinition()...)
+	// Last, and in a fixed order: the built-in tools keep their place in the
+	// request whether or not a server is connected.
+	return append(tools, t.MCP.Definitions()...)
 }
 
 // ReadOnlyToolDefinitions returns the tools that inspect the workspace
@@ -315,6 +323,15 @@ func (t *ToolExecutor) ExecuteTool(ctx context.Context, name string, args map[st
 		if err := t.Authorize(name, args); err != nil {
 			return "", "", err
 		}
+	}
+	// A tool of a server the user connected. What it returns comes from
+	// outside, so it is read the way a fetched page is.
+	if t.MCP.Has(name) {
+		out, server, err := t.MCP.Call(ctx, name, args)
+		if err == nil {
+			t.noteUntrustedContent("the MCP server "+server, out)
+		}
+		return out, "", err
 	}
 	switch name {
 	case "read_file", "read":
