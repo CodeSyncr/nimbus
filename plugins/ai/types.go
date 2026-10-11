@@ -13,6 +13,7 @@ package ai
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"time"
 )
 
@@ -206,6 +207,9 @@ type StreamChunk struct {
 	Reasoning []ReasoningBlock `json:"reasoning,omitempty"`
 	Usage     *Usage           `json:"usage,omitempty"`
 	Done      bool             `json:"done,omitempty"`
+	// FinishReason is why the model stopped, in the provider's own word,
+	// on the last chunk when the provider says. Truncated reads it.
+	FinishReason string `json:"finish_reason,omitempty"`
 	// ToolArgsDelta is a piece of a tool call's arguments as the model
 	// writes them, with the tool's name in ToolName. It is progress only:
 	// the finished call still arrives whole in ToolCalls, and a consumer
@@ -213,6 +217,18 @@ type StreamChunk struct {
 	// tool argument is otherwise silent for as long as that takes.
 	ToolArgsDelta string `json:"tool_args_delta,omitempty"`
 	ToolName      string `json:"tool_name,omitempty"`
+}
+
+// Truncated reports whether a finish reason means the reply was cut at the
+// output limit rather than ended by the model: "max_tokens" (Anthropic,
+// Gemini) or "length" (OpenAI-compatible APIs). A tool call in such a reply
+// may hold only the first part of its arguments.
+func Truncated(finishReason string) bool {
+	switch strings.ToLower(strings.TrimSpace(finishReason)) {
+	case "max_tokens", "length", "max_output_tokens":
+		return true
+	}
+	return false
 }
 
 // StreamResponse wraps a streaming channel plus a done channel.
@@ -230,6 +246,7 @@ func (s *StreamResponse) Collect(ctx context.Context) (*GenerateResponse, error)
 	var usage *Usage
 	var toolCalls []ToolCall
 	var reasoning []ReasoningBlock
+	var finish string
 	for {
 		select {
 		case <-ctx.Done():
@@ -244,7 +261,7 @@ func (s *StreamResponse) Collect(ctx context.Context) (*GenerateResponse, error)
 					}
 				default:
 				}
-				resp := &GenerateResponse{Text: text, ToolCalls: toolCalls, Usage: usage, ReasoningBlocks: reasoning}
+				resp := &GenerateResponse{Text: text, ToolCalls: toolCalls, Usage: usage, ReasoningBlocks: reasoning, FinishReason: finish}
 				for _, r := range reasoning {
 					resp.Reasoning += r.Text
 				}
@@ -254,6 +271,9 @@ func (s *StreamResponse) Collect(ctx context.Context) (*GenerateResponse, error)
 			reasoning = append(reasoning, chunk.Reasoning...)
 			if chunk.Usage != nil {
 				usage = chunk.Usage
+			}
+			if chunk.FinishReason != "" {
+				finish = chunk.FinishReason
 			}
 			toolCalls = append(toolCalls, chunk.ToolCalls...)
 		}

@@ -121,7 +121,7 @@ func (f *FakeProvider) Stream(ctx context.Context, req *GenerateRequest) (*Strea
 		if f.StreamTools && len(resp.ToolCalls) > 0 {
 			chunks <- StreamChunk{ToolCalls: resp.ToolCalls}
 		}
-		chunks <- StreamChunk{Usage: resp.Usage, Done: true}
+		chunks <- StreamChunk{Usage: resp.Usage, Done: true, FinishReason: resp.FinishReason}
 		errc <- nil
 	}()
 	return &StreamResponse{Chunks: chunks, Err: errc}, nil

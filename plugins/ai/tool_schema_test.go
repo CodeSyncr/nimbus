@@ -51,3 +51,29 @@ func TestToolSchemaDescribesListsAndOptionalFields(t *testing.T) {
 }
 
 func reflectTypeOf[T any]() reflect.Type { var v T; return reflect.TypeOf(v) }
+
+type schemaOpen struct {
+	Tool string           `json:"tool"`
+	Args map[string]any   `json:"args,omitempty"`
+	Many []map[string]any `json:"many,omitempty"`
+}
+
+// A map is an object. Declared a string, as it was, a model that follows
+// the schema sends a string and the handler cannot read it.
+func TestToolSchemaDeclaresAMapAnObject(t *testing.T) {
+	var s struct {
+		Properties map[string]struct {
+			Type  string         `json:"type"`
+			Items map[string]any `json:"items"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(structToJSONSchema(reflectTypeOf[schemaOpen]()), &s); err != nil {
+		t.Fatal(err)
+	}
+	if s.Properties["args"].Type != "object" {
+		t.Errorf("args is declared %q, want object", s.Properties["args"].Type)
+	}
+	if s.Properties["many"].Type != "array" || s.Properties["many"].Items["type"] != "object" {
+		t.Errorf("many = %+v", s.Properties["many"])
+	}
+}

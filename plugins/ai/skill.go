@@ -10,7 +10,7 @@
 | the skill). Twenty procedures cost twenty lines of prompt, not twenty
 | pages.
 |
-| Skills use the SKILL.md format shared with `nimbus ai` and other agent
+| Skills use the SKILL.md format shared with `nimbus vani` and other agent
 | tools: a folder per skill with a SKILL.md whose YAML frontmatter names
 | and describes it.
 |

@@ -121,6 +121,11 @@ func (c *Client) configureMedia() {
 		mc, err := mediaConfig(cfg, "fallback", cfg.FallbackProvider, cfg.FallbackAPIKey, cfg.FallbackBaseURL)
 		if err == nil {
 			mc.Model = strings.TrimSpace(cfg.FallbackModel)
+			// On a key of its own the fallback is on another account, and
+			// that account's workspace (or none) goes with it.
+			if ws := strings.TrimSpace(cfg.FallbackWorkspace); ws != "" || strings.TrimSpace(cfg.FallbackAPIKey) != "" {
+				mc.AnthropicWorkspace, mc.ownWorkspace = ws, true
+			}
 			c.fallback, c.fallbackErr = NewClient(mc)
 		} else {
 			c.fallbackErr = err

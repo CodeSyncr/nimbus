@@ -98,9 +98,15 @@ func newAnthropicProvider(cfg *Config) (Provider, error) {
 		maxTokens = defaultAnthropicMaxTokens
 	}
 
+	workspace := strings.TrimSpace(cfg.AnthropicWorkspace)
+	if workspace == "" && !cfg.ownWorkspace {
+		workspace = strings.TrimSpace(os.Getenv("ANTHROPIC_WORKSPACE_ID"))
+	}
+
 	whole, stream := anthropicClients(cfg)
 	return &anthropicProvider{
 		apiKey:     apiKey,
+		workspace:  workspace,
 		model:      model,
 		endpoint:   normalizeAnthropicURL(apiURL),
 		maxTokens:  maxTokens,
@@ -110,7 +116,10 @@ func newAnthropicProvider(cfg *Config) (Provider, error) {
 }
 
 type anthropicProvider struct {
-	apiKey     string
+	apiKey string
+	// workspace, when set, names the workspace a key that is not scoped
+	// to one is used for (the anthropic-workspace-id header).
+	workspace  string
 	model      string
 	endpoint   string
 	maxTokens  int
@@ -364,6 +373,10 @@ type anthropicStreamEvent struct {
 		Usage anthropicUsage `json:"usage"`
 	} `json:"message"`
 	Usage anthropicUsage `json:"usage"`
+	Error struct {
+		Type    string `json:"type"`
+		Message string `json:"message"`
+	} `json:"error"`
 }
 
 // anthropicStreamBlock accumulates one content block of a stream.
@@ -405,12 +418,19 @@ func (p *anthropicProvider) Stream(ctx context.Context, req *GenerateRequest) (*
 	chunks := make(chan StreamChunk, 32)
 	errCh := make(chan error, 1)
 
+	// A stream that stops sending is not a stream that is thinking: Anthropic
+	// keeps one alive with pings. With nothing on the line at all for this
+	// long the connection is dead in a way the socket has not noticed, and
+	// reading it would wait for ever.
+	stream := newIdleReader(resp.Body, streamIdleLimit)
+
 	go func() {
-		defer resp.Body.Close()
+		defer stream.Close()
 		defer close(chunks)
 		defer close(errCh)
 
 		usage := &Usage{}
+		finish := ""
 		blocks := map[int]*anthropicStreamBlock{}
 		send := func(c StreamChunk) bool {
 			select {
@@ -421,7 +441,7 @@ func (p *anthropicProvider) Stream(ctx context.Context, req *GenerateRequest) (*
 				return false
 			}
 		}
-		scanner := bufio.NewScanner(resp.Body)
+		scanner := bufio.NewScanner(stream)
 		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 		for scanner.Scan() {
 			line := scanner.Text()
@@ -502,9 +522,21 @@ func (p *anthropicProvider) Stream(ctx context.Context, req *GenerateRequest) (*
 				}
 				usage.CompletionTokens = ev.Usage.OutputTokens
 				usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
+				if ev.Delta.StopReason != "" {
+					finish = ev.Delta.StopReason
+				}
+			case "error":
+				// Said mid-stream (overloaded, most often). Dropped, as it
+				// was, the reply simply ended short with no reason given.
+				msg := strings.TrimSpace(ev.Error.Message)
+				if msg == "" {
+					msg = "the stream ended with an error"
+				}
+				errCh <- fmt.Errorf("anthropic: %s: %s", ev.Error.Type, msg)
+				return
 			case "message_stop":
 				select {
-				case chunks <- StreamChunk{Usage: usage, Done: true}:
+				case chunks <- StreamChunk{Usage: usage, Done: true, FinishReason: finish}:
 				case <-ctx.Done():
 					errCh <- ctx.Err()
 					return
@@ -526,6 +558,9 @@ func (p *anthropicProvider) setHeaders(req *http.Request) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-api-key", p.apiKey)
 	req.Header.Set("anthropic-version", anthropicVersion)
+	if p.workspace != "" {
+		req.Header.Set("anthropic-workspace-id", p.workspace)
+	}
 }
 
 func (p *anthropicProvider) buildRequest(req *GenerateRequest, stream bool) *anthropicRequest {

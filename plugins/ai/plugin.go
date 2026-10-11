@@ -190,6 +190,7 @@ func (p *Plugin) loadConfig(app *nimbus.App) *Config {
 		cfg.AnthropicBaseURL = os.Getenv("ANTHROPIC_API_URL")
 	}
 	cfg.AnthropicAPIURL = os.Getenv("ANTHROPIC_API_URL")
+	cfg.AnthropicWorkspace = os.Getenv("ANTHROPIC_WORKSPACE_ID")
 	cfg.CohereKey = os.Getenv("COHERE_API_KEY")
 	cfg.GeminiKey = os.Getenv("GEMINI_API_KEY")
 	cfg.ImageProvider = os.Getenv("AI_IMAGE_PROVIDER")
@@ -204,6 +205,7 @@ func (p *Plugin) loadConfig(app *nimbus.App) *Config {
 	cfg.FallbackModel = os.Getenv("AI_FALLBACK_MODEL")
 	cfg.FallbackAPIKey = os.Getenv("AI_FALLBACK_API_KEY")
 	cfg.FallbackBaseURL = firstEnv("AI_FALLBACK_BASE_URL", "AI_FALLBACK_API_URL")
+	cfg.FallbackWorkspace = os.Getenv("AI_FALLBACK_WORKSPACE_ID")
 	cfg.MistralKey = os.Getenv("MISTRAL_API_KEY")
 	cfg.XAIKey = os.Getenv("XAI_API_KEY")
 	cfg.JinaKey = os.Getenv("JINA_API_KEY")

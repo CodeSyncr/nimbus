@@ -32,6 +32,11 @@ type Config struct {
 	FallbackModel    string
 	FallbackAPIKey   string
 	FallbackBaseURL  string
+	// FallbackWorkspace is the Anthropic workspace id for a fallback model
+	// that is on Anthropic with a key of its own (AI_FALLBACK_WORKSPACE_ID).
+	// A fallback with its own key never borrows the base model's workspace:
+	// the id belongs to the account the key is from.
+	FallbackWorkspace string
 
 	// mediaOf marks the config of an image or video client ("image",
 	// "video"), which makes no media clients of its own.
@@ -50,10 +55,19 @@ type Config struct {
 	AnthropicKey     string
 	AnthropicBaseURL string
 	AnthropicAPIURL  string
-	CohereKey        string
-	GeminiKey        string
-	MistralKey       string
-	XAIKey           string
+	// AnthropicWorkspace is sent as the anthropic-workspace-id header.
+	// Anthropic requires it with an API key that is not scoped to one
+	// workspace, and refuses the request (400) without it.
+	// ANTHROPIC_WORKSPACE_ID.
+	AnthropicWorkspace string
+	// ownWorkspace says AnthropicWorkspace is this client's whole answer,
+	// empty included: the environment's ANTHROPIC_WORKSPACE_ID, which is
+	// the base model's, is not to be read in its place.
+	ownWorkspace bool
+	CohereKey    string
+	GeminiKey    string
+	MistralKey   string
+	XAIKey       string
 	// Ollama uses OLLAMA_HOST (default localhost:11434), no key
 	OllamaHost string
 	// Embeddings / specialized (for future use)

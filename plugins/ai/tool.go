@@ -363,6 +363,11 @@ func structToJSONSchema(t reflect.Type) json.RawMessage {
 			var m map[string]any
 			json.Unmarshal(nested, &m)
 			prop = m
+		case reflect.Map:
+			// An open set of named values. Left to the default this was
+			// declared a string, and a model that follows its schema then
+			// sends one, which the handler's map cannot take.
+			prop["type"] = "object"
 		default:
 			prop["type"] = "string"
 		}
@@ -401,6 +406,8 @@ func itemSchema(t reflect.Type) map[string]any {
 		return map[string]any{"type": "number"}
 	case reflect.Bool:
 		return map[string]any{"type": "boolean"}
+	case reflect.Map:
+		return map[string]any{"type": "object"}
 	case reflect.Struct:
 		var m map[string]any
 		if json.Unmarshal(structToJSONSchema(t), &m) == nil {

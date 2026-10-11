@@ -201,12 +201,13 @@ func (p *openAIProvider) Stream(ctx context.Context, req *GenerateRequest) (*Str
 		}
 
 		var usage *Usage
+		finish := ""
 		for {
 			response, err := stream.Recv()
 			if err == io.EOF {
 				flushToolCalls()
-				if usage != nil {
-					chunks <- StreamChunk{Usage: usage, Done: true}
+				if usage != nil || finish != "" {
+					chunks <- StreamChunk{Usage: usage, Done: true, FinishReason: finish}
 				}
 				return
 			}
@@ -217,6 +218,9 @@ func (p *openAIProvider) Stream(ctx context.Context, req *GenerateRequest) (*Str
 			usage = openAIStreamUsage(usage, response.Usage)
 			if len(response.Choices) == 0 {
 				continue
+			}
+			if fr := string(response.Choices[0].FinishReason); fr != "" {
+				finish = fr
 			}
 			delta := response.Choices[0].Delta
 			if delta.Content != "" {

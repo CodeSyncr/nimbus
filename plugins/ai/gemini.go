@@ -283,8 +283,9 @@ func (p *geminiProvider) Stream(ctx context.Context, req *GenerateRequest) (*Str
 		defer close(errCh)
 
 		var (
-			turn  geminiTurn
-			usage *Usage
+			turn   geminiTurn
+			usage  *Usage
+			finish string
 		)
 		send := func(c StreamChunk) bool {
 			select {
@@ -317,6 +318,9 @@ func (p *geminiProvider) Stream(ctx context.Context, req *GenerateRequest) (*Str
 			if len(chunk.Candidates) == 0 {
 				continue
 			}
+			if fr := chunk.Candidates[0].FinishReason; fr != "" {
+				finish = strings.ToLower(fr)
+			}
 			before := len(turn.calls)
 			if text := turn.add(chunk.Candidates[0].Content.Parts); text != "" {
 				if !send(StreamChunk{Text: text}) {
@@ -333,7 +337,7 @@ func (p *geminiProvider) Stream(ctx context.Context, req *GenerateRequest) (*Str
 			errCh <- err
 			return
 		}
-		send(StreamChunk{Usage: usage, Done: true})
+		send(StreamChunk{Usage: usage, Done: true, FinishReason: finish})
 	}()
 
 	return &StreamResponse{Chunks: chunks, Err: errCh}, nil
