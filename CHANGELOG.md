@@ -6,6 +6,59 @@ This project follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [1.13.1] - 2026-10-12
+
+### Changed
+
+- **The terminal agent is `nimbus vani`.** `nimbus ai` still works as an
+  alias, so scripts written against it keep running.
+- **`nimbus vani`: the conversation is sent unaltered once the server is seen
+  to cache.** Older tool output used to be shortened on every step, which
+  rewrote messages already sent and cost a provider's prompt cache its hold on
+  the turn. With a server that reports cache reads the history now goes as it
+  was; without one it is trimmed as before. The directory tree and project
+  instructions are captured when the session starts and no longer change
+  between turns, for the same reason; the branch and uncommitted changes are
+  still read every turn.
+
+### Added
+
+- **`nimbus vani`: MCP servers.** List servers under `mcp_servers` in
+  `~/.nimbus/settings.json` or `.nimbus/settings.local.json`, by `url` and
+  `headers` or by `command`, `args` and `env`; `${NAME}` is read from the
+  environment. They are connected once before the first turn, their tools
+  appear as `mcp__<server>__<tool>`, and `/mcp` shows what connected. A tool
+  its server does not mark read-only asks first, unless the server is set
+  `"trust": true`. What a server returns is scanned like a fetched page.
+- **`nimbus vani`: what is typed while it works is read before its next
+  step**, not held until the task ends. Several messages are kept; anything
+  unread when the run ends is sent as the next message.
+- **`plugins/ai`: why a streamed reply stopped.** The last `StreamChunk`
+  carries `FinishReason`, `Collect` passes it on, and `ai.Truncated(reason)`
+  says whether the reply was cut at the output limit.
+- **`plugins/ai`: Anthropic workspace.** `Config.AnthropicWorkspace`
+  (`ANTHROPIC_WORKSPACE_ID`) is sent as `anthropic-workspace-id`, which
+  Anthropic requires with a key that is not scoped to one workspace. A
+  fallback model on a key of its own has `Config.FallbackWorkspace`
+  (`AI_FALLBACK_WORKSPACE_ID`) and never borrows the base model's.
+
+### Fixed
+
+- **`plugins/ai`: a tool's map field was declared a string.** A handler input
+  such as `Args map[string]any` got `"type": "string"` in its schema, so a
+  model that followed the schema sent text the handler could not read. Maps
+  are now declared objects.
+- **`plugins/ai`: an Anthropic stream that went silent was waited on for
+  ever.** With nothing on the line for three minutes the stream now ends with
+  an error that says so. An `error` event sent mid-stream (overloaded, most
+  often) is the stream's error; it used to be dropped, and the reply simply
+  ended short.
+- **`nimbus vani`: a tool call cut off at the output limit was run on what
+  arrived of it.** It is now answered, not run, and the model is told to
+  write less in one call.
+- **`nimbus vani`: an empty reply was reported as "Done."** It is asked for
+  again, twice at most, and said plainly if that does not help.
+
 ## [1.13.0] - 2026-10-09
 
 ### Added
