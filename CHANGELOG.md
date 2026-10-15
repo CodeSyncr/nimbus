@@ -6,6 +6,14 @@ This project follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [1.13.2] - 2026-10-15
+
+### Changed
+
+- **`nimbus vani` calls itself Vani.** The header, the welcome line, the
+  `/settings` and `/exit` descriptions, `nimbus whoami`'s upgrade note and the
+  "subscription required" error said "Nimbus AI" or "AI Copilot".
+
 ## [1.13.1] - 2026-10-12
 
 ### Changed
