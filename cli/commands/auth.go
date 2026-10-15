@@ -109,7 +109,7 @@ func (c *WhoamiCommand) Run(ctx *cli.Context) error {
 
 	if !creds.HasSub && plan == "free" {
 		fmt.Fprintln(ctx.Stdout)
-		fmt.Fprintln(ctx.Stdout, warningStyle.Render("  ⚠  No active AI subscription. Upgrade at https://nimbusgo.space/pricing to unlock AI Copilot."))
+		fmt.Fprintln(ctx.Stdout, warningStyle.Render("  ⚠  No active AI subscription. Upgrade at https://nimbusgo.space/pricing to unlock Vani."))
 	}
 
 	return nil

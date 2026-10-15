@@ -263,7 +263,7 @@ func NewModel(agent *ai.Agent, initialPrompt string, oneShot bool) Model {
 // welcomeText summarises what the agent knows about the workspace.
 func welcomeText(agent *ai.Agent) string {
 	if agent == nil || agent.Context == nil {
-		return "Nimbus AI is ready."
+		return "Vani is ready."
 	}
 	c := agent.Context
 	var facts []string

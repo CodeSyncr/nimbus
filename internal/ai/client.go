@@ -602,7 +602,7 @@ func (c *NimbusCloudClient) checkAuthStatus(statusCode int) error {
 		return errors.New("unauthorized: session expired. Run 'nimbus login' to authenticate with nimbusgo.space")
 	}
 	if statusCode == http.StatusPaymentRequired {
-		return fmt.Errorf("active Nimbus AI Copilot subscription required. Upgrade at %s/pricing", c.ServerURL)
+		return fmt.Errorf("active Vani subscription required. Upgrade at %s/pricing", c.ServerURL)
 	}
 	return nil
 }

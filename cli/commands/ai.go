@@ -42,7 +42,7 @@ func (c *AICommand) Name() string { return "vani" }
 // and scripts and habits written against that should not break on upgrade.
 func (c *AICommand) Aliases() []string { return []string{"ai"} }
 func (c *AICommand) Description() string {
-	return "AI Copilot — plan and execute architectural code changes (powered by nimbusgo.space)"
+	return "Vani — plan and execute architectural code changes (powered by nimbusgo.space)"
 }
 func (c *AICommand) Args() int { return -1 }
 

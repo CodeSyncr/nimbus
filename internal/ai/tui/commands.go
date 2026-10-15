@@ -29,11 +29,11 @@ var slashCommands = []SlashCommand{
 	{Name: "/compact", Summary: "summarise earlier turns to free up context"},
 	{Name: "/skills", Summary: "agent skills available for this request"},
 	{Name: "/mcp", Summary: "MCP servers connected to this session, and their tools"},
-	{Name: "/settings", Aliases: []string{"/config"}, Summary: "change and save how Nimbus AI behaves"},
+	{Name: "/settings", Aliases: []string{"/config"}, Summary: "change and save how Vani behaves"},
 	{Name: "/session", Summary: "session id, memory, and how to resume it"},
 	{Name: "/sessions", Summary: "earlier sessions in this project, and how to resume one"},
 	{Name: "/clear", Aliases: []string{"clear"}, Summary: "clear the transcript on screen"},
-	{Name: "/exit", Aliases: []string{"/quit", "exit", "quit", "q"}, Summary: "quit Nimbus AI"},
+	{Name: "/exit", Aliases: []string{"/quit", "exit", "quit", "q"}, Summary: "quit Vani"},
 }
 
 // matchCommands returns the commands matching what has been typed so far.

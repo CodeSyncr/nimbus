@@ -12,7 +12,7 @@ import (
 
 func (m Model) View() string {
 	if !m.Ready || m.Width == 0 || m.Height == 0 {
-		return sAccentBold.Render(glyphAI+" Nimbus AI") + sMuted.Render("  starting…")
+		return sAccentBold.Render(glyphAI+" Vani") + sMuted.Render("  starting…")
 	}
 
 	headerView := renderHeader(&m)
@@ -62,7 +62,7 @@ func renderHeader(m *Model) string {
 	width := contentWidth(m)
 
 	vStr := "v" + strings.TrimPrefix(version.Nimbus, "v")
-	left := " " + sAccentBold.Render(glyphAI+" Nimbus AI") + " " + sDim.Render(vStr)
+	left := " " + sAccentBold.Render(glyphAI+" Vani") + " " + sDim.Render(vStr)
 
 	projName := "nimbus-app"
 	branch := "main"
