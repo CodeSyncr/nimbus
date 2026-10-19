@@ -55,6 +55,13 @@ func mediaConfig(base *Config, what, provider, key, url string) (*Config, error)
 		if url != "" {
 			c.OpenAIBaseURL = url
 		}
+	case "runway":
+		if key != "" {
+			c.RunwayKey = key
+		}
+		if url != "" {
+			c.RunwayBaseURL = url
+		}
 	case "anthropic":
 		if key != "" {
 			c.AnthropicKey = key

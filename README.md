@@ -363,6 +363,20 @@ What each piece needs so that several app instances or workers behave like one:
    ```
    After the first fetch, the module appears on [pkg.go.dev](https://pkg.go.dev) automatically.
 
+### Runway video generation
+
+Runway is a built-in video provider. Set `AI_VIDEO_PROVIDER=runway`,
+`AI_VIDEO_MODEL=kling3.0_standard` and `RUNWAY_API_KEY` on the server (or use
+`AI_VIDEO_API_KEY` for a separate video account). Text and image models keep their
+own settings. `ai.Video().Model(ai.RunwayKlingStandard).Prompt("A cyclist in warm
+sunlight").Duration(5).Size("720x1280").Audio(false).Generate(ctx)` creates a clip.
+Handle the returned error before accessing its URL. Standard supports 3–15 seconds
+and 1280x720, 720x1280 or 960x960; omit FPS. Nimbus defaults audio off for lower cost.
+For background jobs use `.Start(ctx)`, persist the returned task ID and owner, then
+`client.GetVideoTask(ctx, id)` / `client.CancelVideoTask(ctx, id)`; never restart a
+billable task because polling failed. Output URLs expire: copy successful clips to
+your own storage. See the starter's `/docs/ai-video` for complete examples.
+
 ## License
 
 MIT

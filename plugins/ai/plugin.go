@@ -197,6 +197,8 @@ func (p *Plugin) loadConfig(app *nimbus.App) *Config {
 	cfg.ImageModel = os.Getenv("AI_IMAGE_MODEL")
 	cfg.ImageAPIKey = os.Getenv("AI_IMAGE_API_KEY")
 	cfg.ImageBaseURL = firstEnv("AI_IMAGE_BASE_URL", "AI_IMAGE_API_URL")
+	cfg.RunwayKey = os.Getenv("RUNWAY_API_KEY")
+	cfg.RunwayBaseURL = os.Getenv("RUNWAY_BASE_URL")
 	cfg.VideoProvider = os.Getenv("AI_VIDEO_PROVIDER")
 	cfg.VideoModel = os.Getenv("AI_VIDEO_MODEL")
 	cfg.VideoAPIKey = os.Getenv("AI_VIDEO_API_KEY")

@@ -186,3 +186,74 @@ The director's ARTWORK plan describes original vector paths/groups or generated 
 - `hold` stepped easing, `hidden` / `locked`, `via: "dissolve"` and `transitionDuration` 0.1–2 seconds survive Cloud validation.
 
 Upgrade Cloud and Strobe together. Whole-scene seamlessness also requires periodic camera/background/effects and matching boundaries; schema support or still-frame critique does not establish temporal quality or artwork quality.
+
+
+### Strobe articulated 2D artwork (2026-10-16)
+
+Cloud now validates design layer `kind: "rig"`, with `rig: {period, phase, joints, chains, parts}`. Coordinates are in the rig's own 100×100 box; equal w/h avoids distortion. Period 0.2–60 seconds; phase is cycles. Up to 32 unique joints `{id,x,y,rot?,anim?:{x,y},orbit?:{rx,ry,phase,turns}}`; rotation is fixed or keys, keys are cycle-local seconds, orbit phase is degrees and turns is a signed integer (-12..12). Up to eight independent analytic two-link chains `{root,mid,end,target,upper,lower,bend:1|-1}`; all references must exist, lengths positive, each solved mid/end unique. Endpoints outside reach are clamped without stretching and reported by Strobe quality review.
+
+Up to 48 back-to-front parts `{id,joint,tip?,stretch?,layer}`. Part offsets default to zero at the attachment; tip points local +X along a segment; stretch fits width between joints. Original path/image/ellipse/rect/group artwork consumes the scene's 60-layer budget. Unsupported kinds/nested rigs are rejected; one-shot entrance/idle/tiling/repeat fields are stripped from parts. A shared deterministic solver drives preview, seek, proof and export; changing cadence retimes authored keys. Quality review checks entire-cycle reachability, missing attachments/artwork and endpoint continuity. Rigs and scrolling tiles count as subject motion in Cloud review.
+
+Editor Elements → Character rig creates editable vector cyclist parts; inspector controls performance, joints, constraints, vector paths and individual generated/uploaded cutouts. Generated images receive shared art direction/palette, identical prompt/shape/cutout requests reuse an asset before the four-unique-image allowance, rig parts are traversed for painting and asset loading, and cutouts no longer receive an opaque backing. A whole character image is not automatically segmented or rigged. No 3D skinning or photoreal performance synthesis. Upgrade Cloud and Strobe together; actual illustration quality still requires rendered inspection.
+
+
+### Strobe generation reliability (2026-10-17)
+
+Strobe checks `NIMBUS_API_KEY`/Cloud URL before creating a film job (503 on missing/invalid configuration, no empty job). Cloud `strobeAsk` bounds each provider/fallback sequence to 180 seconds; `STROBE_MODEL_TIMEOUT_SECONDS` may override within 30–300, and caller deadlines take precedence. Strobe HTTP task deadlines: script/edit/critique 4m, explore 90s, picture/retouch 210s, voice 2m, remake 7m, direct/default 10m. A shared 12m job context/watchdog covers capture through review; heartbeats cannot extend it. Progress is persisted when stages change; cancelled/failed jobs cannot be marked active by late stages. Saved drafts/captures remain available.
+
+Create UI request budgets include reading the response body (start 20s, model/status 15s). Authentication/permission/not-found failures stop polling immediately; three transient failures pause checks with a status-only retry and library link. `/new?job=<id>` resumes polling across refresh/sign-in, never repeats POST. Server elapsed time and `hasDraft` determine progress and recovery actions. A start timeout is an uncertain outcome, not proof that no job started; check the library before resubmitting.
+
+## Runway / Kling video provider
+
+`runway` is built in. Keep text/image clients separate with `AI_VIDEO_PROVIDER=runway`,
+`AI_VIDEO_MODEL=kling3.0_standard`, and `RUNWAY_API_KEY` (or `AI_VIDEO_API_KEY`).
+Optional endpoint: `AI_VIDEO_BASE_URL` for media clients, `RUNWAY_BASE_URL` for direct
+Runway clients. Config fields: `RunwayKey string`, `RunwayBaseURL string`.
+`ai.RunwayKlingStandard` is `"kling3.0_standard"`. Audio defaults **off** in Nimbus
+(the upstream default is on); `.Audio(true)` explicitly enables it at greater cost.
+Standard sizes: `1280x720`, `720x1280`, `960x960`; duration 3–15 seconds, default 5;
+prompt 2–2500 UTF-16 characters. Do not use `.FPS()` for Kling. Runway also accepts
+`kling3.0_pro`, `kling3.0_4k`, `kling2.5_turbo_pro`, subject to their size/duration rules.
+
+```go
+video, err := ai.Video().Model(ai.RunwayKlingStandard).
+    Prompt("A cyclist pedals through a golden meadow").
+    Duration(5).Size("720x1280").Audio(false).Generate(ctx)
+if err != nil { return err }
+fmt.Println(video.URL, video.TaskID, video.Credits)
+```
+
+`.Generate(ctx)` waits at most 10 minutes and attempts cancellation on interruption.
+A background worker should start once, persist the ID/owner, then poll the same task:
+
+```go
+client := ai.GetClient()
+task, err := ai.Video().WithClient(client).Model(ai.RunwayKlingStandard).
+    Prompt("A cyclist pedals through a golden meadow").Duration(5).Audio(false).Start(ctx)
+if err != nil { return err }
+state, err := client.GetVideoTask(ctx, task.ID)
+if err != nil { return err }
+fmt.Println(state.Status, state.Output)
+// Explicitly cancel when appropriate:
+if err := client.CancelVideoTask(ctx, task.ID); err != nil { return err }
+```
+
+New signatures: `(*VideoBuilder).Audio(bool) *VideoBuilder`,
+`(*VideoBuilder).Start(context.Context) (*VideoTask, error)`,
+`(*Client).GetVideoTask(context.Context, string) (*VideoTask, error)`,
+`(*Client).CancelVideoTask(context.Context, string) error`.
+`AsyncVideoProvider` requires `StartVideo`, `GetVideoTask`, `CancelVideoTask`.
+`VideoTask`: ID/Status/Failure/FailureCode strings, Output []string,
+Progress/EstimatedCredits float64. `VideoResponse` adds TaskID string and Credits float64;
+`VideoRequest` adds Audio *bool. Statuses include PENDING, THROTTLED, RUNNING, SUCCEEDED,
+FAILED, CANCELED. Do not automatically retry task creation (it is billable). Copy successful
+output into application storage; provider URLs expire. The generic VideoPipeline's 2-second
+draft setting and default 1080p output are incompatible with Standard: explicitly use
+DraftMode(false) and a supported OutputFormat. Video synthesis produces rendered footage,
+not independently editable character parts.
+
+Nimbus Cloud Strobe tasks: `brief` expands human creative direction through the selected
+text model; `video-check`, `video-start`, `video-status`, `video-cancel` use a separate Runway
+client. Video defaults to Kling Standard with audio off. Tickets are HMAC signed, bound to
+Cloud key owner + Strobe end user, and expire after 24 hours. A non-default APP_KEY is required.
+Strobe charges a successful task only once using the unique provider task ID.

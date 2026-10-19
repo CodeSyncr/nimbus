@@ -20,6 +20,8 @@ type Config struct {
 	// (see media.go).
 	ImageAPIKey   string
 	ImageBaseURL  string
+	RunwayKey     string
+	RunwayBaseURL string
 	VideoProvider string
 	VideoModel    string
 	VideoAPIKey   string

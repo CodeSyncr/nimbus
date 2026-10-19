@@ -36,6 +36,7 @@ import (
 
 // VideoRequest configures a video generation call.
 type VideoRequest struct {
+	Audio    *bool  `json:"audio,omitempty"`
 	Prompt   string `json:"prompt"`
 	Model    string `json:"model,omitempty"`
 	ImageURL string `json:"image_url,omitempty"` // for image-to-video
@@ -46,9 +47,11 @@ type VideoRequest struct {
 
 // VideoResponse wraps the generated video.
 type VideoResponse struct {
-	URL      string `json:"url"`
-	Model    string `json:"model"`
-	Duration int    `json:"duration"`
+	TaskID   string  `json:"task_id,omitempty"`
+	Credits  float64 `json:"credits,omitempty"`
+	URL      string  `json:"url"`
+	Model    string  `json:"model"`
+	Duration int     `json:"duration"`
 }
 
 // VideoProvider is the capability interface for video generation.
@@ -131,4 +134,64 @@ func (b *VideoBuilder) Generate(ctx context.Context) (*VideoResponse, error) {
 	req := b.req
 	req.Model = firstNonBlank(req.Model, client.config.VideoModel)
 	return vp.GenerateVideo(ctx, &req)
+}
+
+// VideoTask is an asynchronous generation. Persist ID before polling; do not
+// start another task merely because polling was interrupted.
+type VideoTask struct {
+	ID               string   `json:"id"`
+	Status           string   `json:"status"`
+	Output           []string `json:"output,omitempty"`
+	Failure          string   `json:"failure,omitempty"`
+	FailureCode      string   `json:"failure_code,omitempty"`
+	Progress         float64  `json:"progress,omitempty"`
+	EstimatedCredits float64  `json:"estimated_credits,omitempty"`
+}
+
+// AsyncVideoProvider supports task creation, polling and cancellation.
+type AsyncVideoProvider interface {
+	StartVideo(context.Context, *VideoRequest) (*VideoTask, error)
+	GetVideoTask(context.Context, string) (*VideoTask, error)
+	CancelVideoTask(context.Context, string) error
+}
+
+func (b *VideoBuilder) Audio(enabled bool) *VideoBuilder { b.req.Audio = &enabled; return b }
+func (b *VideoBuilder) Start(ctx context.Context) (*VideoTask, error) {
+	base := b.client
+	if base == nil {
+		base = GetClient()
+	}
+	client, err := base.videoFor()
+	if err != nil {
+		return nil, err
+	}
+	p, ok := client.provider.(AsyncVideoProvider)
+	if !ok {
+		return nil, fmt.Errorf("ai: provider %q does not support asynchronous video", client.config.Provider)
+	}
+	req := b.req
+	req.Model = firstNonBlank(req.Model, client.config.VideoModel)
+	return p.StartVideo(ctx, &req)
+}
+func (c *Client) GetVideoTask(ctx context.Context, id string) (*VideoTask, error) {
+	client, err := c.videoFor()
+	if err != nil {
+		return nil, err
+	}
+	p, ok := client.provider.(AsyncVideoProvider)
+	if !ok {
+		return nil, fmt.Errorf("ai: provider does not support asynchronous video")
+	}
+	return p.GetVideoTask(ctx, id)
+}
+func (c *Client) CancelVideoTask(ctx context.Context, id string) error {
+	client, err := c.videoFor()
+	if err != nil {
+		return err
+	}
+	p, ok := client.provider.(AsyncVideoProvider)
+	if !ok {
+		return fmt.Errorf("ai: provider does not support asynchronous video")
+	}
+	return p.CancelVideoTask(ctx, id)
 }

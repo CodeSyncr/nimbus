@@ -103,3 +103,9 @@ return ctx.View("home", map[string]any{
 2.  **Atomic Components**: Break down your UI into small, reusable components.
 3.  **Layout Inheritance**: Use layouts to maintain consistency across your application.
 4.  **Automatic Escaping**: Always use `{{ .var }}` unless you are certain the content is safe HTML.
+
+## Nimbus Cloud dashboard shell (starter)
+
+The starter's authenticated dashboard uses `resources/views/layout-dash.nimbus` with `resources/css/cloud-dashboard.css` (copied to `public/css/` by `nimbus build`) for the existing warm morning surfaces, ember accents, Instrument Serif titles and Geist body typography, shared component tokens, and responsive navigation. The overview at `cloud/dash/overview.nimbus` renders existing controller data: `User.AIUsageCount`, `AIThisPeriod`, `AIHistory` (`Period`, `Count`), `SiteCount`, `TunnelCount`, `Billing`, and `Payments`. Do not invent uptime or trend values. Empty usage/payment data have explicit empty states. `Billing.PeriodPct` is the percentage **remaining**, not elapsed.
+
+The native dialog opened by the header search or Cmd/Ctrl+K derives links from `#dashNav`, retaining role and Cashier workspace visibility. Sidebar groups expand independently; the navigation scrolls on short windows and uses a Menu disclosure on mobile. Keep skip-to-content and keyboard focus styling intact when extending the shell. The background canvas loop was removed from this workspace.
