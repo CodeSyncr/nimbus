@@ -6,6 +6,18 @@ This project follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [1.14.0] - 2026-10-19
+
+### Added
+
+- **Runway video provider.** `AI_VIDEO_PROVIDER=runway` with `RUNWAY_API_KEY`
+  (or `AI_VIDEO_API_KEY`) generates clips through Runway; `ai.RunwayKlingStandard`
+  is the lowest-priced Kling tier, audio off by default.
+- **Background video tasks.** `VideoBuilder.Start` returns a `VideoTask` to
+  persist, and `client.GetVideoTask` / `client.CancelVideoTask` poll and cancel it,
+  for providers that implement `AsyncVideoProvider`.
+- `VideoBuilder.Audio`, and `VideoResponse.TaskID` and `Credits`.
+
 ## [1.13.2] - 2026-10-15
 
 ### Changed
