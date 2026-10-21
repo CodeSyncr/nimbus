@@ -36,8 +36,7 @@ func anthropicClients(cfg *Config) (whole, stream *http.Client) {
 		secs = cfg.Timeout
 	}
 	limit := time.Duration(secs) * time.Second
-	tr := http.DefaultTransport.(*http.Transport).Clone()
-	tr.ResponseHeaderTimeout = limit
+	tr := ownTransport(func(t *http.Transport) { t.ResponseHeaderTimeout = limit })
 	return &http.Client{Timeout: limit, Transport: tr}, &http.Client{Transport: tr}
 }
 

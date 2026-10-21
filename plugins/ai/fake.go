@@ -7,11 +7,10 @@
 | from a script and records every request, so a test can assert what was
 | sent (system prompt, tools, messages) as well as what came back.
 |
-|   fake := ai.NewFake(
+|   fake := ai.Fake(t,              // the global client until the test ends
 |       ai.FakeToolCall("lookup_order", `{"id":"42"}`),
 |       ai.FakeText("Your order ships tomorrow."),
 |   )
-|   defer fake.Install()()          // becomes the global client
 |
 |   resp, _ := ai.NewAgent("…").WithTools("lookup_order").Prompt(ctx, "Where is order 42?")
 |   fake.Requests()[1].Messages     // includes the tool result
@@ -26,6 +25,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"testing"
 )
 
 // ErrFakeExhausted is returned when a fake has answered every scripted
@@ -162,6 +162,41 @@ func (f *FakeProvider) Install() (restore func()) {
 		clientMu.Unlock()
 	}
 }
+
+// Fake installs a scripted fake as the global client for the rest of the
+// test and restores the previous client when it ends. Two tests faking AI at
+// the same time would share one client, so the second one fails.
+//
+//	fake := ai.Fake(t, ai.FakeText("Hello"))
+//	client.PostJSON("/chat", body)
+//	if got := fake.Requests(); len(got) != 1 { ... }
+func Fake(t testing.TB, responses ...*GenerateResponse) *FakeProvider {
+	t.Helper()
+	fakeOwnerMu.Lock()
+	if fakeOwner != "" {
+		owner := fakeOwner
+		fakeOwnerMu.Unlock()
+		t.Fatalf("ai: AI is already faked by %s; tests that fake AI cannot run in parallel", owner)
+		return nil
+	}
+	fakeOwner = t.Name()
+	fakeOwnerMu.Unlock()
+
+	f := NewFake(responses...)
+	restore := f.Install()
+	t.Cleanup(func() {
+		restore()
+		fakeOwnerMu.Lock()
+		fakeOwner = ""
+		fakeOwnerMu.Unlock()
+	})
+	return f
+}
+
+var (
+	fakeOwnerMu sync.Mutex
+	fakeOwner   string // test that called Fake, while it runs
+)
 
 var (
 	_ Provider         = (*FakeProvider)(nil)

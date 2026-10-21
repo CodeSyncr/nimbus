@@ -19,6 +19,10 @@ type Notification interface {
 // with a mail message fails to send when no mail driver is configured
 // (mail.Default is nil); return nil from ToMail to skip mail.
 func Send(n Notification) error {
+	if recordFake(n) {
+		runAfterSendHooks(n, nil)
+		return nil
+	}
 	if err := SendMail(n); err != nil {
 		runAfterSendHooks(n, err)
 		return err
@@ -30,6 +34,9 @@ func Send(n Notification) error {
 
 // SendMail sends the notification via the configured mail driver (if any).
 func SendMail(n Notification) error {
+	if recordFake(n) {
+		return nil
+	}
 	msg := n.ToMail()
 	if msg == nil {
 		return nil
@@ -40,6 +47,9 @@ func SendMail(n Notification) error {
 // Broadcast sends the notification over the transmit SSE system (if configured).
 // When no Transmit plugin/transport is registered, this is a no-op.
 func Broadcast(n Notification) {
+	if recordFake(n) {
+		return
+	}
 	channel, payload := n.ToBroadcast()
 	if channel == "" {
 		return

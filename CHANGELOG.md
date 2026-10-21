@@ -6,6 +6,31 @@ This project follows Semantic Versioning.
 
 ## [Unreleased]
 
+### Added
+
+- **Test fakes for every service.** `nimbustesting.FakeJobs`, `FakeMail`,
+  `FakeNotifications`, `FakeEvents` / `FakeEventsOn`, `FakeCache`,
+  `FakeStorage` and `FakeHTTP`, plus `ai.Fake`. Each one replaces its service
+  for the rest of the test, records what the code did, and puts the real
+  service back through `t.Cleanup`. Assertions take `t`
+  (`AssertDispatched[T]`, `AssertSentTo`, `AssertNotificationSent[T]`, ...).
+  Two tests faking the same service at once fail right away with a message.
+  `FakeHTTP` answers any client without its own transport, and fails the test
+  on a request no stub matches unless `AllowStray` is called.
+- `storage.NewMemoryDriver`, an in-memory `storage.Driver`.
+- `events.Dispatcher.Fake` and `notification.Fake`, the switches the test
+  fakes use. `queue.Manager.Decode` and `queue.JobName`.
+
+### Fixed
+
+- **`FakeQueue` saw nothing from `queue.Dispatch`.** It was not connected to
+  the queue, so jobs a handler dispatched went nowhere and tests counted zero.
+  `FakeJobs(t)` connects it. `NewFakeQueue`, `Push` and `ProcessAll` work as
+  before.
+- **The OpenAI and Anthropic providers panicked when `http.DefaultTransport`
+  had been replaced**, for example by a tracing wrapper. They now use the
+  replacement as is.
+
 ## [1.14.0] - 2026-10-19
 
 ### Added

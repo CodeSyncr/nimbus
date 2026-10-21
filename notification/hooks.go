@@ -28,3 +28,35 @@ func runAfterSendHooks(n Notification, err error) {
 		fn(n, err)
 	}
 }
+
+var (
+	fakeMu     sync.RWMutex
+	fakeRecord func(Notification)
+)
+
+// Fake makes Send, SendMail and Broadcast hand notifications to record instead
+// of delivering them, until restore is called. Used by
+// nimbustesting.FakeNotifications.
+func Fake(record func(Notification)) (restore func()) {
+	fakeMu.Lock()
+	prev := fakeRecord
+	fakeRecord = record
+	fakeMu.Unlock()
+	return func() {
+		fakeMu.Lock()
+		fakeRecord = prev
+		fakeMu.Unlock()
+	}
+}
+
+// recordFake records n and reports true when notifications are faked.
+func recordFake(n Notification) bool {
+	fakeMu.RLock()
+	record := fakeRecord
+	fakeMu.RUnlock()
+	if record == nil {
+		return false
+	}
+	record(n)
+	return true
+}

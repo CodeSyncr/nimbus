@@ -68,7 +68,7 @@ func newOpenAIProvider(cfg *Config) (*openAIProvider, error) {
 	// other client in the process.
 	httpClient := &http.Client{
 		Timeout:   time.Duration(timeoutSec) * time.Second,
-		Transport: http.DefaultTransport.(*http.Transport).Clone(),
+		Transport: ownTransport(nil),
 	}
 	openaiConfig.HTTPClient = httpClient
 	client := openai.NewClientWithConfig(openaiConfig)
@@ -529,4 +529,20 @@ func openAIStreamUsage(have *Usage, u *openai.Usage) *Usage {
 		got.ReasoningTokens = d.ReasoningTokens
 	}
 	return got
+}
+
+// ownTransport gives a provider its own connection pool: a copy of
+// http.DefaultTransport, adjusted by tune. When DefaultTransport has been
+// replaced (a tracing wrapper, or nimbustesting.FakeHTTP) there is nothing to
+// copy, so the replacement is used as is and tune is skipped.
+func ownTransport(tune func(*http.Transport)) http.RoundTripper {
+	base, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		return http.DefaultTransport
+	}
+	tr := base.Clone()
+	if tune != nil {
+		tune(tr)
+	}
+	return tr
 }

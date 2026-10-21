@@ -54,6 +54,48 @@ type Listener func(payload any) error
 type Dispatcher struct {
 	mu        sync.RWMutex
 	listeners map[string][]Listener
+	fake      *fake
+}
+
+// fake is a test double installed with Dispatcher.Fake.
+type fake struct {
+	record func(event string, payload any)
+	except map[string]bool
+}
+
+// Fake makes the dispatcher hand every event to record instead of running its
+// listeners, until restore is called. Listeners for the events named in except
+// still run. Used by nimbustesting.FakeEvents.
+func (d *Dispatcher) Fake(record func(event string, payload any), except ...string) (restore func()) {
+	f := &fake{record: record, except: make(map[string]bool, len(except))}
+	for _, e := range except {
+		f.except[e] = true
+	}
+	d.mu.Lock()
+	prev := d.fake
+	d.fake = f
+	d.mu.Unlock()
+	return func() {
+		d.mu.Lock()
+		d.fake = prev
+		d.mu.Unlock()
+	}
+}
+
+// listenersFor returns the listeners to run for event, recording it first
+// when the dispatcher is faked.
+func (d *Dispatcher) listenersFor(event string, payload any) []Listener {
+	d.mu.RLock()
+	fns, f := d.listeners[event], d.fake
+	d.mu.RUnlock()
+	if f == nil {
+		return fns
+	}
+	f.record(event, payload)
+	if f.except[event] {
+		return fns
+	}
+	return nil
 }
 
 // New returns a new Dispatcher.
@@ -71,9 +113,7 @@ func (d *Dispatcher) Listen(event string, fn Listener) {
 // Dispatch fires the event synchronously. All listeners run in order.
 // Returns the first error encountered; remaining listeners still run.
 func (d *Dispatcher) Dispatch(event string, payload any) error {
-	d.mu.RLock()
-	fns := d.listeners[event]
-	d.mu.RUnlock()
+	fns := d.listenersFor(event, payload)
 
 	var firstErr error
 	for _, fn := range fns {
@@ -93,9 +133,7 @@ func (d *Dispatcher) Dispatch(event string, payload any) error {
 // DispatchAsync fires the event asynchronously. Each listener runs in
 // its own goroutine; errors are logged.
 func (d *Dispatcher) DispatchAsync(event string, payload any) {
-	d.mu.RLock()
-	fns := d.listeners[event]
-	d.mu.RUnlock()
+	fns := d.listenersFor(event, payload)
 
 	for _, fn := range fns {
 		go func(f Listener) {
@@ -148,7 +186,7 @@ func Dispatch(event string, payload any) error { return Default.Dispatch(event, 
 func DispatchAsync(event string, payload any) { Default.DispatchAsync(event, payload) }
 
 var (
-	afterDispatchMu   sync.Mutex
+	afterDispatchMu    sync.Mutex
 	afterDispatchHooks []func(event string, payload any)
 )
 

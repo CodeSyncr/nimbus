@@ -505,6 +505,12 @@ func (m *Manager) deserialize(p *JobPayload) (Job, error) {
 	return job, nil
 }
 
+// Decode turns a stored payload back into its registered job type.
+func (m *Manager) Decode(p *JobPayload) (Job, error) { return m.deserialize(p) }
+
+// JobName returns the name a job is registered and stored under.
+func JobName(job Job) string { return jobName(job) }
+
 func jobName(job Job) string {
 	t := reflect.TypeOf(job)
 	if t.Kind() == reflect.Ptr {
