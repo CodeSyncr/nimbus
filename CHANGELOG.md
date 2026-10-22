@@ -6,6 +6,8 @@ This project follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [1.15.0] - 2026-10-22
+
 ### Added
 
 - **Test fakes for every service.** `nimbustesting.FakeJobs`, `FakeMail`,
