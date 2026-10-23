@@ -1,0 +1,22 @@
+package services
+
+import (
+	"context"
+
+	pb "{{ .Module }}/proto/{{ .Snake }}"
+)
+
+// {{ .Name }} implements the {{ .Name }} gRPC service from proto/{{ .Snake }}/{{ .Snake }}.proto.
+// Register it in bin/server.go:
+//
+//	app.Use(nimbusgrpc.New(nimbusgrpc.Config{
+//		Register: func(s *grpc.Server) { pb.Register{{ .Name }}Server(s, &services.{{ .Name }}{}) },
+//	}))
+type {{ .Name }} struct {
+	pb.Unimplemented{{ .Name }}Server
+}
+
+// Ping answers with the message it was sent.
+func (s *{{ .Name }}) Ping(ctx context.Context, req *pb.PingRequest) (*pb.PingReply, error) {
+	return &pb.PingReply{Message: req.GetMessage()}, nil
+}
