@@ -2,6 +2,7 @@ package cache
 
 import (
 	"encoding/json"
+	"github.com/CodeSyncr/nimbus/internal/cachehook"
 	"time"
 )
 
@@ -87,6 +88,10 @@ func RememberT[T any](key string, ttl time.Duration, fn func() (T, error)) (T, e
 	}
 	return zero, nil
 }
+
+// The database package caches queries through this hook, so it need not
+// import this package and every cache driver with it.
+func init() { cachehook.Remember = Remember }
 
 // Default is the fallback in-memory store when Boot was not called.
 var Default Store = NewMemoryStore()
