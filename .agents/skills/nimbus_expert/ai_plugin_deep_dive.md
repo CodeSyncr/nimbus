@@ -74,6 +74,55 @@ Built-in support for OpenTelemetry tracing and cost tracking with budget alerts.
 3.  **Guardrails**: Apply `ai.Guardrails` to validate and filter the AI's output.
 4.  **Cost Monitoring**: Enable cost tracking in production to stay within budget.
 
+### Vani web chat application
+
+`nimbus-starter/resources/views/cloud/chat.nimbus` renders the web chat. Its
+behavior is in deferred `public/js/vani-chat.js`, with local pinned markdown,
+sanitizer and syntax-highlighting dependencies under `public/js/vendor/`.
+`public/css/vani-chat.css` provides the phone layout; `vani-launch.js` handles
+the visual viewport, options menu and arrival sound. Fonts load asynchronously.
+The composer uses a soft fill with no border or inner textarea focus outline;
+button focus indicators remain visible.
+Personalisation is opt-in and memories load on panel open, not during startup.
+History, documents, voice and the `/cloud/chat/send` streaming contract remain
+shared with the existing controller. The composer guards duplicate submissions,
+respects IME composition, uses Return for newlines on touch devices, and avoids
+focusing the phone keyboard automatically. Scrolling up pauses reply following.
+`public/audio/vani-open.wav` is the unchanged Devki arrival clip. Play once per
+page, retry after the first gesture if autoplay is blocked, and persist the
+`vani-opening-sound` preference (`off` disables it). Sound never gates chat.
+Vani's identity is an abstract orb only: no face, character or Nimbus mascot.
+Use `partials/vani-orb.nimbus` and `public/css/vani-orb.css` in Vani welcomes,
+reply avatars, thinking states, voice headers, marketing demos and monitoring
+empty states. Notifications/favicons use `public/images/vani/`. The standalone
+chat does not load `nimbo.js` or `nimbo.css`. Keep Nimbus's platform logo separate
+from Vani's identity. Orb glow may reflect activity without character features.
+Voice mode is in deferred `public/js/vani-voice.js`, with a scrollable transcript,
+calm activity indicator and optional auto-listen/read-aloud controls. Record mono
+16 kHz WAV and POST `/cloud/chat/transcribe` to Cloudflare Whisper large v3 turbo
+(`@cf/openai/whisper-large-v3-turbo`). Whisper is STT only. POST text to
+`/cloud/chat/speak` for Sarvam `bulbul:v4-flash`, persona `roopa_hi_companion`,
+language `hi-IN`, pace 1 and MP3 at 24 kHz. The server calls Sarvam's
+`/text-to-speech/stream` using the `api-subscription-key` header and the current
+`language_code` field. Validate/buffer a bounded clip, then play one continuous
+Web Audio buffer with 12 ms edge fades. This is buffered client playback, not
+progressive playback. No browser recognizer, browser TTS or local model fallback.
+Credentials stay server-side; both routes require authentication and an active
+plan. `SARVAM_API_KEY` supplies speech credentials, optionally overridden by
+`VANI_TTS_API_KEY`/`VANI_TTS_BASE_URL`. `VANI_TTS_MODEL`, `VANI_TTS_SPEAKER` and
+`VANI_TTS_LANGUAGE` select model/persona/language; match the persona to the
+language. Use `en-IN` for Indian English, `hi-IN` for Hindi/code-mixed Hindi.
+Cloudflare Aura 2 remains an explicit model option using its Cloudflare account.
+STT uses `VANI_STT_API_KEY`/`VANI_STT_BASE_URL`, otherwise
+`CLOUDFLARE_ACCOUNT_ID` + `CLOUDFLARE_AI_TOKEN` (or `CLOUDFLARE_API_TOKEN`).
+Capture/playback generations guard late microphone, transcription, fetch and
+decode callbacks. Closing/hiding aborts requests, stops output, releases tracks/
+AudioContexts and restores chat focus. Mic pause prevents auto-listening. The
+arrival clip stops when voice opens. Errors retain readable captions. Regression
+harness: `scripts/check-vani-voice.cjs` (Playwright, optional
+`PLAYWRIGHT_MODULE` and `CHROMIUM_PATH`).
+These changes address page startup and interaction, not model latency.
+
 ### Website Studio application architecture
 
 In `nimbus-starter`, Vani generation uses a persisted `sites.Plan` with `PlanPage.Scenes`

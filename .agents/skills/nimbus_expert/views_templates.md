@@ -109,3 +109,27 @@ return ctx.View("home", map[string]any{
 The starter's authenticated dashboard uses `resources/views/layout-dash.nimbus` with `resources/css/cloud-dashboard.css` (copied to `public/css/` by `nimbus build`) for the existing warm morning surfaces, ember accents, Instrument Serif titles and Geist body typography, shared component tokens, and responsive navigation. The overview at `cloud/dash/overview.nimbus` renders existing controller data: `User.AIUsageCount`, `AIThisPeriod`, `AIHistory` (`Period`, `Count`), `SiteCount`, `TunnelCount`, `Billing`, and `Payments`. Do not invent uptime or trend values. Empty usage/payment data have explicit empty states. `Billing.PeriodPct` is the percentage **remaining**, not elapsed.
 
 The native dialog opened by the header search or Cmd/Ctrl+K derives links from `#dashNav`, retaining role and Cashier workspace visibility. Sidebar groups expand independently; the navigation scrolls on short windows and uses a Menu disclosure on mobile. Keep skip-to-content and keyboard focus styling intact when extending the shell. The background canvas loop was removed from this workspace.
+
+## Shared Nimbus brand artwork (starter)
+
+Use `resources/views/partials/nimbus-mark.nimbus` for the compact Nimbus platform logo. It renders
+`/public/images/nimbus/mark.svg` at 32 px in marketing/dashboard navigation and
+fits 24–28 px wrappers in docs and chat. Do not shrink a detailed full-body
+illustration into a nav icon. The shared `nimbo.css` sizes `.nimbus-logo`,
+`.halo-mark` and `.docs-mark` consistently. The favicon uses the same SVG;
+`public/logo.png` (512 px) and `public/apple-touch-icon.png` (180 px) are raster
+exports of that vector, for metadata and home-screen icons respectively.
+
+Vani is a separate, faceless orb identity: use `partials/vani-orb.nimbus`,
+never a Nimbus mascot as its avatar or illustration.
+
+`public/js/nimbo.js` keeps the `Nimbo.svg`, `render`, `scan`, `moods` API and all
+20 mood names. It now loads SVG poses from `public/images/nimbus/<mood>.svg`,
+with explicit intrinsic dimensions (160×180; launch 240×180). `data-size`
+controls display width. Keep props/expressions readable at small sizes; avoid
+bitmaps, SVG blur filters and stretching transforms. Reduced motion disables
+mascot animations. `partials/nimbo-flier` uses the coloured vector launch pose
+and the corresponding 240×180 aspect ratio. Version shared CSS/JS and icons
+when changing the artwork; the head partial and standalone chat/studio/Cashier
+views carry these URLs. Preserve CC BY 4.0 attribution to Renée French in the
+asset README. See the starter's `docs/static-files.nimbus` for usage.
