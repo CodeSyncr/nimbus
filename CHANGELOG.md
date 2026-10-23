@@ -6,6 +6,39 @@ This project follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [1.15.1] - 2026-10-23
+
+### Added
+
+- **gRPC plugin.** `plugins/grpc` runs a gRPC server beside the HTTP app and
+  stops it with the app: `grpc.New(grpc.Config{Addr, Register, ...})`, with
+  recovery and logging interceptors, the health service, optional reflection
+  and `grpc.BearerAuth` / `grpc.Token(ctx)` for tokens.
+- `nimbus make:grpc <name>` writes a `.proto` file and a Go service to
+  register with the plugin.
+- `http.Context.Route()` returns the route a request matched (method, path,
+  handler, middleware) as a `*http.RouteInfo`.
+
+### Fixed
+
+- **Views rendered at the same time could swap slots.** Slot functions were
+  shared by every template, so two concurrent renders of different views
+  could fill each other's slots. Each template now gets its own.
+- `database.CachedFind` returned without filling `dest` when the value came
+  from the cache. It now copies the cached value into `dest`.
+
+### Changed
+
+- The SQL pool keeps idle connections by default (`MaxIdleConns` 25,
+  `ConnMaxIdleTime` 5 minutes, used when the config leaves them at zero), so
+  busy apps stop reopening connections.
+- The router builds each route's info once, at registration, and creates a
+  request's params map only when the route has params: less allocation per
+  request.
+- `database` no longer imports `cache`; cached queries reach the cache through
+  a hook it sets, falling back to memory. Apps that do not use `cache` no
+  longer link it.
+
 ## [1.15.0] - 2026-10-22
 
 ### Added
