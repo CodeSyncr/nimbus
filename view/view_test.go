@@ -1,9 +1,11 @@
 package view
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -254,5 +256,49 @@ func TestProvideInject(t *testing.T) {
 	}
 	if clean(out) != clean(expected) {
 		t.Errorf("Provide/Inject output mismatch. Expected %q, got %q", expected, out)
+	}
+}
+
+// Two views fill the same component with different slot content and are
+// rendered from many goroutines at once: each must get its own slot, and the
+// engine's cache must be safe under concurrent requests (run with -race).
+func TestConcurrentRenderKeepsEachViewsSlots(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "components"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		"components/card.nimbus": `<div class="card">{{{ .slots.main }}}</div>`,
+		"alpha.nimbus":           "@card()\n<p>from alpha</p>\n@end",
+		"beta.nimbus":            "@card()\n<p>from beta</p>\n@end",
+	}
+	for name, body := range files {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	eng := New(root, nil)
+	var wg sync.WaitGroup
+	errs := make(chan error, 400)
+	for i := 0; i < 200; i++ {
+		for _, view := range []string{"alpha", "beta"} {
+			wg.Add(1)
+			go func(view string, n int) {
+				defer wg.Done()
+				out, err := eng.Render(view, map[string]any{"n": n})
+				if err != nil {
+					errs <- err
+					return
+				}
+				if want := "from " + view; !strings.Contains(out, want) {
+					errs <- fmt.Errorf("render %s (%d): want %q in %q", view, n, want, out)
+				}
+			}(view, i)
+		}
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
 	}
 }

@@ -272,12 +272,14 @@ func defaultFuncs() template.FuncMap {
 
 // Engine renders .nimbus templates (Edge-style: {{ variable }}, {{{ raw }}}, @if, @each, @layout, @component).
 type Engine struct {
-	root         string
-	funcs        template.FuncMap
-	cache        map[string]*template.Template
-	layout       map[string]string // view name -> layout name
-	slotTemplate *template.Template
-	slotCounter  int
+	root  string
+	funcs template.FuncMap
+	// mu guards cache and layout, and serialises parsing (which uses
+	// slotCounter). Requests render concurrently from the cached templates.
+	mu          sync.RWMutex
+	cache       map[string]*template.Template
+	layout      map[string]string // view name -> layout name
+	slotCounter int
 }
 
 // New creates a view engine with views loaded from root (e.g. "views"). Templates use .nimbus extension.
@@ -290,39 +292,11 @@ func New(root string, funcs template.FuncMap) *Engine {
 		merged[k] = v
 	}
 	e := &Engine{root: root, funcs: merged, cache: make(map[string]*template.Template), layout: make(map[string]string)}
-	merged["slot"] = func(name string, data any) (template.HTML, error) {
-		if e.slotTemplate == nil {
-			return "", fmt.Errorf("view: slot template not ready")
-		}
-		var b bytes.Buffer
-		if err := e.slotTemplate.ExecuteTemplate(&b, name, data); err != nil {
-			return "", err
-		}
-		return template.HTML(b.String()), nil
-	}
-	merged["renderSlot"] = func(slots any, name string, data any) (template.HTML, error) {
-		if slots == nil {
-			return "", nil
-		}
-		var slotTmplName string
-		switch sMap := slots.(type) {
-		case map[string]any:
-			if val, ok := sMap[name].(string); ok {
-				slotTmplName = val
-			}
-		}
-		if slotTmplName == "" {
-			return "", nil
-		}
-		if e.slotTemplate == nil {
-			return "", fmt.Errorf("view: slot template not ready")
-		}
-		var b bytes.Buffer
-		if err := e.slotTemplate.ExecuteTemplate(&b, slotTmplName, data); err != nil {
-			return "", err
-		}
-		return template.HTML(b.String()), nil
-	}
+	// slot and renderSlot are rebound to each template as it is parsed
+	// (see slotFuncs), so a view's slots always come from that view.
+	notReady := func(...any) (template.HTML, error) { return "", fmt.Errorf("view: slot template not ready") }
+	merged["slot"] = func(name string, data any) (template.HTML, error) { return notReady() }
+	merged["renderSlot"] = func(slots any, name string, data any) (template.HTML, error) { return notReady() }
 	merged["include"] = func(name string, data any) (template.HTML, error) {
 		if data == nil {
 			data = map[string]any{}
@@ -371,7 +345,7 @@ func (e *Engine) renderWithLayouts(name string, data any, seen map[string]bool) 
 		return "", err
 	}
 	body := b.String()
-	if layoutName, ok := e.layout[name]; ok {
+	if layoutName, ok := e.layoutOf(name); ok {
 		if seen == nil {
 			seen = make(map[string]bool)
 		}
@@ -408,9 +382,46 @@ func (e *Engine) RenderWriter(name string, data any, w io.Writer) error {
 	return t.Execute(w, data)
 }
 
+// slotFuncs returns slot and renderSlot bound to t, the template whose
+// named slot sub-templates they execute.
+func slotFuncs(t *template.Template) template.FuncMap {
+	exec := func(name string, data any) (template.HTML, error) {
+		var b bytes.Buffer
+		if err := t.ExecuteTemplate(&b, name, data); err != nil {
+			return "", err
+		}
+		return template.HTML(b.String()), nil
+	}
+	return template.FuncMap{
+		"slot": exec,
+		"renderSlot": func(slots any, name string, data any) (template.HTML, error) {
+			sMap, _ := slots.(map[string]any)
+			slotTmplName, _ := sMap[name].(string)
+			if slotTmplName == "" {
+				return "", nil
+			}
+			return exec(slotTmplName, data)
+		},
+	}
+}
+
+func (e *Engine) layoutOf(name string) (string, bool) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	l, ok := e.layout[name]
+	return l, ok
+}
+
 func (e *Engine) parse(name string) (*template.Template, error) {
+	e.mu.RLock()
+	t, ok := e.cache[name]
+	e.mu.RUnlock()
+	if ok {
+		return t, nil
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	if t, ok := e.cache[name]; ok {
-		e.slotTemplate = t
 		return t, nil
 	}
 	body, _, err := e.readView(name)
@@ -424,7 +435,7 @@ func (e *Engine) parse(name string) (*template.Template, error) {
 	}
 	e.slotCounter = 0
 	converted := e.convertNimbusToGo(s)
-	t, err := template.New(name).Funcs(e.funcs).Parse(converted)
+	t, err = template.New(name).Funcs(e.funcs).Parse(converted)
 	if err != nil {
 		return nil, fmt.Errorf("view %q parse: %w", name, err)
 	}
@@ -432,7 +443,7 @@ func (e *Engine) parse(name string) (*template.Template, error) {
 	if err != nil {
 		return nil, err
 	}
-	e.slotTemplate = t
+	t.Funcs(slotFuncs(t))
 	e.cache[name] = t
 	return t, nil
 }
