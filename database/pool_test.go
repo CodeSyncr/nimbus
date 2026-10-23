@@ -1,6 +1,7 @@
 package database
 
 import (
+	"sync"
 	"testing"
 	"time"
 
@@ -49,5 +50,39 @@ func TestApplyPool(t *testing.T) {
 	}
 	if sqlDB.Stats().MaxOpenConnections != 7 {
 		t.Fatalf("MaxOpenConnections = %d", sqlDB.Stats().MaxOpenConnections)
+	}
+}
+
+// With no pool settings, connections opened for concurrent queries stay in
+// the pool for the next requests instead of being closed (Go keeps 2).
+func TestApplyPoolDefaultKeepsConnectionsIdle(t *testing.T) {
+	db := openTestDB(t)
+	if err := ApplyPool(db, PoolConfig{}); err != nil {
+		t.Fatal(err)
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			tx, err := sqlDB.Begin() // holds a connection until Commit
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			time.Sleep(50 * time.Millisecond)
+			_ = tx.Commit()
+		}()
+	}
+	close(start)
+	wg.Wait()
+	if idle := sqlDB.Stats().Idle; idle < 10 {
+		t.Fatalf("idle connections after 10 concurrent queries = %d, want 10", idle)
 	}
 }

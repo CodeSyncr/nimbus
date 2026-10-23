@@ -85,3 +85,38 @@ func TestRouterMethodAndRoutes(t *testing.T) {
 		t.Fatal("route not in Routes()")
 	}
 }
+
+// The route a request matched is readable through Get, as before, and a
+// route without parameters leaves Params empty.
+func TestRouteInfoThroughGet(t *testing.T) {
+	t.Parallel()
+	r := New()
+	var got map[string]any
+	var params int
+	r.Get("/posts/:slug", func(c *nhttp.Context) error {
+		got = map[string]any{}
+		for _, k := range []string{"route_method", "route_path", "route_handler"} {
+			v, _ := c.Get(k)
+			got[k] = v
+		}
+		params = len(c.Params)
+		c.String(nhttp.StatusOK, c.Param("slug"))
+		return nil
+	})
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(nhttp.MethodGet, "/posts/hello", nil))
+	if rec.Body.String() != "hello" {
+		t.Fatalf("param: body %q", rec.Body.String())
+	}
+	if got["route_method"] != "GET" || got["route_path"] != "/posts/:slug" || got["route_handler"] == "" {
+		t.Fatalf("route info: %v", got)
+	}
+	if params != 1 {
+		t.Fatalf("params: %d", params)
+	}
+	r.Get("/plain", func(c *nhttp.Context) error { params = len(c.Params); return nil })
+	r.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(nhttp.MethodGet, "/plain", nil))
+	if params != 0 {
+		t.Fatalf("plain route params: %d", params)
+	}
+}

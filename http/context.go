@@ -49,7 +49,25 @@ type Context struct {
 	status    int
 	store     map[string]any
 	auth      Authenticator
+	route     *RouteInfo
 }
+
+// RouteInfo describes the route a request matched. The router builds one per
+// route when it is registered and points each request's Context at it, so
+// nothing is allocated per request. Get("route_method"), "route_path",
+// "route_handler" and "route_middleware" read from it.
+type RouteInfo struct {
+	Method     string
+	Path       string
+	Handler    string
+	Middleware []string
+}
+
+// SetRoute records the route this request matched (called by the router).
+func (c *Context) SetRoute(r *RouteInfo) { c.route = r }
+
+// Route returns the route this request matched, or nil outside the router.
+func (c *Context) Route() *RouteInfo { return c.route }
 
 // Auth returns the AdonisJS-style auth accessor for this request.
 // Usage: user, err := c.Auth().User()
@@ -112,11 +130,22 @@ func (c *Context) Set(key string, val any) {
 
 // Get retrieves a value from the request-scoped store.
 func (c *Context) Get(key string) (any, bool) {
-	if c.store == nil {
-		return nil, false
+	if v, ok := c.store[key]; ok {
+		return v, true
 	}
-	v, ok := c.store[key]
-	return v, ok
+	if c.route != nil {
+		switch key {
+		case "route_method":
+			return c.route.Method, true
+		case "route_path":
+			return c.route.Path, true
+		case "route_handler":
+			return c.route.Handler, true
+		case "route_middleware":
+			return c.route.Middleware, true
+		}
+	}
+	return nil, false
 }
 
 // MustGet retrieves a value or panics if not found.

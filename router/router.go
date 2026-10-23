@@ -228,12 +228,10 @@ func (r *Router) addRoute(method, path string, handler HandlerFunc, groupMiddlew
 func (r *Router) CompileTime() time.Duration { return r.compileTime }
 
 func withRouteMeta(method, path, handlerName string, middleware []string, next HandlerFunc) HandlerFunc {
+	info := &http.RouteInfo{Method: method, Path: path, Handler: handlerName, Middleware: middleware}
 	return func(c *http.Context) error {
 		if c != nil {
-			c.Set("route_method", method)
-			c.Set("route_path", path)
-			c.Set("route_handler", handlerName)
-			c.Set("route_middleware", middleware)
+			c.SetRoute(info)
 		}
 		return next(c)
 	}
@@ -260,8 +258,9 @@ func (r *Router) Routes() []*Route {
 
 func (r *Router) toHandler(fn HandlerFunc) http.StdHandlerFunc {
 	return func(w http.ResponseWriter, req *http.Request) {
-		params := make(map[string]string)
-		if rc := chi.RouteContext(req.Context()); rc != nil {
+		var params map[string]string
+		if rc := chi.RouteContext(req.Context()); rc != nil && len(rc.URLParams.Keys) > 0 {
+			params = make(map[string]string, len(rc.URLParams.Keys))
 			for i, key := range rc.URLParams.Keys {
 				if key != "" && i < len(rc.URLParams.Values) {
 					params[key] = rc.URLParams.Values[i]
