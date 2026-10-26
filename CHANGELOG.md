@@ -6,6 +6,61 @@ This project follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [1.15.2] - 2026-10-26
+
+### Security
+
+- **Sessions can no longer be revived after logout.** Saving an existing
+  session now updates only a live record, so a slow request that finishes
+  after logout cannot write the old session back. `Regenerate` swaps the ID
+  in one step, and an unknown session ID sent by the client is thrown away
+  instead of being adopted.
+- Encrypted cookie sessions use payload version 2, which carries a session
+  ID so destroying a cookie also revokes the cookies that replaced it.
+  **Version 1 cookies are rejected: users have to log in again after the
+  upgrade.**
+- `storage.LocalDriver` works through `os.Root`, so a symlinked directory
+  inside the root can no longer lead outside it.
+- `view.Props.ToAttrs()` escapes every value, drops `on*` and `srcdoc`
+  attributes and invalid names, and runs URL, `srcset` and `style` values
+  through Go's contextual escaping.
+
+### Added
+
+- `session.Updater`, `session.Rotator` and `session.Replacer`: the atomic
+  operations the session middleware needs, implemented by the memory, Redis,
+  database and cookie stores. `session.ErrExpired` reports an update that
+  lost to logout or expiry.
+- `session.Config.SaveTimeout` (default 5s) bounds the session save.
+- `websocket.NewHubWithOptions(HubOptions{...})` caps message size,
+  connections, per-client send buffer and timeouts; `Hub.Close()` stops the
+  hub and its connections; `Hub.BroadcastContext` returns `ErrClosed`,
+  `ErrBackpressure` or `ErrMessageTooLarge` instead of blocking.
+- `ai.WithMemoryMaxEntries(n)` caps the in-memory conversation store
+  (default 10,000, least recently used evicted first).
+
+### Fixed
+
+- Session load and save errors are returned instead of ignored; a failed
+  save answers 503 before any body is sent. The session writer now passes
+  `Flush`, `Hijack` and `Unwrap` through, so SSE, WebSockets and
+  `http.ResponseController` work behind the session middleware.
+- The session memory store keeps JSON snapshots, so changing a nested value
+  after saving no longer changes the stored session, and it has no
+  background cleanup goroutine left running.
+- `container` no longer holds its lock while running constructors:
+  concurrent `Make` calls build a singleton once, independent bindings build
+  in parallel, and dependency cycles return an error instead of deadlocking.
+- The AI memory store hands out copies, so callers cannot change a saved
+  conversation by editing the slice they got back.
+
+### Upgrading
+
+- Custom session stores must implement `Updater` and `Rotator` (cookie
+  registries also `Replacer`), atomically, not as a `Get` then `Set`.
+- Values in the session memory store come back as JSON types (numbers are
+  `float64`), the same as the Redis, database and cookie stores.
+
 ## [1.15.1] - 2026-10-23
 
 ### Added
