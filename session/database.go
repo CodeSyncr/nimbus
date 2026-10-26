@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/CodeSyncr/nimbus/lucid"
@@ -43,8 +44,11 @@ func (s *DatabaseStore) Get(ctx context.Context, id string) (map[string]any, err
 	}
 	var rec SessionRecord
 	err := s.db.WithContext(ctx).Table(s.table).Where("id = ? AND expires_at > ?", id, time.Now()).First(&rec).Error
-	if err != nil {
+	if errors.Is(err, lucid.ErrRecordNotFound) {
 		return nil, nil
+	}
+	if err != nil {
+		return nil, err
 	}
 	var data map[string]any
 	if err := json.Unmarshal([]byte(rec.Payload), &data); err != nil {
@@ -82,4 +86,35 @@ func (s *DatabaseStore) Destroy(ctx context.Context, id string) error {
 		return nil
 	}
 	return s.db.WithContext(ctx).Table(s.table).Where("id = ?", id).Delete(&SessionRecord{}).Error
+}
+
+func (s *DatabaseStore) Update(ctx context.Context, id string, data map[string]any, maxAge time.Duration) (string, error) {
+	if err := s.Replace(ctx, id, id, data, maxAge); err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
+// Replace performs one conditional UPDATE, never an upsert after revocation.
+func (s *DatabaseStore) Replace(ctx context.Context, oldID, newID string, data map[string]any, maxAge time.Duration) error {
+	if oldID == "" || newID == "" {
+		return ErrExpired
+	}
+	payload, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+	now := time.Now()
+	result := s.db.WithContext(ctx).Table(s.table).Where("id = ? AND expires_at > ?", oldID, now).Updates(map[string]any{"id": newID, "payload": string(payload), "expires_at": now.Add(maxAge)})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return ErrExpired
+	}
+	return nil
+}
+
+func (s *DatabaseStore) Rotate(ctx context.Context, id string, data map[string]any, maxAge time.Duration) (string, error) {
+	return rotateRecord(ctx, s, id, data, maxAge)
 }

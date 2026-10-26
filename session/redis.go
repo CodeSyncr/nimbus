@@ -46,7 +46,7 @@ func (s *RedisStore) Get(ctx context.Context, id string) (map[string]any, error)
 		return nil, nil
 	}
 	if err != nil {
-		return nil, nil
+		return nil, err
 	}
 	var out map[string]any
 	if err := json.Unmarshal(data, &out); err != nil {
@@ -88,3 +88,43 @@ func (s *RedisStore) Destroy(ctx context.Context, id string) error {
 }
 
 var _ Store = (*RedisStore)(nil)
+
+// Update only changes a still-live session; it cannot resurrect a revoked ID.
+func (s *RedisStore) Update(ctx context.Context, id string, data map[string]any, maxAge time.Duration) (string, error) {
+	if err := s.Replace(ctx, id, id, data, maxAge); err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
+var replaceSessionScript = redis.NewScript(`
+if redis.call('EXISTS', KEYS[1]) == 0 then return 0 end
+redis.call('SET', KEYS[2], ARGV[1], 'PX', ARGV[2])
+if KEYS[1] ~= KEYS[2] then redis.call('DEL', KEYS[1]) end
+return 1
+`)
+
+func (s *RedisStore) Replace(ctx context.Context, oldID, newID string, data map[string]any, maxAge time.Duration) error {
+	if oldID == "" || newID == "" {
+		return ErrExpired
+	}
+	payload, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+	if maxAge <= 0 {
+		maxAge = 24 * time.Hour
+	}
+	n, err := replaceSessionScript.Run(ctx, s.client, []string{s.key(oldID), s.key(newID)}, payload, max(int64(1), maxAge.Milliseconds())).Int()
+	if err != nil {
+		return err
+	}
+	if n != 1 {
+		return ErrExpired
+	}
+	return nil
+}
+
+func (s *RedisStore) Rotate(ctx context.Context, id string, data map[string]any, maxAge time.Duration) (string, error) {
+	return rotateRecord(ctx, s, id, data, maxAge)
+}

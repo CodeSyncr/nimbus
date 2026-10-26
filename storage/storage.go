@@ -2,6 +2,7 @@ package storage
 
 import (
 	"bytes"
+	"crypto/rand"
 	"io"
 	"io/fs"
 	"os"
@@ -30,55 +31,71 @@ func NewLocalDriver(root string) *LocalDriver {
 	return &LocalDriver{Root: root}
 }
 
-// resolve maps a storage path to a file under Root. Cleaning it as an
-// absolute path first drops any leading "..", so paths built from user
-// input ("../../etc/passwd") cannot reach outside Root.
-func (d *LocalDriver) resolve(path string) string {
-	return filepath.Join(d.Root, filepath.Clean(string(filepath.Separator)+path))
+// resolve preserves the historical normalization of ../ paths, returning a
+// relative name for os.Root. Root enforces confinement during each operation,
+// including directory symlinks; lexical cleaning alone cannot do that.
+func (d *LocalDriver) resolve(name string) string {
+	return strings.TrimPrefix(filepath.Clean(string(filepath.Separator)+name), string(filepath.Separator))
 }
 
-// Put writes the reader to root/path, creating parent dirs. The file is
-// written to a temporary name and renamed, so readers never see a partial
-// file and a failed copy leaves the previous version in place.
-func (d *LocalDriver) Put(path string, src io.Reader) error {
-	full := d.resolve(path)
-	if err := os.MkdirAll(filepath.Dir(full), 0755); err != nil {
+func (d *LocalDriver) Put(name string, src io.Reader) error {
+	if err := os.MkdirAll(d.Root, 0755); err != nil {
 		return err
 	}
-	f, err := os.CreateTemp(filepath.Dir(full), ".tmp-"+filepath.Base(full)+"-*")
+	root, err := os.OpenRoot(d.Root)
 	if err != nil {
 		return err
 	}
-	tmp := f.Name()
+	defer root.Close()
+	name = d.resolve(name)
+	if err := root.MkdirAll(filepath.Dir(name), 0755); err != nil {
+		return err
+	}
+	tmp := filepath.Join(filepath.Dir(name), ".tmp-"+rand.Text())
+	f, err := root.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		return err
+	}
+	defer root.Remove(tmp)
 	_, err = io.Copy(f, src)
+	if err == nil {
+		err = f.Chmod(0644)
+	}
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
-	if err == nil {
-		err = os.Chmod(tmp, 0644)
+	if err != nil {
+		return err
 	}
-	if err == nil {
-		err = os.Rename(tmp, full)
+	return root.Rename(tmp, name)
+}
+
+func (d *LocalDriver) Get(name string) (io.ReadCloser, error) {
+	root, err := os.OpenRoot(d.Root)
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+	return root.Open(d.resolve(name))
+}
+func (d *LocalDriver) Delete(name string) error {
+	root, err := os.OpenRoot(d.Root)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	return root.Remove(d.resolve(name))
+}
+func (d *LocalDriver) Exists(name string) (bool, error) {
+	root, err := os.OpenRoot(d.Root)
+	if os.IsNotExist(err) {
+		return false, nil
 	}
 	if err != nil {
-		_ = os.Remove(tmp)
+		return false, err
 	}
-	return err
-}
-
-// Get opens the file at root/path for reading.
-func (d *LocalDriver) Get(path string) (io.ReadCloser, error) {
-	return os.Open(d.resolve(path))
-}
-
-// Delete removes the file at root/path.
-func (d *LocalDriver) Delete(path string) error {
-	return os.Remove(d.resolve(path))
-}
-
-// Exists returns whether the file exists.
-func (d *LocalDriver) Exists(path string) (bool, error) {
-	_, err := os.Stat(d.resolve(path))
+	defer root.Close()
+	_, err = root.Stat(d.resolve(name))
 	if os.IsNotExist(err) {
 		return false, nil
 	}

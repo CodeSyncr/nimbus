@@ -60,6 +60,7 @@ type CookieStoreImpl struct {
 }
 
 type cookiePayload struct {
+	SessionID string         `json:"session_id"`
 	Version   int            `json:"v"`
 	ExpiresAt int64          `json:"expires_at"`
 	Data      map[string]any `json:"data"`
@@ -79,37 +80,88 @@ func (s *CookieStoreImpl) Get(ctx context.Context, id string) (map[string]any, e
 		return nil, nil
 	}
 	var payload cookiePayload
-	if json.Unmarshal(dec, &payload) != nil || payload.Version != 1 ||
+	if json.Unmarshal(dec, &payload) != nil || payload.Version != 2 || payload.SessionID == "" ||
 		payload.ExpiresAt <= time.Now().UnixNano() {
 		return nil, nil
 	}
-	active, err := s.registry.Get(ctx, cookieFingerprint(id))
+	active, err := s.registry.Get(ctx, "cookie:"+payload.SessionID)
 	if err != nil {
 		return nil, err
 	}
-	if active == nil {
+	if active == nil || active["fingerprint"] != cookieFingerprint(id) {
 		return nil, nil
 	}
 	return payload.Data, nil
 }
 
 func (s *CookieStoreImpl) Set(ctx context.Context, id string, data map[string]any, maxAge time.Duration) (string, error) {
+	if id != "" {
+		return s.Update(ctx, id, data, maxAge)
+	}
 	if maxAge <= 0 {
 		return "", fmt.Errorf("session: cookie lifetime must be positive")
 	}
-	enc, err := s.encrypt(cookiePayload{Version: 1, ExpiresAt: time.Now().Add(maxAge).UnixNano(), Data: data})
+	family, err := newSessionID()
 	if err != nil {
 		return "", err
 	}
-	fingerprint := cookieFingerprint(enc)
-	if _, err := s.registry.Set(ctx, fingerprint, map[string]any{"active": true}, maxAge); err != nil {
+	enc, err := s.encrypt(cookiePayload{Version: 2, SessionID: family, ExpiresAt: time.Now().Add(maxAge).UnixNano(), Data: data})
+	if err != nil {
 		return "", err
 	}
-	if id != "" {
-		if err := s.Destroy(ctx, id); err != nil {
-			_ = s.registry.Destroy(ctx, fingerprint)
+	if _, err := s.registry.Set(ctx, "cookie:"+family, map[string]any{"fingerprint": cookieFingerprint(enc)}, maxAge); err != nil {
+		return "", err
+	}
+	return enc, nil
+}
+
+func (s *CookieStoreImpl) payload(id string) (cookiePayload, error) {
+	var p cookiePayload
+	raw, err := s.decrypt(id)
+	if err != nil {
+		return p, ErrExpired
+	}
+	if json.Unmarshal(raw, &p) != nil || p.Version != 2 || p.SessionID == "" {
+		return p, ErrExpired
+	}
+	return p, nil
+}
+
+// Update retains one revocation record across cookie replacements. Logout
+// removes that record, whether it races before or after a replacement save.
+func (s *CookieStoreImpl) Update(ctx context.Context, id string, data map[string]any, maxAge time.Duration) (string, error) {
+	return s.replace(ctx, id, data, maxAge, false)
+}
+
+func (s *CookieStoreImpl) Rotate(ctx context.Context, id string, data map[string]any, maxAge time.Duration) (string, error) {
+	return s.replace(ctx, id, data, maxAge, true)
+}
+
+func (s *CookieStoreImpl) replace(ctx context.Context, id string, data map[string]any, maxAge time.Duration, rotate bool) (string, error) {
+	if maxAge <= 0 {
+		return "", fmt.Errorf("session: cookie lifetime must be positive")
+	}
+	previous, err := s.payload(id)
+	if err != nil || previous.ExpiresAt <= time.Now().UnixNano() {
+		return "", ErrExpired
+	}
+	registry, ok := s.registry.(Replacer)
+	if !ok {
+		return "", fmt.Errorf("session: cookie registry must implement Replacer")
+	}
+	family := previous.SessionID
+	if rotate {
+		family, err = newSessionID()
+		if err != nil {
 			return "", err
 		}
+	}
+	enc, err := s.encrypt(cookiePayload{Version: 2, SessionID: family, ExpiresAt: time.Now().Add(maxAge).UnixNano(), Data: data})
+	if err != nil {
+		return "", err
+	}
+	if err := registry.Replace(ctx, "cookie:"+previous.SessionID, "cookie:"+family, map[string]any{"fingerprint": cookieFingerprint(enc)}, maxAge); err != nil {
+		return "", err
 	}
 	return enc, nil
 }
@@ -118,7 +170,11 @@ func (s *CookieStoreImpl) Destroy(ctx context.Context, id string) error {
 	if id == "" {
 		return nil
 	}
-	return s.registry.Destroy(ctx, cookieFingerprint(id))
+	p, err := s.payload(id)
+	if err != nil {
+		return nil
+	}
+	return s.registry.Destroy(ctx, "cookie:"+p.SessionID)
 }
 
 func (s *CookieStoreImpl) encrypt(data any) (string, error) {

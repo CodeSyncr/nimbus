@@ -4,63 +4,73 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"sync"
 	"time"
 )
 
-// MemoryStore stores sessions in memory. Sessions are lost on restart.
-// Use for development or single-instance apps.
+// MemoryStore stores JSON session snapshots in memory. Sessions are lost on
+// restart. Use for development or single-instance apps. No background goroutine
+// is started: expired records are pruned on reads and periodically on writes.
 type MemoryStore struct {
-	mu       sync.RWMutex
-	sessions map[string]sessionEntry
+	mu        sync.RWMutex
+	sessions  map[string]sessionEntry
+	lastSweep time.Time
 }
 
 type sessionEntry struct {
-	data   map[string]any
-	expiry time.Time
+	payload []byte // immutable after publication
+	expiry  time.Time
 }
 
-// NewMemoryStore creates an in-memory session store.
 func NewMemoryStore() *MemoryStore {
-	s := &MemoryStore{sessions: make(map[string]sessionEntry)}
-	go s.cleanup()
-	return s
+	return &MemoryStore{sessions: make(map[string]sessionEntry), lastSweep: time.Now()}
 }
 
-func (s *MemoryStore) cleanup() {
-	ticker := time.NewTicker(time.Minute)
-	defer ticker.Stop()
-	for range ticker.C {
-		s.mu.Lock()
-		now := time.Now()
-		for id, e := range s.sessions {
-			if e.expiry.Before(now) {
-				delete(s.sessions, id)
-			}
-		}
-		s.mu.Unlock()
+func (s *MemoryStore) sweepLocked(now time.Time) {
+	if now.Sub(s.lastSweep) < time.Minute {
+		return
 	}
+	for id, e := range s.sessions {
+		if !now.Before(e.expiry) {
+			delete(s.sessions, id)
+		}
+	}
+	s.lastSweep = now
 }
 
 func (s *MemoryStore) Get(ctx context.Context, id string) (map[string]any, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if id == "" {
 		return nil, nil
 	}
 	s.mu.RLock()
 	e, ok := s.sessions[id]
 	s.mu.RUnlock()
-	if !ok || e.expiry.Before(time.Now()) {
+	if !ok {
 		return nil, nil
 	}
-	// Return a copy so caller cannot mutate the stored data
-	out := make(map[string]any, len(e.data))
-	for k, v := range e.data {
-		out[k] = v
+	if !time.Now().Before(e.expiry) {
+		s.mu.Lock()
+		if latest, ok := s.sessions[id]; ok && !time.Now().Before(latest.expiry) {
+			delete(s.sessions, id)
+		}
+		s.mu.Unlock()
+		return nil, nil
+	}
+	var out map[string]any
+	if err := json.Unmarshal(e.payload, &out); err != nil {
+		return nil, err
 	}
 	return out, nil
 }
 
 func (s *MemoryStore) Set(ctx context.Context, id string, data map[string]any, maxAge time.Duration) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	if id == "" {
 		b := make([]byte, 16)
 		if _, err := rand.Read(b); err != nil {
@@ -68,25 +78,61 @@ func (s *MemoryStore) Set(ctx context.Context, id string, data map[string]any, m
 		}
 		id = hex.EncodeToString(b)
 	}
-	entry := sessionEntry{
-		data:   make(map[string]any, len(data)),
-		expiry: time.Now().Add(maxAge),
-	}
-	for k, v := range data {
-		entry.data[k] = v
+	payload, err := json.Marshal(data)
+	if err != nil {
+		return "", err
 	}
 	s.mu.Lock()
-	s.sessions[id] = entry
-	s.mu.Unlock()
+	defer s.mu.Unlock()
+	now := time.Now()
+	s.sweepLocked(now)
+	s.sessions[id] = sessionEntry{payload: payload, expiry: now.Add(maxAge)}
 	return id, nil
 }
 
+func (s *MemoryStore) Update(ctx context.Context, id string, data map[string]any, maxAge time.Duration) (string, error) {
+	if err := s.Replace(ctx, id, id, data, maxAge); err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
+func (s *MemoryStore) Replace(ctx context.Context, oldID, newID string, data map[string]any, maxAge time.Duration) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	payload, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now()
+	s.sweepLocked(now)
+	e, ok := s.sessions[oldID]
+	if !ok || !now.Before(e.expiry) {
+		return ErrExpired
+	}
+	if newID == "" {
+		return ErrExpired
+	}
+	s.sessions[newID] = sessionEntry{payload: payload, expiry: now.Add(maxAge)}
+	if oldID != newID {
+		delete(s.sessions, oldID)
+	}
+	return nil
+}
+
 func (s *MemoryStore) Destroy(ctx context.Context, id string) error {
-	if id == "" {
-		return nil
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	s.mu.Lock()
 	delete(s.sessions, id)
 	s.mu.Unlock()
 	return nil
+}
+
+func (s *MemoryStore) Rotate(ctx context.Context, id string, data map[string]any, maxAge time.Duration) (string, error) {
+	return rotateRecord(ctx, s, id, data, maxAge)
 }

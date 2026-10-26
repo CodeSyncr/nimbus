@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -127,7 +128,7 @@ func (p *Props) ToAttrs() template.HTMLAttr {
 	}
 	var parts []string
 	for k, v := range p.data {
-		if k == "slots" || k == "slots.main" || k == "embed" || k == "content" {
+		if k == "slots" || k == "slots.main" || k == "embed" || k == "content" || !validAttributeName(k) {
 			continue
 		}
 		switch val := v.(type) {
@@ -136,20 +137,64 @@ func (p *Props) ToAttrs() template.HTMLAttr {
 				parts = append(parts, k)
 			}
 		case string:
-			parts = append(parts, fmt.Sprintf("%s=%q", k, val))
+			parts = append(parts, htmlAttribute(k, val))
 		case []any:
 			var strParts []string
 			for _, item := range val {
 				strParts = append(strParts, fmt.Sprint(item))
 			}
-			parts = append(parts, fmt.Sprintf("%s=%q", k, strings.Join(strParts, " ")))
+			parts = append(parts, htmlAttribute(k, strings.Join(strParts, " ")))
 		case []string:
-			parts = append(parts, fmt.Sprintf("%s=%q", k, strings.Join(val, " ")))
+			parts = append(parts, htmlAttribute(k, strings.Join(val, " ")))
 		default:
-			parts = append(parts, fmt.Sprintf("%s=%q", k, fmt.Sprint(v)))
+			parts = append(parts, htmlAttribute(k, fmt.Sprint(v)))
 		}
 	}
+	sort.Strings(parts)
 	return template.HTMLAttr(strings.Join(parts, " "))
+}
+
+// Attribute names and executable attributes must remain template-author controlled.
+// Accept standard HTML/data/aria/XML names; omit event handlers and srcdoc.
+func validAttributeName(name string) bool {
+	if name == "" {
+		return false
+	}
+	lower := strings.ToLower(name)
+	if strings.HasPrefix(lower, "on") || lower == "srcdoc" {
+		return false
+	}
+	for i, c := range name {
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_' || c == ':' {
+			continue
+		}
+		if i > 0 && ((c >= '0' && c <= '9') || c == '-' || c == '.') {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+var contextualAttributeTemplates = func() map[string]*template.Template {
+	out := make(map[string]*template.Template)
+	for _, name := range []string{"href", "src", "action", "formaction", "poster", "cite", "background", "xlink:href", "data", "srcset", "style"} {
+		out[name] = template.Must(template.New("attribute").Parse("<a " + name + `="{{.}}"></a>`))
+	}
+	return out
+}()
+
+func htmlAttribute(name, value string) string {
+	// Reuse parsed templates so URL/CSS contexts retain Go's filtering without
+	// parsing templates on the request path. Values are deliberately plain strings.
+	if t := contextualAttributeTemplates[strings.ToLower(name)]; t != nil {
+		var b strings.Builder
+		if t.Execute(&b, value) == nil {
+			return strings.TrimSuffix(strings.TrimPrefix(b.String(), "<a "), "></a>")
+		}
+		return name + `="#ZgotmplZ"`
+	}
+	return name + `="` + template.HTMLEscapeString(value) + `"`
 }
 
 func mergeClasses(c1, c2 any) any {

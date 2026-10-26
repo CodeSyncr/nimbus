@@ -19,6 +19,7 @@ func startHub(t *testing.T, h *Hub) string {
 		_, _ = h.Upgrade(w, r)
 	}))
 	t.Cleanup(srv.Close)
+	t.Cleanup(func() { _ = h.Close() })
 	return "ws" + strings.TrimPrefix(srv.URL, "http")
 }
 

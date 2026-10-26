@@ -19,6 +19,7 @@
 package ai
 
 import (
+	"container/list"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -46,59 +47,124 @@ type Memory interface {
 // In-memory store (development / single-process)
 // ---------------------------------------------------------------------------
 
+const DefaultMemoryMaxEntries = 10_000
+
+type memoryEntry struct {
+	key      string
+	messages []Message
+	expires  time.Time
+}
 type memoryStore struct {
-	mu   sync.RWMutex
-	data map[string][]Message
-	ttl  time.Duration
+	mu         sync.Mutex
+	data       map[string]*list.Element
+	lru        *list.List
+	ttl        time.Duration
+	maxEntries int
+	lastSweep  time.Time
 }
 
-// MemoryStore returns a simple in-memory Memory (lost on restart).
-// Useful for development and testing.
+// MemoryStore stores isolated conversation snapshots in one process. By default
+// it keeps at most 10,000 conversations, evicting the least recently used.
 func MemoryStore(opts ...MemoryStoreOption) Memory {
-	m := &memoryStore{
-		data: make(map[string][]Message),
-	}
+	m := &memoryStore{data: make(map[string]*list.Element), lru: list.New(), maxEntries: DefaultMemoryMaxEntries, lastSweep: time.Now()}
 	for _, opt := range opts {
 		opt(m)
 	}
 	return m
 }
 
-// MemoryStoreOption configures the in-memory store.
 type MemoryStoreOption func(*memoryStore)
 
-// WithTTL sets the time-to-live for stored conversations.
-// Note: TTL cleanup is lazy (checked on Load).
-func WithMemoryTTL(ttl time.Duration) MemoryStoreOption {
-	return func(m *memoryStore) { m.ttl = ttl }
+// WithMemoryTTL expires conversations from their last Save. Zero disables TTL.
+func WithMemoryTTL(ttl time.Duration) MemoryStoreOption { return func(m *memoryStore) { m.ttl = ttl } }
+
+// WithMemoryMaxEntries caps conversation count; nonpositive values use the default.
+func WithMemoryMaxEntries(n int) MemoryStoreOption {
+	return func(m *memoryStore) {
+		if n > 0 {
+			m.maxEntries = n
+		}
+	}
 }
 
-func (m *memoryStore) Load(_ context.Context, key string) ([]Message, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	msgs, ok := m.data[key]
-	if !ok {
+func cloneMemoryMessages(messages []Message) []Message {
+	out := append([]Message(nil), messages...)
+	for i := range out {
+		out[i].Images = append([]string(nil), out[i].Images...)
+		out[i].Files = append([]string(nil), out[i].Files...)
+		out[i].Reasoning = append([]ReasoningBlock(nil), out[i].Reasoning...)
+		out[i].ToolCalls = append([]ToolCall(nil), out[i].ToolCalls...)
+		for j := range out[i].ToolCalls {
+			out[i].ToolCalls[j].Args = append(json.RawMessage(nil), out[i].ToolCalls[j].Args...)
+		}
+	}
+	return out
+}
+func (m *memoryStore) remove(el *list.Element) {
+	delete(m.data, el.Value.(*memoryEntry).key)
+	m.lru.Remove(el)
+}
+func (m *memoryStore) Load(ctx context.Context, key string) ([]Message, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	m.mu.Lock()
+	el := m.data[key]
+	if el == nil {
+		m.mu.Unlock()
 		return nil, nil
 	}
-	// Return a copy to prevent mutation.
-	out := make([]Message, len(msgs))
-	copy(out, msgs)
-	return out, nil
+	entry := el.Value.(*memoryEntry)
+	if !entry.expires.IsZero() && !time.Now().Before(entry.expires) {
+		m.remove(el)
+		m.mu.Unlock()
+		return nil, nil
+	}
+	m.lru.MoveToFront(el)
+	messages := entry.messages
+	m.mu.Unlock()
+	// Published snapshots are immutable, so the copy need not hold the store lock.
+	return cloneMemoryMessages(messages), nil
 }
-
-func (m *memoryStore) Save(_ context.Context, key string, messages []Message) error {
+func (m *memoryStore) Save(ctx context.Context, key string, messages []Message) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	snapshot := cloneMemoryMessages(messages)
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	cp := make([]Message, len(messages))
-	copy(cp, messages)
-	m.data[key] = cp
+	now := time.Now()
+	if m.ttl > 0 && now.Sub(m.lastSweep) >= min(m.ttl, time.Minute) {
+		for _, el := range m.data {
+			e := el.Value.(*memoryEntry)
+			if !e.expires.IsZero() && !now.Before(e.expires) {
+				m.remove(el)
+			}
+		}
+		m.lastSweep = now
+	}
+	if previous := m.data[key]; previous != nil {
+		m.remove(previous)
+	}
+	entry := &memoryEntry{key: key, messages: snapshot}
+	if m.ttl > 0 {
+		entry.expires = now.Add(m.ttl)
+	}
+	m.data[key] = m.lru.PushFront(entry)
+	for len(m.data) > m.maxEntries {
+		m.remove(m.lru.Back())
+	}
 	return nil
 }
-
-func (m *memoryStore) Clear(_ context.Context, key string) error {
+func (m *memoryStore) Clear(ctx context.Context, key string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	delete(m.data, key)
+	if el := m.data[key]; el != nil {
+		m.remove(el)
+	}
 	return nil
 }
 

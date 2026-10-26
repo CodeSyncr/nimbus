@@ -42,7 +42,7 @@ session fixation.
 
 ## Stores
 
-`Store` is an interface — `Get`, `Set`, `Destroy` — so any backend works.
+`Store` supplies `Get`, `Set`, `Destroy`. Middleware additionally requires atomic `Updater` and `Rotator` capabilities for existing IDs; cookie registries require `Replacer`. See the concurrency contract below.
 
 | Store | Constructor | Notes |
 | --- | --- | --- |
@@ -68,6 +68,7 @@ type Config struct {
     Store      Store
     CookieName string
     MaxAge     time.Duration
+    SaveTimeout time.Duration // zero defaults to 5s
     HttpOnly   bool
     Secure     bool
     SameSite   http.SameSite
@@ -87,3 +88,15 @@ Related: [auth](auth.md) for the session guard built on top of this.
 ## Expiry and revocation
 
 Cookie payloads include authenticated expiry. Legacy cookies are rejected on upgrade, requiring login again. Replacement and Destroy revoke the old fingerprint. SessionGuard.Logout calls Session.Invalidate(ctx context.Context) error synchronously; storage errors propagate. Invalidate clears all session data. Use the same encryption key and shared registry on every instance.
+
+
+## Atomic persistence and JSON snapshots (security update)
+
+- `Updater.Update(ctx context.Context, id string, data map[string]any, maxAge time.Duration) (string, error)` updates only a live record.
+- `Rotator.Rotate(ctx context.Context, id string, data map[string]any, maxAge time.Duration) (string, error)` atomically replaces a live ID with a fresh one.
+- `Replacer.Replace(ctx context.Context, oldID, newID string, data map[string]any, maxAge time.Duration) error` atomically changes a server-side record, optionally its key. Memory, Redis and database stores implement all three. Cookie stores implement Update/Rotate and require a registry with Replace.
+- Return `session.ErrExpired` if the predecessor is absent/expired/revoked. Never implement these as a non-atomic Get+Set. Middleware discards a stale save after revocation and sends no new cookie; other errors propagate. Existing custom stores must implement the new capabilities. Low-level Set remains an explicit upsert.
+- Regenerate uses Rotate; unknown client IDs are discarded before creating a new session. Snapshot writes are still last-writer-wins, not a merge/counter primitive.
+- Encrypted cookie payload version 2 contains a random SessionID. Its registry entry holds the current fingerprint. Ordinary cookie replacements keep the same revocation key; Destroy of a previously loaded cookie revokes its replacement too. Rotate changes the family on privilege change. Version-1 cookies require re-login. Shared deployments need a shared registry/key.
+- MemoryStore stores immutable JSON snapshots, not nested map aliases. Values must be JSON-compatible; numbers decode into any as float64, matching Redis/database/cookie stores. It has no background cleanup goroutine; expiry is lazy on reads and swept periodically on writes.
+- Config.SaveTimeout defaults to five seconds, bounded further by request cancellation/deadline. Load/save failures propagate; writes fail with 503 before success bytes are sent. Session changes must precede headers/flushes. SessionWriter forwards Flush/FlushError, Hijack and Unwrap so SSE/WebSocket and ResponseController work through it.

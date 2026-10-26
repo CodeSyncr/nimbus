@@ -157,3 +157,6 @@ Reset and email verification tokens are consumed atomically. For multiple instan
 ## JWT claim validation
 
 NewJWTDriver(secret string, options ...JWTOptions) accepts only HS256 and requires exp. JWTOptions{Issuer: "issuer", Audience: "api"} configures required issuer and audience; generated tokens include these configured claims. Existing callers may omit options, but multi-service deployments should configure both. Stateless token iat is a numeric Unix timestamp. Tokens missing expiry or using HS384/HS512 are rejected after upgrade.
+
+
+Session persistence uses atomic live-record updates/rotation so stale requests cannot revive revoked IDs. Encrypted cookie format v2 shares a revocation record across replacements and requires existing users to re-login on upgrade. See session.md for the Updater/Rotator/Replacer custom-backend contract and SaveTimeout.

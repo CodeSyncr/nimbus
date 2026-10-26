@@ -1,7 +1,12 @@
 package session
 
 import (
+	"bufio"
 	"context"
+	"errors"
+	"fmt"
+	"net"
+	stdhttp "net/http"
 	"strings"
 	"sync"
 	"time"
@@ -18,12 +23,13 @@ import (
 // (TLS or X-Forwarded-Proto: https); set Secure=true to force it on even
 // behind a proxy that does not forward the scheme.
 type Config struct {
-	Store      Store
-	CookieName string
-	MaxAge     time.Duration
-	HttpOnly   bool
-	Secure     bool
-	SameSite   http.SameSite
+	Store       Store
+	CookieName  string
+	MaxAge      time.Duration
+	SaveTimeout time.Duration // zero defaults to five seconds
+	HttpOnly    bool
+	Secure      bool
+	SameSite    http.SameSite
 }
 
 // SameSite values.
@@ -41,6 +47,9 @@ var sessionKey = contextKey{}
 // Middleware returns middleware that loads the session from the store and sets it on the request context.
 // If no session cookie exists, a new session is created on first write.
 func Middleware(cfg Config) router.Middleware {
+	if cfg.SaveTimeout <= 0 {
+		cfg.SaveTimeout = 5 * time.Second
+	}
 	if cfg.MaxAge == 0 {
 		cfg.MaxAge = 7 * 24 * time.Hour
 	}
@@ -60,8 +69,12 @@ func Middleware(cfg Config) router.Middleware {
 			if cookie != nil {
 				sid = cookie.Value
 			}
-			data, _ := cfg.Store.Get(c.Request.Context(), sid)
+			data, loadErr := cfg.Store.Get(c.Request.Context(), sid)
+			if loadErr != nil {
+				return fmt.Errorf("session: load: %w", loadErr)
+			}
 			if data == nil {
+				sid = "" // Never adopt an unknown client-supplied ID.
 				data = make(map[string]any)
 			}
 			sd := &sessionData{
@@ -85,6 +98,7 @@ func Middleware(cfg Config) router.Middleware {
 				sd:             sd,
 				cfg:            cfg,
 				secure:         cfg.Secure || isHTTPS(c.Request),
+				ctx:            ctx,
 			}
 			c.Response = sw
 
@@ -92,9 +106,11 @@ func Middleware(cfg Config) router.Middleware {
 
 			// Safety net: if the handler never wrote a response (no
 			// WriteHeader/Write call), persist the session now.
-			sw.persistSession()
-
-			return err
+			saveErr := sw.persistSession()
+			if err != nil {
+				return err
+			}
+			return saveErr
 		}
 	}
 }
@@ -103,10 +119,13 @@ func Middleware(cfg Config) router.Middleware {
 // be added to the response headers just before they are flushed to the wire.
 type sessionWriter struct {
 	http.ResponseWriter
-	sd     *sessionData
-	cfg    Config
-	secure bool
-	saved  bool
+	sd          *sessionData
+	cfg         Config
+	secure      bool
+	saved       bool
+	saveErr     error
+	wroteHeader bool
+	ctx         context.Context
 }
 
 // isHTTPS reports whether the request was served over TLS, either directly or
@@ -120,57 +139,100 @@ func isHTTPS(r *http.Request) bool {
 
 // persistSession saves dirty session data to the store and adds the
 // Set-Cookie header. Safe to call multiple times; only acts once.
-func (sw *sessionWriter) persistSession() {
+func (sw *sessionWriter) persistSession() error {
 	if sw.saved {
-		return
+		return sw.saveErr
 	}
 	sw.saved = true
+	sw.saveErr = sw.save()
+	return sw.saveErr
+}
+
+func (sw *sessionWriter) save() error {
 	sw.sd.mu.Lock()
-	dirty := sw.sd.dirty
-	data := sw.sd.data
-	id := sw.sd.id
-	staleID := sw.sd.staleID
-	sw.sd.staleID = ""
-	sw.sd.mu.Unlock()
-	if !dirty {
-		return
+	defer sw.sd.mu.Unlock()
+	if !sw.sd.dirty {
+		return nil
 	}
-	newID, err := sw.sd.config.Store.Set(
-		context.Background(), id, data, sw.sd.config.MaxAge,
-	)
+	ctx, cancel := context.WithTimeout(sw.ctx, sw.cfg.SaveTimeout)
+	defer cancel()
+	id := sw.sd.id
+	var newID string
+	var err error
+	if id == "" && sw.sd.staleID != "" {
+		if store, ok := sw.cfg.Store.(Rotator); ok {
+			newID, err = store.Rotate(ctx, sw.sd.staleID, sw.sd.data, sw.cfg.MaxAge)
+		} else {
+			err = fmt.Errorf("session: store must implement Rotator to regenerate existing sessions")
+		}
+		if err == nil {
+			sw.sd.staleID = ""
+		}
+	} else if id == "" {
+		newID, err = sw.cfg.Store.Set(ctx, "", sw.sd.data, sw.cfg.MaxAge)
+	} else if store, ok := sw.cfg.Store.(Updater); ok {
+		newID, err = store.Update(ctx, id, sw.sd.data, sw.cfg.MaxAge)
+	} else {
+		err = fmt.Errorf("session: store must implement Updater to persist existing sessions")
+	}
+	// An overlapping logout wins. Do not issue a new cookie or restore the
+	// snapshot. Its already-authorized response can finish normally.
+	if errors.Is(err, ErrExpired) {
+		return nil
+	}
 	if err != nil {
-		return
+		return err
 	}
 	if newID != "" {
-		sw.sd.mu.Lock()
 		sw.sd.id = newID
 		id = newID
-		sw.sd.mu.Unlock()
 	}
-	// Destroy the pre-regeneration session so a fixed/leaked old id cannot be
-	// replayed after login. Only destroy once we have a distinct new id.
-	if staleID != "" && staleID != id {
-		_ = sw.sd.config.Store.Destroy(context.Background(), staleID)
+	if stale := sw.sd.staleID; stale != "" && stale != id {
+		if err := sw.cfg.Store.Destroy(ctx, stale); err != nil {
+			_ = sw.cfg.Store.Destroy(ctx, id)
+			return err
+		}
+		sw.sd.staleID = ""
 	}
-	http.SetCookie(sw.ResponseWriter, &http.Cookie{
-		Name:     sw.cfg.CookieName,
-		Value:    id,
-		Path:     "/",
-		MaxAge:   int(sw.cfg.MaxAge.Seconds()),
-		HttpOnly: sw.cfg.HttpOnly,
-		Secure:   sw.secure,
-		SameSite: sw.cfg.SameSite,
-	})
+	stdhttp.SetCookie(sw.ResponseWriter, &stdhttp.Cookie{Name: sw.cfg.CookieName, Value: id, Path: "/", MaxAge: int(sw.cfg.MaxAge.Seconds()), HttpOnly: sw.cfg.HttpOnly, Secure: sw.secure, SameSite: sw.cfg.SameSite})
+	return nil
 }
 
 func (sw *sessionWriter) WriteHeader(code int) {
-	sw.persistSession()
+	if code >= 100 && code < 200 && code != stdhttp.StatusSwitchingProtocols {
+		sw.ResponseWriter.WriteHeader(code)
+		return
+	}
+	if sw.wroteHeader {
+		return
+	}
+	if sw.persistSession() != nil {
+		code = stdhttp.StatusServiceUnavailable
+	}
+	sw.wroteHeader = true
 	sw.ResponseWriter.WriteHeader(code)
 }
-
 func (sw *sessionWriter) Write(b []byte) (int, error) {
-	sw.persistSession()
+	sw.WriteHeader(stdhttp.StatusOK)
+	if sw.saveErr != nil {
+		return 0, sw.saveErr
+	}
 	return sw.ResponseWriter.Write(b)
+}
+func (sw *sessionWriter) Unwrap() stdhttp.ResponseWriter { return sw.ResponseWriter }
+func (sw *sessionWriter) Flush()                         { _ = sw.FlushError() }
+func (sw *sessionWriter) FlushError() error {
+	if err := sw.persistSession(); err != nil {
+		return err
+	}
+	sw.wroteHeader = true
+	return stdhttp.NewResponseController(sw.ResponseWriter).Flush()
+}
+func (sw *sessionWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if err := sw.persistSession(); err != nil {
+		return nil, nil, err
+	}
+	return stdhttp.NewResponseController(sw.ResponseWriter).Hijack()
 }
 
 type sessionData struct {

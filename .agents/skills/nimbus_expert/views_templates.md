@@ -133,3 +133,8 @@ and the corresponding 240×180 aspect ratio. Version shared CSS/JS and icons
 when changing the artwork; the head partial and standalone chat/studio/Cashier
 views carry these URLs. Preserve CC BY 4.0 attribution to Renée French in the
 asset README. See the starter's `docs/static-files.nimbus` for usage.
+
+
+## Props attribute safety
+
+Props.ToAttrs() template.HTMLAttr HTML-escapes scalar/array values and emits deterministic attribute order. Names must be standard HTML/data/aria/XML-style identifiers; on* and srcdoc are omitted. URL/srcset/style values pass through cached Go contextual templates rather than accepting raw trusted values. Keep names component-controlled and allowlist forwarded props with Only; use JS listeners instead of inline event props. Quotes in data cannot introduce another attribute.
