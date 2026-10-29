@@ -26,6 +26,8 @@ func attachNative(root *cobra.Command) {
 		Short: "Build and run native iOS and Android apps written in Go (Nimbus Native)",
 		Long: `Build and run native iOS and Android apps written in Go.
 
+  nimbus native new <dir>              a project: Nimbus server, shared UI,
+                                       native/ios (Xcode) and native/android (Gradle)
   nimbus native doctor                 check Xcode, the Android SDK and Go
   nimbus native dev ios|android [dir]  run the app here, reload on every save
   nimbus native run ios|android [dir]  build, install and launch, streaming logs
@@ -33,8 +35,8 @@ func attachNative(root *cobra.Command) {
   nimbus native gen [dir]              regenerate wire schemas
 
 Inside an app whose go.mod requires ` + nativeModule + `, the toolchain
-version the app depends on is used. Elsewhere, set NIMBUS_NATIVE_BIN to a
-toolchain binary.`,
+version the app depends on is used. Elsewhere the latest release runs, or
+set NIMBUS_NATIVE_BIN to a toolchain binary.`,
 		DisableFlagParsing: true, // every flag belongs to the toolchain
 		SilenceUsage:       true,
 		SilenceErrors:      true, // main prints the error once
@@ -67,7 +69,8 @@ func runNative(args []string) error {
 
 // nativeTool picks the toolchain: NIMBUS_NATIVE_BIN, else the version the
 // current module requires (via go run, so it always matches the app's
-// runtime), else a nimbus-native binary on PATH.
+// runtime), else a nimbus-native binary on PATH, else the latest release
+// (so `nimbus native new` works anywhere).
 func nativeTool() (string, []string, error) {
 	if p := os.Getenv("NIMBUS_NATIVE_BIN"); p != "" {
 		return p, nil, nil
@@ -77,6 +80,9 @@ func nativeTool() (string, []string, error) {
 	}
 	if p, err := exec.LookPath("nimbus-native"); err == nil {
 		return p, nil, nil
+	}
+	if _, err := exec.LookPath("go"); err == nil {
+		return "go", []string{"run", nativeModule + "/cmd/nimbus-native@latest"}, nil
 	}
 	return "", nil, fmt.Errorf("Nimbus Native isn't set up here: run this inside an app module that requires %s, or set NIMBUS_NATIVE_BIN", nativeModule)
 }
