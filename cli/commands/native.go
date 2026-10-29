@@ -27,6 +27,7 @@ func attachNative(root *cobra.Command) {
 		Long: `Build and run native iOS and Android apps written in Go.
 
   nimbus native doctor                 check Xcode, the Android SDK and Go
+  nimbus native dev ios|android [dir]  run the app here, reload on every save
   nimbus native run ios|android [dir]  build, install and launch, streaming logs
   nimbus native build ios|android      build an .app or .apk
   nimbus native gen [dir]              regenerate wire schemas
