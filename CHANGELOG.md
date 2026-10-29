@@ -6,6 +6,22 @@ This project follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [1.16.0] - 2026-10-30
+
+### Added
+
+- **`nimbus native`: native iOS and Android apps in Go, with
+  [Nimbus Native](https://github.com/CodeSyncr/nimbus-native).** One CLI for
+  both: `nimbus native new shop` makes a project with a Nimbus server, the
+  shared UI in Go, an Xcode project and a Gradle project, and the same app
+  served to browsers. Then `nimbus native run ios|android`, `nimbus native
+  dev ios|android` (reload on save), `nimbus native build`, `doctor` and
+  `gen`.
+- Inside an app whose `go.mod` requires `github.com/CodeSyncr/nimbus-native`,
+  `nimbus native` runs that exact toolchain version, so the CLI always
+  matches the app's runtime. Elsewhere (`nimbus native new`) it runs the
+  latest release; `NIMBUS_NATIVE_BIN` points it at a toolchain binary.
+
 ## [1.15.2] - 2026-10-26
 
 ### Security
