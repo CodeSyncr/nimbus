@@ -6,6 +6,26 @@ This project follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [1.16.1] - 2026-10-30
+
+### Fixed
+
+- **`nimbus new` no longer writes `replace github.com/CodeSyncr/nimbus =>
+  ../nimbus` into the new app's `go.mod`**, which broke `go mod tidy` on any
+  machine without a Nimbus checkout next to the app.
+- An app made without authentication builds: `bin/server.go` reads
+  `config.AuthGuard`, so `config/auth.go` is now written with no guard.
+
+### Added
+
+- `nimbus new` can run without questions: `--yes` takes the defaults
+  (SQLite, no auth, no extra plugins), and `--db`, `--auth` and `--plugins`
+  choose them.
+- `nimbus native new` makes a whole Nimbus app (the same questions and files
+  as `nimbus new`) and adds the native iOS and Android app to it, or, with
+  `-server none`, the phone app alone for a backend of your own. It needs
+  Nimbus Native v0.0.12 or later, which it fetches.
+
 ## [1.16.0] - 2026-10-30
 
 ### Added

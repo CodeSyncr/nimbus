@@ -23,6 +23,17 @@ type NewCommand struct {
 	starter    string
 	teams      bool
 	lambda     bool
+	yes        bool   // take the defaults instead of asking
+	db         string // sqlite, postgres, mysql, supabase
+	auth       string // none, session, access_token, stateless, basic
+	plugins    string // comma-separated, as nimbus plugin install names them
+
+	// Native is set by nimbus native new: a Basic app (no Inertia or
+	// starter kit question), and no next steps (native new prints its own).
+	Native bool
+	// Dir and Summary are what a Native run made: the project's directory
+	// and its configuration, for native new's own closing panel.
+	Dir, Summary string
 }
 
 func (c *NewCommand) Name() string        { return "new" }
@@ -36,10 +47,16 @@ func (c *NewCommand) Flags(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&c.teams, "teams", false, "Jetstream option: scaffold team features (only with --starter=jetstream)")
 	cmd.Flags().BoolVar(&c.noDefaults, "no-default-plugins", false, "Skip auto-registering default plugins")
 	cmd.Flags().BoolVar(&c.lambda, "lambda", false, "Add an AWS Lambda deployment target (serverless)")
+	cmd.Flags().BoolVarP(&c.yes, "yes", "y", false, "Don't ask: SQLite, no auth, no extra plugins (other flags still apply)")
+	cmd.Flags().StringVar(&c.db, "db", "", "Database: sqlite, postgres, mysql, supabase (skips the questions)")
+	cmd.Flags().StringVar(&c.auth, "auth", "", "Auth guard: none, session, access_token, stateless, basic (skips the questions)")
+	cmd.Flags().StringVar(&c.plugins, "plugins", "", "Plugins to install, comma-separated: ai, mcp, telescope, pulse, scout, socialite, unpoly (skips the questions)")
 }
 
 func (c *NewCommand) Run(ctx *cli.Context) error {
-	ctx.UI.Panel("Nimbus Setup", "Welcome to Nimbus! Let's scaffold your new project.")
+	if !c.Native {
+		ctx.UI.Panel("Nimbus Setup", "Welcome to Nimbus! Let's scaffold your new project.")
+	}
 
 	var name string
 	if len(ctx.Args) > 0 {
@@ -52,7 +69,8 @@ func (c *NewCommand) Run(ctx *cli.Context) error {
 		name = strings.TrimSpace(ans)
 	}
 
-	interactive := c.kit == "" && (c.starter == "" || c.starter == "none")
+	interactive := c.kit == "" && (c.starter == "" || c.starter == "none") &&
+		!c.yes && c.db == "" && c.auth == "" && c.plugins == ""
 
 	dbDriver := "sqlite"
 	var selectedPlugins []string
@@ -61,41 +79,45 @@ func (c *NewCommand) Run(ctx *cli.Context) error {
 	teams := false
 
 	if interactive {
-		pt, err := ctx.UI.AskSelect("Select project type", []string{"Basic (server-rendered views)", "Inertia (Inertia.js SPA)"}, "Basic (server-rendered views)")
-		if err != nil {
-			return err
-		}
-		if pt == "Inertia (Inertia.js SPA)" {
-			kitAns, err := ctx.UI.AskSelect("Choose Inertia frontend", []string{"React", "Vue", "Svelte"}, "React")
-			if err != nil {
-				return err
-			}
-			switch kitAns {
-			case "Vue":
-				c.kit = "vue"
-			case "Svelte":
-				c.kit = "svelte"
-			default:
-				c.kit = "react"
-			}
+		if c.Native {
+			c.kit, starter = "", "none"
 		} else {
-			c.kit = ""
-		}
-
-		// ── Starter kit (Basic only) ────────────────────────────────
-		if c.kit == "" {
-			st, err := ctx.UI.AskSelect("Select starter kit", []string{
-				"None",
-				"Livewire",
-			}, "None")
+			pt, err := ctx.UI.AskSelect("Select project type", []string{"Basic (server-rendered views)", "Inertia (Inertia.js SPA)"}, "Basic (server-rendered views)")
 			if err != nil {
 				return err
 			}
-			switch st {
-			case "Livewire":
-				starter = "livewire"
-			default:
-				starter = "none"
+			if pt == "Inertia (Inertia.js SPA)" {
+				kitAns, err := ctx.UI.AskSelect("Choose Inertia frontend", []string{"React", "Vue", "Svelte"}, "React")
+				if err != nil {
+					return err
+				}
+				switch kitAns {
+				case "Vue":
+					c.kit = "vue"
+				case "Svelte":
+					c.kit = "svelte"
+				default:
+					c.kit = "react"
+				}
+			} else {
+				c.kit = ""
+			}
+
+			// ── Starter kit (Basic only) ────────────────────────────────
+			if c.kit == "" {
+				st, err := ctx.UI.AskSelect("Select starter kit", []string{
+					"None",
+					"Livewire",
+				}, "None")
+				if err != nil {
+					return err
+				}
+				switch st {
+				case "Livewire":
+					starter = "livewire"
+				default:
+					starter = "none"
+				}
 			}
 		}
 
@@ -217,6 +239,41 @@ func (c *NewCommand) Run(ctx *cli.Context) error {
 		}
 		starter = c.starter
 		teams = c.teams
+
+		switch c.db {
+		case "", "sqlite":
+		case "postgres", "mysql":
+			dbDriver = c.db
+		case "supabase":
+			dbDriver, authGuard = "supabase", "supabase"
+			selectedPlugins = append(selectedPlugins, "supabase")
+		default:
+			return fmt.Errorf("invalid --db=%q: must be sqlite, postgres, mysql or supabase", c.db)
+		}
+		switch c.auth {
+		case "", "none":
+		case "session", "access_token", "stateless", "basic":
+			authGuard = c.auth
+		default:
+			return fmt.Errorf("invalid --auth=%q: must be none, session, access_token, stateless or basic", c.auth)
+		}
+		if starter != "none" && authGuard == "none" {
+			authGuard = "session" // starter kits come with session auth
+		}
+		for _, p := range strings.Split(c.plugins, ",") {
+			p = strings.TrimSpace(p)
+			if p == "" {
+				continue
+			}
+			switch p {
+			case "ai", "mcp", "telescope", "pulse", "scout", "socialite", "unpoly":
+				if !containsPlugin(selectedPlugins, p) {
+					selectedPlugins = append(selectedPlugins, p)
+				}
+			default:
+				return fmt.Errorf("invalid plugin %q in --plugins: use ai, mcp, telescope, pulse, scout, socialite or unpoly", p)
+			}
+		}
 	}
 
 	dir := name
@@ -373,6 +430,11 @@ func (c *NewCommand) Run(ctx *cli.Context) error {
 	_ = os.WriteFile(filepath.Join(dir, "database", "migrations", "registry.go"), []byte(migrationsRegistryStub), 0644)
 
 	// ── Scaffold auth based on selected guard ───────────────
+	if authGuard == "none" {
+		// bin/server.go reads config.AuthGuard and config.StatelessToken
+		// whatever the guard; without auth they still have to exist.
+		_ = os.WriteFile(filepath.Join(dir, "config", "auth.go"), []byte(noAuthConfig), 0644)
+	}
 	if authGuard != "none" {
 		if err := scaffoldAuth(dir, name, authGuard); err != nil {
 			ctx.UI.Warnf("failed to scaffold auth: %v", err)
@@ -388,7 +450,7 @@ func (c *NewCommand) Run(ctx *cli.Context) error {
 		}
 	}
 
-	if interactive {
+	if interactive || dbDriver != "sqlite" || len(selectedPlugins) > 0 {
 		if err := updateEnvDB(dir, name, dbDriver); err != nil {
 			ctx.UI.Warnf("failed to update DB settings in env files: %v", err)
 		}
@@ -421,8 +483,6 @@ func (c *NewCommand) Run(ctx *cli.Context) error {
 		}
 	}
 
-	ctx.UI.Successf("Project %s successfully created!", name)
-
 	msg := fmt.Sprintf("Selected DB: %s", dbDriver)
 	if authGuard != "none" {
 		msg += fmt.Sprintf("\nAuth guard: %s", authGuard)
@@ -430,6 +490,12 @@ func (c *NewCommand) Run(ctx *cli.Context) error {
 	if len(selectedPlugins) > 0 {
 		msg += fmt.Sprintf("\nPlugins selected: %s (run nimbus plugin install for each in your app directory)", strings.Join(selectedPlugins, ", "))
 	}
+	if c.Native {
+		c.Dir, c.Summary = dir, msg
+		return nil
+	}
+
+	ctx.UI.Successf("Project %s successfully created!", name)
 	ctx.UI.Panel("Configuration Summary", msg)
 
 	ctx.UI.Infof("Next steps:")
@@ -459,8 +525,6 @@ require (
 	github.com/joho/godotenv v1.5.1
 	github.com/air-verse/air v1.52.3
 )
-
-replace github.com/CodeSyncr/nimbus => ../nimbus
 `
 	if kit != "" {
 		mod = `module ` + name + `
@@ -473,8 +537,6 @@ require (
 	github.com/air-verse/air v1.52.3
 	github.com/petaki/inertia-go v1.6.0
 )
-
-replace github.com/CodeSyncr/nimbus => ../nimbus
 `
 	}
 	return mod
@@ -856,3 +918,21 @@ func RunDbCreate() {
 }
 `
 }
+
+// noAuthConfig is config/auth.go for an app made without authentication:
+// what bin/server.go reads, with no guard.
+const noAuthConfig = `package config
+
+// AuthGuard is the authentication guard: none.
+var AuthGuard = "none"
+
+// StatelessTokenConfig configures the stateless (JWT/PASETO) guard.
+type StatelessTokenConfig struct {
+	Driver    string
+	Secret    string
+	ExpiresIn string
+}
+
+// StatelessToken is unused until the stateless guard is chosen.
+var StatelessToken = StatelessTokenConfig{Driver: "jwt", ExpiresIn: "24h"}
+`
